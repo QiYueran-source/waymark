@@ -26,11 +26,14 @@ use cmd::config::ConfigArgs;
 use cmd::create::CreateArgs;
 use cmd::edit::{BodyArgs, FieldArgs, TitleArgs};
 use cmd::init::InitArgs;
+use cmd::link::LinkArgs;
 use cmd::list::ListArgs;
+use cmd::parent::ParentArgs;
 use cmd::project::ProjectArgs;
 use cmd::relationship::DependencyArgs;
 use cmd::show::ShowArgs;
 use cmd::status::{StatusArgs, TransitionArgs};
+use cmd::tree::{DepArgs, TreeArgs};
 use cmd::{EXIT_OK, USAGE_EXIT};
 
 #[derive(Debug, Parser)]
@@ -81,6 +84,14 @@ enum Command {
     Reopen(TransitionArgs),
     /// Add or remove a hard dependency edge.
     Dependency(DependencyArgs),
+    /// Set or clear the single parent of an item.
+    Parent(ParentArgs),
+    /// Add or remove a symmetric soft link.
+    Link(LinkArgs),
+    /// Read the hierarchy tree, bounded by depth.
+    Tree(TreeArgs),
+    /// Read dependency structures.
+    Dep(DepArgs),
     /// List active work items.
     List(ListArgs),
     /// List items whose dependencies are all closed.
@@ -188,6 +199,22 @@ fn run(cli: Cli) -> Result<(), waymark_core::WaymarkError> {
         Command::Dependency(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
             cmd::relationship::run(&project, args, &options, json)
+        }
+        Command::Parent(args) => {
+            let project = cmd::open_project(cli.project.as_deref())?;
+            cmd::parent::run(&project, args, &options, json)
+        }
+        Command::Link(args) => {
+            let project = cmd::open_project(cli.project.as_deref())?;
+            cmd::link::run(&project, args, &options, json)
+        }
+        Command::Tree(args) => {
+            let project = cmd::open_project(cli.project.as_deref())?;
+            cmd::tree::run(&project, &args, json)
+        }
+        Command::Dep(args) => {
+            let project = cmd::open_project(cli.project.as_deref())?;
+            cmd::tree::run_dep(&project, args, &options, json)
         }
         Command::List(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;

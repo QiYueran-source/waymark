@@ -322,7 +322,51 @@ impl Graph {
                 cycle,
             )));
         }
+        for cycle in self.parent_cycles() {
+            findings.push(Finding::from_error(&WaymarkError::cycle_detected(
+                "parent", cycle,
+            )));
+        }
         findings
+    }
+
+    /// Every parent cycle, each reported once, as a closed path.
+    ///
+    /// A cycle here can only come from an external edit — `parent set` refuses to
+    /// create one — and nothing in this module repairs it: the diagnostic names
+    /// the loop, the files keep it, and `doctor` (T14) decides what to offer.
+    ///
+    /// A node has at most one outgoing `parent` edge, so each component is a
+    /// chain or a loop and a cursor plus a visited path is enough. The walk is
+    /// iterative for the same reason the dependency walk is.
+    pub fn parent_cycles(&self) -> Vec<Vec<WorkItemId>> {
+        let mut seen: BTreeSet<Vec<WorkItemId>> = BTreeSet::new();
+        let mut cycles: Vec<Vec<WorkItemId>> = Vec::new();
+
+        for start in self.items.keys() {
+            let mut path: Vec<WorkItemId> = Vec::new();
+            let mut cursor = start.clone();
+            loop {
+                if let Some(position) = path.iter().position(|id| *id == cursor) {
+                    let mut cycle: Vec<WorkItemId> = path[position..].to_vec();
+                    cycle.push(cursor);
+                    if seen.insert(canonical_cycle(&cycle)) {
+                        cycles.push(cycle);
+                    }
+                    break;
+                }
+                path.push(cursor.clone());
+                match self.items.get(&cursor).and_then(|item| item.parent.clone()) {
+                    // A dangling parent has no outgoing edge to follow; the
+                    // dangling reference itself is diagnosed separately.
+                    Some(parent) if self.items.contains_key(&parent) => cursor = parent,
+                    _ => break,
+                }
+            }
+        }
+        cycles.sort();
+        cycles.dedup();
+        cycles
     }
 
     /// Every dependency cycle, each reported once, as a closed path.

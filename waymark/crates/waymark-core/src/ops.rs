@@ -16,11 +16,14 @@
 pub mod config;
 pub mod create;
 pub mod edit;
+pub mod link;
 pub mod list;
 pub mod mediated;
+pub mod parent;
 pub mod read;
 pub mod relationship;
 pub mod status;
+pub mod tree;
 
 use std::sync::Arc;
 use std::time::Duration;
