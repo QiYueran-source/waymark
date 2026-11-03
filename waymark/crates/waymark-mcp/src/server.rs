@@ -33,6 +33,7 @@ impl WaymarkServer {
     pub fn new(start: Utf8PathBuf) -> Self {
         let mut tool_router = Self::project_router();
         tool_router.merge(Self::config_router());
+        tool_router.merge(Self::read_router());
         Self { start, tool_router }
     }
 
