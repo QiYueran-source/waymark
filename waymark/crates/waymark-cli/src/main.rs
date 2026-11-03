@@ -24,7 +24,10 @@ mod cmd;
 
 use cmd::create::CreateArgs;
 use cmd::init::InitArgs;
+use cmd::list::ListArgs;
+use cmd::relationship::DependencyArgs;
 use cmd::show::ShowArgs;
+use cmd::status::{StatusArgs, TransitionArgs};
 use cmd::{EXIT_OK, USAGE_EXIT};
 
 #[derive(Debug, Parser)]
@@ -59,6 +62,22 @@ enum Command {
     Create(CreateArgs),
     /// Read one work item by its stable ID.
     Show(ShowArgs),
+    /// Change the lifecycle state of one item.
+    Status(StatusArgs),
+    /// Move one item to `in_progress`.
+    Start(TransitionArgs),
+    /// Move one item to `closed`.
+    Close(TransitionArgs),
+    /// Move one item back to `open`.
+    Reopen(TransitionArgs),
+    /// Add or remove a hard dependency edge.
+    Dependency(DependencyArgs),
+    /// List active work items.
+    List(ListArgs),
+    /// List items whose dependencies are all closed.
+    Ready(ListArgs),
+    /// List items waiting on an unfinished or missing dependency.
+    Blocked(ListArgs),
 }
 
 fn main() -> ExitCode {
@@ -110,6 +129,50 @@ fn run(cli: Cli) -> Result<(), waymark_core::WaymarkError> {
         Command::Show(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
             cmd::show::run(&project, &args, json)
+        }
+        Command::Status(args) => {
+            let project = cmd::open_project(cli.project.as_deref())?;
+            cmd::status::run(&project, args, &options, json)
+        }
+        Command::Start(args) => {
+            let project = cmd::open_project(cli.project.as_deref())?;
+            cmd::status::convenience(
+                &project,
+                &args,
+                waymark_core::Status::InProgress,
+                &options,
+                json,
+            )
+        }
+        Command::Close(args) => {
+            let project = cmd::open_project(cli.project.as_deref())?;
+            cmd::status::convenience(
+                &project,
+                &args,
+                waymark_core::Status::Closed,
+                &options,
+                json,
+            )
+        }
+        Command::Reopen(args) => {
+            let project = cmd::open_project(cli.project.as_deref())?;
+            cmd::status::convenience(&project, &args, waymark_core::Status::Open, &options, json)
+        }
+        Command::Dependency(args) => {
+            let project = cmd::open_project(cli.project.as_deref())?;
+            cmd::relationship::run(&project, args, &options, json)
+        }
+        Command::List(args) => {
+            let project = cmd::open_project(cli.project.as_deref())?;
+            cmd::list::run(&project, &args, cmd::list::Which::All, json)
+        }
+        Command::Ready(args) => {
+            let project = cmd::open_project(cli.project.as_deref())?;
+            cmd::list::run(&project, &args, cmd::list::Which::Ready, json)
+        }
+        Command::Blocked(args) => {
+            let project = cmd::open_project(cli.project.as_deref())?;
+            cmd::list::run(&project, &args, cmd::list::Which::Blocked, json)
         }
     }
 }
