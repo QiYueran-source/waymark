@@ -79,12 +79,27 @@ pub struct ListArgs {
     pub compact: bool,
 }
 
-/// The collection arguments of `search`, which has no filter or archive range.
+/// The collection arguments of `search`.
+///
+/// Search follows the same archive-range and filter rules as the list tools:
+/// the needle selects within the filtered population, it does not define a
+/// separate one.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SearchArgs {
     /// Case-insensitive substring to look for in the title, the frontmatter,
     /// and the body. Must be non-empty.
     pub text: String,
+
+    /// Structured filter document, the same vocabulary as `waymark query
+    /// --filter` and the list tools. A hit must also match it.
+    #[serde(default)]
+    pub filter: Option<Value>,
+
+    /// Archive slice to read: `active` (default), `archived`, or `all`.
+    /// Archived items are never mixed into `active`. When present this
+    /// overrides `filter.archive`, because one request has one range.
+    #[serde(default)]
+    pub archive: Option<String>,
 
     /// Ordering: `rank` (default), `created_at`, `updated_at`, `title`,
     /// `status`, or `field:<key>`.
@@ -187,16 +202,14 @@ impl SearchArgs {
             )
             .at_field("text"));
         }
-        let mut query = params::query_from(
-            None,
-            None,
+        params::query_from(
+            self.filter.as_ref(),
+            self.archive.as_deref(),
             self.sort.as_deref(),
             self.desc,
             self.limit,
             self.offset,
-        )?;
-        query.filters.archive = ArchiveRange::Active;
-        Ok(query)
+        )
     }
 
     fn projection(&self) -> Result<Projection, WaymarkError> {
@@ -248,9 +261,11 @@ impl WaymarkServer {
 
     /// Search titles, frontmatter, and bodies case-insensitively. Title hits
     /// are returned before body/frontmatter-only hits; within each group the
-    /// shared sort decides. No snippets and no body text are returned. The
-    /// same page, ordering, and projection arguments as list apply, and the
-    /// default limit is 50.
+    /// shared sort decides. No snippets and no body text are returned. Search
+    /// follows the same archive-range and filter rules as the list tools: the
+    /// `filter` document and `archive` range select the population, and the
+    /// needle selects within it. The same page, ordering, and projection
+    /// arguments as list apply, and the default limit is 50.
     #[tool(
         name = "waymark_search_work_items",
         annotations(title = "Search work items")

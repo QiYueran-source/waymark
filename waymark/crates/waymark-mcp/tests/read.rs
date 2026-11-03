@@ -281,3 +281,81 @@ async fn stats_reports_counts_only() {
 
     client.shutdown().await;
 }
+
+/// Search is not a reduced surface: the archive range and the filter document
+/// select the population exactly as they do for the list tools.
+#[tokio::test]
+async fn search_follows_the_archive_range_and_the_filter_document() {
+    let fixture = common::fixture_with(vec![
+        ("needle in a closed item", None),
+        ("needle in an archived item", None),
+    ]);
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    for (tool, arguments) in [
+        (
+            "waymark_set_status",
+            json!({"id": fixture.ids[0], "status": "closed"}),
+        ),
+        ("waymark_archive_work_item", json!({"id": fixture.ids[1]})),
+    ] {
+        let envelope = common::envelope(&client.call(tool, arguments).await);
+        assert_eq!(envelope["ok"], true, "{tool}: {envelope}");
+    }
+
+    // Default range is active: the closed item is still active work, the
+    // archived one is not.
+    let active = common::envelope(
+        &client
+            .call("waymark_search_work_items", json!({"text": "needle"}))
+            .await,
+    );
+    assert_eq!(active["data"]["count"], 1, "{active}");
+    assert_eq!(ids(&active), vec![fixture.ids[0].clone()]);
+
+    // A document status filter narrows the same population.
+    let closed = common::envelope(
+        &client
+            .call(
+                "waymark_search_work_items",
+                json!({"text": "needle", "filter": {"status": "closed"}}),
+            )
+            .await,
+    );
+    assert_eq!(closed["data"]["count"], 1, "{closed}");
+    assert_eq!(ids(&closed), vec![fixture.ids[0].clone()]);
+
+    let open = common::envelope(
+        &client
+            .call(
+                "waymark_search_work_items",
+                json!({"text": "needle", "filter": {"status": "open"}}),
+            )
+            .await,
+    );
+    assert_eq!(open["data"]["count"], 0, "{open}");
+
+    // An archived-only range is reachable and returns only the archived item.
+    let archived = common::envelope(
+        &client
+            .call(
+                "waymark_search_work_items",
+                json!({"text": "needle", "archive": "archived"}),
+            )
+            .await,
+    );
+    assert_eq!(archived["data"]["count"], 1, "{archived}");
+    assert_eq!(ids(&archived), vec![fixture.ids[1].clone()]);
+
+    let all = common::envelope(
+        &client
+            .call(
+                "waymark_search_work_items",
+                json!({"text": "needle", "archive": "all"}),
+            )
+            .await,
+    );
+    assert_eq!(all["data"]["count"], 2, "{all}");
+
+    client.shutdown().await;
+}
