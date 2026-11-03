@@ -121,13 +121,9 @@ pub fn open_project(explicit: Option<&camino::Utf8Path>) -> Result<Project, Waym
     }
 }
 
-/// Translate `--lock-timeout-ms` into a lock wait policy.
+/// Translate `--lock-timeout-ms` into the shared lock wait policy.
 pub fn lock_wait(milliseconds: Option<u64>) -> LockWait {
-    match milliseconds {
-        Some(0) => LockWait::immediate(),
-        Some(value) => LockWait::new(std::time::Duration::from_millis(value)),
-        None => LockWait::default_policy(),
-    }
+    waymark_core::ops::lock_wait_from_millis(milliseconds)
 }
 
 /// Render one mediated write: the shared core fields plus this operation's own.

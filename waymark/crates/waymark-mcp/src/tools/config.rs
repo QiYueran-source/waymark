@@ -36,6 +36,12 @@ pub struct ConfigSetArgs {
     /// Validate and report the change without writing.
     #[serde(default)]
     pub dry_run: bool,
+
+    /// Wait at most this many milliseconds for the project write lock.
+    /// Omitted uses the shared default wait; `0` fails immediately with the
+    /// retryable `LOCK_TIMEOUT` code.
+    #[serde(default)]
+    pub lock_timeout_ms: Option<u64>,
 }
 
 /// Inputs of `waymark_config_add_category`.
@@ -54,6 +60,12 @@ pub struct ConfigAddCategoryArgs {
     /// Validate and report the change without writing.
     #[serde(default)]
     pub dry_run: bool,
+
+    /// Wait at most this many milliseconds for the project write lock.
+    /// Omitted uses the shared default wait; `0` fails immediately with the
+    /// retryable `LOCK_TIMEOUT` code.
+    #[serde(default)]
+    pub lock_timeout_ms: Option<u64>,
 }
 
 /// Inputs of `waymark_config_update_category`.
@@ -69,6 +81,12 @@ pub struct ConfigUpdateCategoryArgs {
     /// Validate and report the change without writing.
     #[serde(default)]
     pub dry_run: bool,
+
+    /// Wait at most this many milliseconds for the project write lock.
+    /// Omitted uses the shared default wait; `0` fails immediately with the
+    /// retryable `LOCK_TIMEOUT` code.
+    #[serde(default)]
+    pub lock_timeout_ms: Option<u64>,
 }
 
 /// Inputs of `waymark_config_remove_category`.
@@ -81,6 +99,12 @@ pub struct ConfigRemoveCategoryArgs {
     /// Validate and report the change without writing.
     #[serde(default)]
     pub dry_run: bool,
+
+    /// Wait at most this many milliseconds for the project write lock.
+    /// Omitted uses the shared default wait; `0` fails immediately with the
+    /// retryable `LOCK_TIMEOUT` code.
+    #[serde(default)]
+    pub lock_timeout_ms: Option<u64>,
 }
 
 /// Inputs of `waymark_config_add_field`.
@@ -106,6 +130,12 @@ pub struct ConfigAddFieldArgs {
     /// Validate and report the change without writing.
     #[serde(default)]
     pub dry_run: bool,
+
+    /// Wait at most this many milliseconds for the project write lock.
+    /// Omitted uses the shared default wait; `0` fails immediately with the
+    /// retryable `LOCK_TIMEOUT` code.
+    #[serde(default)]
+    pub lock_timeout_ms: Option<u64>,
 }
 
 /// Inputs of `waymark_config_update_field`.
@@ -124,6 +154,12 @@ pub struct ConfigUpdateFieldArgs {
     /// Validate and report the change without writing.
     #[serde(default)]
     pub dry_run: bool,
+
+    /// Wait at most this many milliseconds for the project write lock.
+    /// Omitted uses the shared default wait; `0` fails immediately with the
+    /// retryable `LOCK_TIMEOUT` code.
+    #[serde(default)]
+    pub lock_timeout_ms: Option<u64>,
 }
 
 #[tool_router(router = config_router, vis = "pub(crate)")]
@@ -191,6 +227,9 @@ impl WaymarkServer {
     /// or `cache.capacity`. Takes the shared write lock, bumps the revision,
     /// and returns the updated configuration. An empty `operator` clears it.
     /// `dry_run` performs every check and writes nothing.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_config_set",
         annotations(
@@ -207,7 +246,7 @@ impl WaymarkServer {
                 &project,
                 scalar,
                 &args.value,
-                &params::options(args.dry_run),
+                &params::options(args.dry_run, args.lock_timeout_ms),
             )?;
             Ok(config_result(&outcome))
         })
@@ -215,6 +254,9 @@ impl WaymarkServer {
 
     /// Declare a new category. The directory is created on a real run; a dry
     /// run validates the path and creates nothing.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_config_add_category",
         annotations(
@@ -235,7 +277,7 @@ impl WaymarkServer {
                 &key,
                 &args.path,
                 args.name.as_deref(),
-                &params::options(args.dry_run),
+                &params::options(args.dry_run, args.lock_timeout_ms),
             )?;
             Ok(config_result(&outcome))
         })
@@ -243,6 +285,9 @@ impl WaymarkServer {
 
     /// Change a category's display name. Items and directories are untouched;
     /// a directory move is a storage migration.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_config_update_category",
         annotations(
@@ -262,7 +307,7 @@ impl WaymarkServer {
                 &project,
                 &key,
                 &args.name,
-                &params::options(args.dry_run),
+                &params::options(args.dry_run, args.lock_timeout_ms),
             )?;
             Ok(config_result(&outcome))
         })
@@ -270,6 +315,9 @@ impl WaymarkServer {
 
     /// Remove a category that no work item uses, active or archived. The
     /// refusal names every item that still uses it.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_config_remove_category",
         annotations(
@@ -285,13 +333,20 @@ impl WaymarkServer {
         envelope::respond(|| {
             let key = params::category_key(&args.key)?;
             let project = self.project()?;
-            let outcome = config::remove_category(&project, &key, &params::options(args.dry_run))?;
+            let outcome = config::remove_category(
+                &project,
+                &key,
+                &params::options(args.dry_run, args.lock_timeout_ms),
+            )?;
             Ok(config_result(&outcome))
         })
     }
 
     /// Declare an optional custom field. A required declaration is a schema
     /// migration and is refused with `ACTION_REQUIRES_MIGRATION`.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_config_add_field",
         annotations(
@@ -314,7 +369,7 @@ impl WaymarkServer {
                 ty,
                 args.required,
                 args.default.as_deref(),
-                &params::options(args.dry_run),
+                &params::options(args.dry_run, args.lock_timeout_ms),
             )?;
             Ok(config_result(&outcome))
         })
@@ -324,6 +379,9 @@ impl WaymarkServer {
     /// `required` to false, or set/clear the `default`. A type change and
     /// making a field required are migrations and are refused with
     /// `ACTION_REQUIRES_MIGRATION`.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_config_update_field",
         annotations(
@@ -345,7 +403,7 @@ impl WaymarkServer {
                 &key,
                 attribute,
                 &args.value,
-                &params::options(args.dry_run),
+                &params::options(args.dry_run, args.lock_timeout_ms),
             )?;
             Ok(config_result(&outcome))
         })
