@@ -2,11 +2,12 @@
 schema: 1
 id: waym-J3VX6HQS
 title: Define concurrency and lock lifecycle
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-11-03T03:25:00.000Z
-updated: 2026-11-03T03:56:35.631Z
+updated: 2026-11-03T04:05:25.777Z
+closed: 2026-11-03T04:05:25.777Z
 assignee: DeepSeek Agent
 parent: waym-VS5Z5543
 labels: [wayfinder:grilling]
