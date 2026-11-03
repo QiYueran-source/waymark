@@ -299,6 +299,30 @@ async fn write_schemas_are_single_target_and_migration_actions_are_tagged_unions
         );
     }
 
+    // The custom-field change map is required and has explicit `set`/`clear`
+    // halves; there is no editor path and no optional "maybe change" form.
+    let fields = tool_schema(tool("waymark_update_custom_fields"));
+    let required: Vec<&str> = fields["required"]
+        .as_array()
+        .expect("required parameters")
+        .iter()
+        .map(|value| value.as_str().unwrap())
+        .collect();
+    assert!(required.contains(&"id"));
+    assert!(required.contains(&"custom_fields"));
+    assert_eq!(
+        fields["properties"]["custom_fields"]["type"], "object",
+        "the change map is an object"
+    );
+    let change_map = &fields["properties"]["custom_fields"];
+    assert!(change_map["properties"]["set"].is_object());
+    assert_eq!(change_map["properties"]["set"]["type"], "object");
+    assert_eq!(change_map["properties"]["clear"]["type"], "array");
+    assert_eq!(
+        change_map["properties"]["clear"]["items"]["type"], "string",
+        "a clear is a list of keys, not a list of target objects"
+    );
+
     // A migration action is a tagged union: one action per call, enforced by
     // the schema rather than by handler-side flag reconciliation.
     for name in ["waymark_migrate_schema", "waymark_migrate_storage"] {

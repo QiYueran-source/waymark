@@ -57,6 +57,12 @@ pub const TOOLS: &[&str] = &[
     // Phase B: Git inspection.
     "waymark_git_history",
     "waymark_git_diff",
+    // Phase B: work-item creation and editing.
+    "waymark_create_work_item",
+    "waymark_set_title",
+    "waymark_replace_body",
+    "waymark_update_custom_fields",
+    "waymark_set_status",
 ];
 
 /// The phase-A slice of [`TOOLS`], kept as the decisions record's reference.

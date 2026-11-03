@@ -523,7 +523,7 @@ fn work_item_data(read: &ScopedRead) -> Value {
 }
 
 /// The persisted fields of one item, without the file that happens to hold it.
-fn item_fields(item: &WorkItem) -> Value {
+pub(crate) fn item_fields(item: &WorkItem) -> Value {
     json!({
         "schema": item.schema,
         "needs_migration": item.needs_migration(),
@@ -547,7 +547,7 @@ fn item_fields(item: &WorkItem) -> Value {
 }
 
 /// The persisted fields plus the document path.
-fn item_json(item: &WorkItem, path: &camino::Utf8Path) -> Value {
+pub(crate) fn item_json(item: &WorkItem, path: &camino::Utf8Path) -> Value {
     let mut value = item_fields(item);
     if let Some(map) = value.as_object_mut() {
         map.insert("path".to_owned(), json!(path.to_string()));

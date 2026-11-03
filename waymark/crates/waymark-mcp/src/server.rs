@@ -36,6 +36,7 @@ impl WaymarkServer {
         tool_router.merge(Self::git_router());
         tool_router.merge(Self::migrate_router());
         tool_router.merge(Self::read_router());
+        tool_router.merge(Self::write_router());
         Self { start, tool_router }
     }
 
