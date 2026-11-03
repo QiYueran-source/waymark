@@ -1197,3 +1197,109 @@ is unchanged. No existing public signature or behaviour changed.
 - Fetch without an `Origin` header (same-origin requests do this automatically) or with the service's
   exact `http://localhost:<port>` origin. A page opened at `127.0.0.1` gets an origin for `127.0.0.1`,
   which is accepted; do not proxy through another origin or port.
+
+# T12 — read-only Web frontend (phase 2)
+
+Phase 2 adds the SvelteKit single-page frontend in `crates/waymark-web/ui`, its browser-local
+preference store, and its tests. It consumes exactly the phase-1 contract above; the only API change is
+`project.root` on `GET /api/health`.
+
+## Design direction — "field index"
+
+**Choice:** the overview is a surveyor's field sheet for a work tree: a cool sage paper ground
+(`#eef0ea`), instrument ink (`#1a2420`), one deep-teal accent for interaction (`#1e6257`), a light
+header band, and no ornament that does not carry meaning. Colour is used only on work state and the
+selected row; category identity is the six-shape vocabulary plus the category name, never a category
+colour.
+
+- **Type:** one family (the system UI face) for all reading; `ui-monospace` appears only inside literal
+  `code`/`pre` from a sanitized Markdown body. The tree title reads at 14px, metadata at 12–13px, and
+  the detail title at 16px; there are no display, serif, or tracked-uppercase labels.
+- **Hierarchy:** rows are compact (about 34px), indentation is 1.1rem per depth, and a solid vertical
+  guide plus an elbow draws the parenthood edge. Work state is a 3px stripe on the row's left edge
+  (ready green, in-progress blue, blocked red, closed grey) followed by the state word, with the
+  `blocked_reason` prose directly under a blocked row. Custom fields and category values never set a
+  colour.
+- **Toolbar:** the view control is a quiet segmented radio group; expand/collapse and the global
+  dependency toggle are text controls. The blocked count is the screen's one finding, stated in small
+  tabular text next to the view control.
+- **States:** empty, unresolved, persistence-unavailable, and read-failure each get their own composed
+  block; a failure states the code, message, diagnostics, and that no partial tree is shown.
+- **No images, fonts, icon package, gradients, or shadows.** The service is loopback-only and offline;
+  the only drawing is the inline SVG brand mark, the six category shapes, and the chevron.
+- The inspector (`lint.mjs --app`, `inspect.mjs --app`) reports 0 failures at 1440/768/390. Its one
+  remaining warning (a large blank area below a short tree) is inherent to a workspace view whose tree
+  grows with the project; it is not filled with decoration.
+
+## Asset paths (supersedes the phase-1 `paths.assets` bullet)
+
+**Choice:** keep SvelteKit's default `/_app/...` URLs and set only `paths.relative = false`; leave
+`paths.base` and `paths.assets` unset.
+
+- `kit.paths.assets = '/assets'` from the phase-1 note cannot be used: Kit 2.70 rejects a root-relative
+  `paths.assets`, and any non-root `paths.base` would move the one entry route off `/`.
+- The server maps `GET /_app/<path>` to `<assets>/_app/<path>` (the on-disk layout SvelteKit writes),
+  and keeps `GET /assets/<path>` → `<assets>/<path>` for callers that use that prefix. Both prefixes
+  serve the same files; `GET /` serves the shell and there is still no history fallback.
+- `adapter-static` writes `ui/build/index.html` and `ui/build/_app/...`; `ui/build` stays a local
+  artifact (ignored), so a clean `cargo test` never needs it. `cargo test` includes
+  `tests/frontend.rs`, which skips with a message when `index.html` is absent and otherwise fetches `/`
+  plus every `/_app/...` URL the shell references, asserting status 200 and a content type.
+
+## Browser-local preference key scheme
+
+**Choice:** `localStorage` only, namespaced by the canonical project root reported by
+`GET /api/health` (`data.project.root`), one project never reading another's keys.
+
+- **Identifier:** `waymark.web.v1:<hex(cyrb53(normalized root))>`. Normalization trims, maps `\` to `/`,
+  collapses repeated `/`, and strips trailing `/` except for the filesystem root. The 53-bit hash is
+  deterministic and non-reversible; it only separates projects on one origin and is not a security
+  boundary.
+- **Keys:** `…:view`, `…:expanded:<view>`, `…:dependencies:<view>`, `…:scroll:<view>` for
+  `view ∈ {combined, grouped}`. Preferences are therefore remembered separately per view, and the
+  stored scroll offset is a plain integer (0 when unreadable).
+- **Defaults:** `combined`, fully expanded, dependency overlays hidden, scroll 0. A stored empty
+  expansion array is respected (a collapsed tree stays collapsed).
+- **Failure:** storage is optional. If `localStorage` is absent, blocked, or a write throws (quota,
+  revoked permission), the session keeps working in memory and a single non-blocking notice reports
+  that preferences may reset. Nothing is written into the project and nothing is sent to the service.
+  `project.root` is canonicalized on the server when possible, with the opened root as fallback, so two
+  spellings of one project share a namespace without any write to the project.
+
+## Reference-node anchoring
+
+**Choice:** in the grouped view a cross-category dependency produces one reference node and dashed
+leader per dependent, anchored to the referenced item's parent when it has one and to the referenced
+item itself when it is a root. Hiding dependency overlays hides the reference nodes and the dependency
+rows together. The node names the referenced title when the anchor is its parent, and in both cases
+names the dependent as "referenced by …". `Tree` children remain under their real parent, so a
+cross-category child is never promoted to a synthetic root or a group root.
+
+## Frontend dependency and test set
+
+`@sveltejs/kit 2.70.3`, `svelte 5.57.3`, `@sveltejs/adapter-static 3.0.10`, `vite 8.3.5`,
+`typescript 6.0.3`, `vitest 5.1.0`, `@testing-library/svelte 5.4.2`, and `jsdom 30.1.3`, pinned by
+`package-lock.json`. `npm ci` installs exactly the lockfile; `npm run build` produces the static SPA;
+`npm test` runs vitest over `ui/tests`; `npm run check` runs `svelte-check`.
+
+The vitest suites cover combined and grouped rendering (including a cross-category child under its real
+parent), dependency overlay toggling and reference anchoring, detail contents and the single
+`body_html` injection sink, per-node and whole-tree expansion, browser persistence and per-project
+isolation, unavailable/failing storage, empty, unresolved, and read-failure states, and the GET-only
+API seam. The Rust suite keeps the HTTP/security coverage and adds the built-asset check above.
+
+## Launcher and developer commands
+
+From the repository:
+
+```sh
+cd crates/waymark-web/ui
+npm ci
+npm run build
+npm test
+cd ../../..
+cargo run -p waymark-web --bin waymark-web-dev -- --project /path/to/project
+```
+
+The launcher never runs npm, downloads dependencies, or serves a placeholder; a missing `ui/build`
+exits 1 with the install/build guidance. `cargo build` and `cargo test` do not need npm or `ui/build`.
