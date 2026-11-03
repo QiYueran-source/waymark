@@ -65,6 +65,11 @@ fn global_reads_fail_instead_of_returning_a_partial_graph() {
     };
 
     expect_incomplete("list", list::list(&project, &Query::new()).map(|_| ()));
+    expect_incomplete("ready", list::ready(&project, &Query::new()).map(|_| ()));
+    expect_incomplete(
+        "blocked",
+        list::blocked(&project, &Query::new()).map(|_| ()),
+    );
     expect_incomplete("readiness", Graph::from_project(&project).map(|_| ()));
     expect_incomplete("tree", hierarchy_tree(&project, None, None).map(|_| ()));
     expect_incomplete(
