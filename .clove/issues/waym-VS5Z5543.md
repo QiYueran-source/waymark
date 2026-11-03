@@ -194,6 +194,13 @@ Codes with no exit class, used as warnings and findings: `OWNER_MISMATCH` (warni
 
 `LOCK_TIMEOUT` and `SNAPSHOT_UNSTABLE` are the only retryable codes; every other code is terminal. `USAGE_ERROR` at exit 1 is an adapter-level failure and is deliberately absent from the registry.
 
+### Resolved replacement-specification shape
+
+- The replacement is an implementation brief, not a design narrative. It follows the `/to-spec` shape — Problem Statement, Solution, a long numbered list of User Stories, Implementation Decisions, Testing Decisions, Out of Scope, Further Notes — and is published `ready-for-agent`. The human gate is an approval before implementation starts, not a second writing mode.
+- Exactly one normative document survives. The specification absorbs the settled command and tool catalog and the shared business contract from `docs/superpower/WAYMARK-CLI-MCP-INTERFACE-DESIGN.md`; that working document then retires. It already describes itself as transitional and predicts a new functional specification once the interface details land.
+- The working document's unresolved interface questions do not enter the specification. They join this map's Not yet specified list, where the specification is forbidden to infer an answer.
+- The specification lives in the Clove tracker as its own work item under `.clove/issues/`, not in `docs/`. No spec-like document remains under `docs/`; such documents are retired or migrated into it.
+
 ## Not yet specified
 
 Only the terminal ticket remains: [Define the replacement specification's shape](waym-Q2CT8YGX) now waits on no decision ticket. Every earlier decision question is closed and indexed under Decisions so far, with the lock lifecycle under "Resolved write-lock lifecycle" and the taxonomy under "Resolved error taxonomy structure" and "Resolved error registry".
@@ -203,7 +210,12 @@ What remains here is detail too fine to spend a decision ticket on, and which th
 - the frontmatter field name and value shape that carries the format generation;
 - whether `sync` stays a public command, folds into `doctor`, or is implied by per-operation inventory checks;
 - MCP transport specifics (stdio versus HTTP, tool-name convention, whether resources or subscriptions are exposed);
-- the concrete shape of human-readable CLI output, and whether CLI and Web share work-state colours and markers.
+- the concrete shape of human-readable CLI output, and whether CLI and Web share work-state colours and markers;
+- the exact MCP schema and return values for title, body, and custom-field operations;
+- whether a composite `edit` operation exists at all, and whether cross-domain edits are atomic;
+- which field names `--fields` projection accepts, and the final deterministic tie-break for `rank` ordering within a topological level;
+- the full request and response envelopes for the three migration classes, and the machine-readable shape of `--dry-run` output;
+- whether Git capabilities are exposed with identical parameters through both adapters.
 
 ## Out of scope
 
