@@ -208,10 +208,7 @@ fn parent_cycle(graph: &Graph, child: &WorkItemId, parent: &WorkItemId) -> Optio
         if &cursor == child {
             return Some(cycle);
         }
-        match graph.get(&cursor).and_then(|item| item.parent.clone()) {
-            Some(next) => cursor = next,
-            None => return None,
-        }
+        cursor = graph.get(&cursor).and_then(|item| item.parent.clone())?;
     }
     Some(cycle)
 }
