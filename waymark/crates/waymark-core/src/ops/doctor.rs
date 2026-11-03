@@ -187,6 +187,7 @@ impl Report {
         json!({
             "scope": self.scope,
             "strict": self.strict,
+            "valid": self.counts.errors == 0,
             "healthy": self.counts.errors == 0,
             "counts": self.counts,
             "findings": self.findings,

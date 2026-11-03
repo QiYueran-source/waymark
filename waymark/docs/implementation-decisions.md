@@ -1528,8 +1528,10 @@ document/configuration rewrites (a category-key migration's value rewrites can r
   validation.
 - A full report carries `findings: Vec<Finding>`, counts by severity (`errors`,
   `warnings`, `info`), `strict`, the reviewed `scope`, the permitted `repairs`,
-  and `_meta`. `Finding` is the existing envelope type: there is no second
-  diagnostic taxonomy and no new registry code or details key.
+  and `_meta`. The machine data also carries `healthy` and `valid` (true when no
+  error findings remain), keeping the previous `validate` JSON shape usable.
+  `Finding` is the existing envelope type: there is no second diagnostic
+  taxonomy and no new registry code or details key.
 - The full scope is `["configuration", "work_items", "graph", "projection",
   "inventory", "lock"]`. A report made without an openable project is honestly
   configuration-scoped (`["configuration"]`) rather than claiming a work-item
