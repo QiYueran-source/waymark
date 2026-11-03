@@ -14,10 +14,9 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
 use waymark_core::envelope::Meta;
-use waymark_core::error::{Code, WaymarkError};
+use waymark_core::error::WaymarkError;
 use waymark_core::ops::config::{self, ConfigOutcome, FieldAttribute, Scalar};
 use waymark_core::ops::doctor::{self, DoctorOptions, Report};
-use waymark_core::{Config, Project};
 
 use crate::envelope::{self, ToolResult};
 use crate::server::WaymarkServer;
@@ -434,27 +433,8 @@ fn report_result(report: Report) -> ToolResult {
 
 /// Resolve the project and run the shared diagnostics.
 ///
-/// Mirrors the CLI: the configuration file is located without parsing so a
-/// broken configuration still gets a configuration-scoped report instead of a
-/// bare `CONFIG_INVALID` failure with no findings.
+/// The core entry point owns the project-root derivation and maps a broken
+/// configuration to a configuration-scoped report, exactly as the CLI does.
 fn diagnose(start: &Utf8Path) -> Result<Report, WaymarkError> {
-    let config_path = config::locate_config_path(start)?;
-    match Config::load(&config_path) {
-        Ok(_) => {
-            let root = config_path
-                .parent()
-                .and_then(Utf8Path::parent)
-                .ok_or_else(|| {
-                    WaymarkError::internal(format!(
-                        "the configuration path {config_path} has no project root"
-                    ))
-                })?;
-            let project = Project::open(root)?;
-            doctor::diagnose_with(&project, DoctorOptions::new())
-        }
-        Err(error) if matches!(error.code(), Code::ConfigInvalid | Code::UnsupportedVersion) => {
-            doctor::diagnose_config(&config_path, DoctorOptions::new())
-        }
-        Err(error) => Err(error),
-    }
+    doctor::diagnose_from(start, DoctorOptions::new())
 }

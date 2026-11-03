@@ -744,3 +744,30 @@ fn walk(directory: &Utf8Path, files: &mut BTreeMap<Utf8PathBuf, Vec<u8>>) {
         }
     }
 }
+
+/// `diagnose_from` owns the project-root derivation and maps a broken
+/// configuration to a configuration-scoped report on both adapter paths.
+#[test]
+fn diagnose_from_derives_the_root_and_maps_a_broken_configuration() {
+    let (_dir, project) = project();
+    let root = project.root().to_path_buf();
+
+    let report = doctor::diagnose_from(&root, DoctorOptions::new()).expect("the project opens");
+    assert!(
+        report.scope.contains(&"work_items".to_owned()),
+        "{:?}",
+        report.scope
+    );
+
+    std::fs::write(project.config_path(), "categories = [not valid toml").unwrap();
+    for start in [root.clone(), root.join("work/task")] {
+        let report = doctor::diagnose_from(&start, DoctorOptions::new())
+            .expect("a broken configuration still yields a report");
+        assert_eq!(report.scope, vec!["configuration".to_owned()]);
+        assert!(
+            codes(&report).contains(&Code::ConfigInvalid),
+            "{:?}",
+            report.findings
+        );
+    }
+}
