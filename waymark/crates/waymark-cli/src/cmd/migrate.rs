@@ -1,4 +1,4 @@
-//! `waymark migrate version|schema`: explicit format and schema migration.
+//! `waymark migrate version|schema|storage`: explicit migration verbs.
 //!
 //! Every arm is thin: the domain plans, revalidates, and writes, and the adapter
 //! renders the same report either as one JSON envelope on stdout or as prose on
@@ -9,8 +9,8 @@ use clap::{ArgGroup, Args, Subcommand};
 use waymark_core::config::FieldType;
 use waymark_core::envelope::success_envelope;
 use waymark_core::error::WaymarkError;
-use waymark_core::model::FieldKey;
-use waymark_core::ops::migrate::{self, MigrationReport, SchemaAction};
+use waymark_core::model::{CategoryKey, FieldKey};
+use waymark_core::ops::migrate::{self, MigrationReport, SchemaAction, StorageAction};
 use waymark_core::ops::OpOptions;
 
 use super::{emit, err_line, open_project};
@@ -22,7 +22,7 @@ pub struct MigrateArgs {
     pub command: MigrateCommand,
 }
 
-/// The two migration kinds this phase exposes.
+/// The migration kinds this phase exposes.
 #[derive(Debug, Subcommand)]
 pub enum MigrateCommand {
     /// Rewrite every older-generation document and raise the configuration
@@ -30,6 +30,8 @@ pub enum MigrateCommand {
     Version(VersionArgs),
     /// Remove one declared custom field, or add a required one with a default.
     Schema(SchemaArgs),
+    /// Move the storage root, move one category, or rename one category key.
+    Storage(StorageArgs),
 }
 
 /// `migrate version --to <N>`.
@@ -70,6 +72,38 @@ pub struct SchemaArgs {
     pub dry_run: bool,
 }
 
+/// `migrate storage --root <PATH>`, `--category-path <KEY> <PATH>`, or
+/// `--category-key <OLD> <NEW>`.
+#[derive(Debug, Args)]
+#[command(group = ArgGroup::new("action").required(true).multiple(false))]
+pub struct StorageArgs {
+    /// Move the storage root and every category directory under it.
+    #[arg(long, value_name = "PATH", group = "action")]
+    pub root: Option<String>,
+
+    /// Move one category directory to this repository-relative path.
+    #[arg(
+        long,
+        value_names = ["KEY", "PATH"],
+        num_args = 2,
+        group = "action"
+    )]
+    pub category_path: Option<Vec<String>>,
+
+    /// Rename one category key and rewrite its persisted value everywhere.
+    #[arg(
+        long,
+        value_names = ["OLD", "NEW"],
+        num_args = 2,
+        group = "action"
+    )]
+    pub category_key: Option<Vec<String>>,
+
+    /// Perform the complete read-only check and report the moves.
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
 /// Run `waymark migrate`.
 pub fn run(
     args: MigrateArgs,
@@ -99,7 +133,57 @@ pub fn run(
             let report = migrate::migrate_schema(&project, action, &options)?;
             render(&report, json)
         }
+        MigrateCommand::Storage(args) => {
+            let action = storage_action(&args)?;
+            let project = open_project(project)?;
+            let options = if args.dry_run {
+                options.clone().dry_run()
+            } else {
+                options.clone()
+            };
+            let report = migrate::migrate_storage(&project, &action, &options)?;
+            render(&report, json)
+        }
     }
+}
+
+/// Translate the storage flags into exactly one domain action.
+fn storage_action(args: &StorageArgs) -> Result<StorageAction, WaymarkError> {
+    if let Some(root) = &args.root {
+        return Ok(StorageAction::Root { path: root.clone() });
+    }
+    if let Some(values) = &args.category_path {
+        let [key, path] = values.as_slice() else {
+            return Err(argument(
+                "category-path",
+                "--category-path needs <KEY> <PATH>".to_owned(),
+            ));
+        };
+        return Ok(StorageAction::CategoryPath {
+            key: category_key(key)?,
+            path: path.clone(),
+        });
+    }
+    if let Some(values) = &args.category_key {
+        let [from, to] = values.as_slice() else {
+            return Err(argument(
+                "category-key",
+                "--category-key needs <OLD> <NEW>".to_owned(),
+            ));
+        };
+        return Ok(StorageAction::CategoryKey {
+            from: category_key(from)?,
+            to: category_key(to)?,
+        });
+    }
+    Err(argument(
+        "action",
+        "exactly one of --root, --category-path, or --category-key is required".to_owned(),
+    ))
+}
+
+fn category_key(literal: &str) -> Result<CategoryKey, WaymarkError> {
+    CategoryKey::parse(literal).map_err(|error| argument("key", error.to_string()))
 }
 
 /// Translate the schema flags into exactly one domain action.
@@ -160,6 +244,15 @@ fn render(report: &MigrationReport, json: bool) -> Result<(), WaymarkError> {
     err_line(&format!("{}: {state}", report.description));
     for item in &report.affected {
         err_line(&format!("  {}  {}", item.id, item.path));
+    }
+    for moved in &report.moves {
+        err_line(&format!("  moved {} -> {}", moved.from, moved.to));
+    }
+    for rewritten in &report.rewritten {
+        err_line(&format!(
+            "  rewritten {}  category {} -> {}",
+            rewritten.id, rewritten.from, rewritten.to
+        ));
     }
     err_line(&format!(
         "  {} work-item file(s); configuration {}; revision {} -> {}",
