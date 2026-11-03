@@ -522,8 +522,8 @@ async fn soft_links_are_written_on_both_sides_as_one_batch() {
         envelope["data"]["fingerprints"].as_array().unwrap().len(),
         2
     );
-    assert!(common::read(&left_path).contains(&format!("soft_links:")));
-    assert!(common::read(&right_path).contains(&format!("soft_links:")));
+    assert!(common::read(&left_path).contains("soft_links:"));
+    assert!(common::read(&right_path).contains("soft_links:"));
 
     let result = client
         .call(

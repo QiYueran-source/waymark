@@ -1803,3 +1803,162 @@ document/configuration rewrites (a category-key migration's value rewrites can r
   file is `ops/move.rs` as requested, exposed as `pub mod r#move;`. Callers use
   `waymark_core::ops::r#move::move_item`.
 
+
+# T10 — MCP adapter (phase B)
+
+## Catalog and invariant helpers
+
+- **The catalog constant is `waymark_mcp::TOOLS` (39 tools).** Phase A's
+  `PHASE_A_TOOLS` remains as the 14-tool phase-A slice, listed literally because
+  a const slice cannot be built from a subslice of another const slice on the
+  workspace's Rust version. The catalog test asserts that `TOOLS` starts with
+  exactly `PHASE_A_TOOLS` and that the served tool list equals `TOOLS`, so the
+  two cannot drift and a tool cannot be added without being named.
+- **`invariants::batch_parameters` is applied to every advertised tool, not only
+  the write family.** It is the schema-based check from phase A (no
+  `items`/`ids`/`targets`/`batch`/`changes` parameter and no array of objects);
+  every phase-B tool passes it. The write-schema test additionally pins the
+  write family's shapes, including that a `clear` list is an array of strings
+  rather than an array of target objects.
+
+## Write options and shared semantics
+
+- **Every write constructs `OpOptions::new()` and adds only `dry_run`.** The
+  clock is the system clock, the repository's configured operator is the
+  effective operator, and the lock wait is the core default. There is no
+  per-call operator, clock, or lock-timeout argument: those are process/operator
+  concerns, and the CLI's `--lock-timeout-ms` has no MCP equivalent because an
+  agent has no useful way to choose one.
+- **Business failures are the shared envelope, never JSON-RPC.** Every handler
+  is wrapped in `envelope::respond`, so a `WaymarkError` becomes
+  `{v, ok:false, error}` with the registry code, typed details, location, and
+  retryable flag. JSON-RPC errors remain reserved for malformed parameters,
+  unknown tools, and transport failures.
+- **`_meta` comes from the domain outcome.** Work-item writes return the
+  outcome's meta, which already carries `OWNER_MISMATCH` warnings. Configuration
+  writes use `Meta::direct_file_scoped()` and migration reports use their own
+  meta (memory projection, complete, with warnings), matching the CLI's JSON
+  mode.
+- **Response `data` mirrors the CLI's `--json` block for the same family.** This
+  is representation only: the fields come from the same outcome structs
+  (`id`, `path`, `changed`, `written`, the complete `item`, and family-specific
+  fields such as `changed_fields`, `previous_status`, `removals`, or
+  `fingerprints`). The adapter-local `item_json`/`item_fields` renderers from
+  phase A are reused inside the adapter rather than copied a second time.
+
+## Creation: a recorded core gap
+
+- **`waymark_create_work_item` exposes `title`, `category`, `owner`, `body`,
+  and `dry_run`.** The specification's tool table also names `creator`, custom
+  fields, `parent`, dependencies, and soft links, but `waymark_core::ops::create`
+  and the CLI's `create` command accept none of those. The tool does not compose
+  follow-up writes: creation mints identity and a document in one atomic write,
+  and attaching fields/edges afterwards would be a non-atomic multi-write the
+  domain does not define. This is reported upward as a genuine core gap; the
+  adapter does not invent a composite creation rule.
+- **A dry-run create still allocates a preview ID and path** through the core's
+  dry-run path and reports `written: false`; nothing is written and no ID is
+  reserved.
+
+## Custom-field changes
+
+- **`waymark_update_custom_fields` requires a `custom_fields` object with `set`
+  and `clear` halves.** `set` is a JSON map of key to value, `clear` is a list
+  of keys. There is no editor, no current-value form, and no optional "maybe
+  change" shape. The whole map is required; either half may be empty.
+- **An explicit `null` in `set` reaches the domain as
+  `FieldChange::Null` and is rejected with `VALIDATION_ERROR`.** It never means
+  "clear": the domain distinguishes the directions and the adapter preserves
+  that distinction rather than collapsing null into absence.
+- **Floats and objects are refused adapter-side with `VALIDATION_ERROR`.** The
+  core's `FieldValue` has no representation for them, so no domain rule can
+  accept or reject them; the refusal reuses the shared code and issue shape
+  (`fields.<key>`). String, integer, boolean, and homogeneous scalar lists are
+  handed to the domain, which owns the declared-type check.
+- **Duplicate keys cannot reach the domain through MCP.** JSON objects collapse
+  duplicates before the adapter sees them; the core's sequence-shaped input
+  (which exists so the CLI can report duplicates) is unchanged. A key present in
+  both `set` and `clear` is still reachable and is rejected by the domain.
+
+## Configuration writes
+
+- **Scalar and attribute values are strings in their CLI literal grammar.**
+  `waymark_config_set` takes `name` + `value`, `waymark_config_update_field`
+  takes `key` + `attribute` + `value`, and `waymark_config_add_field` takes an
+  optional textual `default`. These are the exact tokens the CLI passes; parsing
+  stays in `ops::config`, so the adapter does not acquire a second value grammar.
+- **A type change or making a field required is `ACTION_REQUIRES_MIGRATION`.**
+  Those refusals come from the domain, with its recovery command, not from an
+  adapter-side allow-list. A required declaration via `add_field` reaches the
+  same refusal. The tools never route such a change to a migration implicitly.
+- **Every configuration write supports `dry_run` and returns the effective
+  configuration, `changed`, `changed_keys`, and the revision move.** A no-op
+  write reports `changed: false` and an empty `changed_keys`.
+
+## Migration
+
+- **Exactly one action per call is structural, not flag reconciliation.** Schema
+  migration takes
+  `action: {kind: "remove_field" | "add_required_field", ...}` and storage
+  migration takes
+  `action: {kind: "root" | "category_path" | "category_key", ...}`. The action is
+  a `oneOf` union in the generated schema, so supplying two actions is not
+  expressible, and a missing or unknown `kind` is a JSON-RPC invalid-params
+  failure, mirroring the CLI's required, non-multiple `ArgGroup`.
+- **Version migration takes `target_generation`; the domain decides whether it
+  is supported.** A generation this release does not write stays
+  `MIGRATION_UNSUPPORTED_GENERATION`, not an adapter-level refusal.
+- **A dry run uses the same `migrate_*` entry point with `dry_run` set.** It
+  performs the complete preflight, fingerprint re-checks, and plan, and the
+  report's `dry_run: true`, `written: false`, `affected`, `targets`, `moves`, and
+  `rewritten` blocks are the dry-run contents. Nothing is written, including
+  directories and the configuration revision.
+- **Action `default` values use the declared type's literal grammar** (for
+  example `"0"` for an integer), matching the CLI's `--default`; the domain
+  parses and validates them.
+
+## Git inspection
+
+- **`item` and `path` are both optional in history and their mutual exclusivity
+  is the domain's `VALIDATION_ERROR`.** The adapter does not duplicate that
+  rule; it only normalizes a supplied item ID. `limit` defaults to the core's 20
+  and `0` means unlimited.
+- **Outside a repository both tools are successful reports.** The domain returns
+  an empty report with the informational `NOT_A_GIT_REPOSITORY` finding in
+  `_meta.diagnostics`; the adapter surfaces that as `isError: false` and
+  `ok: true`, exactly as the CLI exits successfully. Turning it into a business
+  failure would invent a rule the domain does not have.
+
+## Tests and CLI/MCP parity
+
+- **Equivalence tests drive the real `waymark` binary.** They copy one project,
+  run the same write through MCP and the CLI, and compare the whole tree. For
+  work-item writes, only operation-clock frontmatter values (`created_at`,
+  `updated_at`, `closed_at`, `archived_at`) are normalized, because both
+  adapters use system time; every other byte, including canonical field order,
+  must match. Configuration and migration writes have no clock-dependent bytes
+  and are compared byte-for-byte.
+- **The dry-run test warms the write lock before its first snapshot.** The lock
+  file is the mutual-exclusion artifact of a mediated write, not business data;
+  taking it once first lets the assertion be strict byte identity for all 23
+  dry-run-capable tools.
+- **`WRITE_CONFLICT` is exercised through the move tool.** A directory at the
+  destination is not a work-item document, so the inventory skips it and the
+  move reaches its own destination check; the test asserts the shared
+  `{id, path, expected_fingerprint, actual_fingerprint}` details.
+  `ITEM_NEEDS_MIGRATION` is exercised by hand-downgrading one document's
+  `schema` literal, as the core tests do.
+- **Parity is bidirectional.** The test parses the top-level CLI commands from
+  `waymark --help`, maps every command family to its tools, asserts every
+  advertised tool is reachable from some family, and asserts the exception list
+  is exact and named in this document. The deliberate exceptions are:
+  - `query` — covered by `waymark_list_work_items`'s structured filter
+    document; MCP has no separate query tool.
+  - `start`, `close`, `reopen` — covered by `waymark_set_status` with
+    `in_progress`, `closed`, and `open`; they are CLI conveniences, not separate
+    capabilities.
+  - `agent-doc` — a generated CLI reference for humans and agents reading the
+    command tree, not a business capability, so it has no tool.
+- **No `waymark-core`, `waymark-cli`, or `waymark-web` source was changed.** The
+  one genuine gap found (creation's richer inputs) is recorded above rather than
+  patched around in the adapter.

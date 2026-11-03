@@ -238,3 +238,138 @@ pub fn warm_lock(root: &Utf8Path) -> waymark_core::Project {
     .expect("the lock is acquirable");
     project
 }
+
+/// The workspace's `waymark` CLI binary, built next to this test executable.
+///
+/// `cargo test --workspace` builds every workspace binary, so the equivalence
+/// tests can drive the real CLI process. Running only `cargo test -p
+/// waymark-mcp` builds just this package's targets; the assertion says so
+/// instead of silently skipping the comparison.
+pub fn waymark_binary() -> Utf8PathBuf {
+    let executable = std::env::current_exe().expect("the test executable path");
+    let target_dir = executable
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("the test executable sits under the target directory");
+    let candidate =
+        Utf8PathBuf::from_path_buf(target_dir.join("waymark")).expect("a UTF-8 binary path");
+    assert!(
+        candidate.is_file(),
+        "the `waymark` binary is missing at {candidate}; run `cargo build -p waymark-cli` \
+         (or the workspace gate `cargo test --workspace`) before the CLI-parity tests"
+    );
+    candidate
+}
+
+/// Run one CLI command in JSON mode against `root` and return its envelope.
+pub fn cli_json(root: &Utf8Path, arguments: &[&str]) -> Value {
+    let output = std::process::Command::new(waymark_binary())
+        .arg("--json")
+        .arg("--project")
+        .arg(root)
+        .args(arguments)
+        .output()
+        .expect("the CLI binary runs");
+    assert!(
+        output.status.success(),
+        "the CLI command {arguments:?} failed\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+        panic!(
+            "the CLI did not emit one JSON envelope ({error}): {}",
+            String::from_utf8_lossy(&output.stdout)
+        )
+    })
+}
+
+/// Copy a project directory to a fresh temporary directory.
+pub fn copy_project(source: &Utf8Path) -> (TempDir, Utf8PathBuf) {
+    let directory = tempfile::tempdir().expect("a temporary directory");
+    let root = Utf8PathBuf::from_path_buf(directory.path().to_path_buf())
+        .expect("the temporary directory path is UTF-8");
+    copy_tree(source, &root);
+    (directory, root)
+}
+
+fn copy_tree(source: &Utf8Path, destination: &Utf8Path) {
+    for entry in std::fs::read_dir(source).expect("a readable project directory") {
+        let entry = entry.expect("a readable directory entry");
+        let path = Utf8PathBuf::from_path_buf(entry.path()).expect("a UTF-8 path");
+        let name = path.file_name().expect("a file name");
+        let target = destination.join(name);
+        if path.is_dir() {
+            std::fs::create_dir_all(&target).expect("a creatable directory");
+            copy_tree(&path, &target);
+        } else if path.is_file() {
+            std::fs::copy(&path, &target).expect("a copyable file");
+        }
+    }
+}
+
+/// A project snapshot with operation-clock values normalized.
+///
+/// Two adapters run the same write against equivalent projects at different
+/// instants. The document timestamps are the operation clock (system time by
+/// default in both adapters), so comparing on-disk equality normalizes exactly
+/// those values and leaves every other byte, including field order, untouched.
+pub fn normalized_snapshot(root: &Utf8Path) -> BTreeMap<String, Vec<u8>> {
+    snapshot(root)
+        .into_iter()
+        .map(|(path, bytes)| {
+            if path.ends_with(".md") {
+                (
+                    path,
+                    normalize_clocks(&String::from_utf8_lossy(&bytes)).into_bytes(),
+                )
+            } else {
+                (path, bytes)
+            }
+        })
+        .collect()
+}
+
+/// Replace frontmatter clock values with a placeholder, leaving everything else.
+pub fn normalize_clocks(text: &str) -> String {
+    normalize(text, false)
+}
+
+/// Replace frontmatter clock values and the stable ID with placeholders.
+pub fn normalize_identity(text: &str) -> String {
+    normalize(text, true)
+}
+
+fn normalize(text: &str, replace_id: bool) -> String {
+    let mut in_frontmatter = false;
+    let mut fences = 0;
+    let mut lines: Vec<String> = Vec::new();
+    for line in text.lines() {
+        if line == "---" {
+            fences += 1;
+            in_frontmatter = fences == 1;
+            lines.push(line.to_owned());
+            continue;
+        }
+        let key = line.split_once(':').map(|(key, _)| key);
+        if in_frontmatter
+            && matches!(
+                key,
+                Some("created_at" | "updated_at" | "closed_at" | "archived_at")
+            )
+        {
+            lines.push(format!("{}: <clock>", key.unwrap()));
+            continue;
+        }
+        if in_frontmatter && replace_id && key == Some("id") {
+            lines.push("id: <id>".to_owned());
+            continue;
+        }
+        lines.push(line.to_owned());
+    }
+    let mut normalized = lines.join("\n");
+    if text.ends_with('\n') {
+        normalized.push('\n');
+    }
+    normalized
+}

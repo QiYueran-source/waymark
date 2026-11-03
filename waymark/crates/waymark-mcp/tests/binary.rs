@@ -71,8 +71,8 @@ fn the_binary_serves_the_catalog_over_a_piped_stdio_pair() {
         .iter()
         .map(|tool| tool["name"].as_str().expect("a tool name"))
         .collect();
-    assert_eq!(names.len(), waymark_mcp::PHASE_A_TOOLS.len());
-    for expected in waymark_mcp::PHASE_A_TOOLS {
+    assert_eq!(names.len(), waymark_mcp::TOOLS.len());
+    for expected in waymark_mcp::TOOLS {
         assert!(names.contains(expected), "the catalog names {expected}");
     }
 
