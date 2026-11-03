@@ -1062,3 +1062,138 @@ use the same gate. Single-document reads (`show`, `read::read`) remain scoped.
 **Why:** every one of those operations either publishes a whole-project answer or rewrites files it did
 not name; a hole in the graph would make the answer or the rewrite untrustworthy. `show` is the only
 read in the current command set that is genuinely about one document.
+
+# T12 — read-only Web service (backend)
+
+Phase 1 of T12 is the Rust backend, the development launcher, and the HTTP/security tests. Phase 2 (a
+later agent) adds the SvelteKit frontend in `crates/waymark-web/ui/build` and must treat the contract
+below as fixed unless it changes both sides and these decisions.
+
+## Dependency set and MSRV result
+
+**Choice:** `axum 0.8`, `tokio 1` (`rt-multi-thread`, `macros`, `net`, `signal`, `sync`),
+`pulldown-cmark 0.13` (safe Markdown), `ammonia 4` (sanitizer), plus the workspace crates. Dev-dependency
+`tempfile` only; the HTTP tests use a hand-written HTTP/1.1 client over `std::net::TcpStream` instead of
+`reqwest` because the tests must send a missing `Host`, a duplicate header, and `Origin: null`, and
+because a TLS stack adds no value to a loopback plain-HTTP service.
+
+**MSRV audit:** `cargo metadata --format-version 1` resolved 195 packages. Every package that declares
+`rust-version` was compared against the workspace's `rust-version = "1.85"`. The maximum required
+version is **1.85**, declared (among others) by `ammonia 4.2.4`, `tokio 1.54.1`, `clap 4.6.7`,
+`hyper-util 0.1.21`, `html5ever 0.40.1`, `cssparser 0.38.0`, `hashbrown 0.17.1` (1.85.0), and
+`web_atoms 0.3.0`. **No package requires more than 1.85**, so the gate holds and `rust-version` is not
+raised. Thirty-six resolved packages declare no `rust-version`; they are unknown, not evidence of a
+higher requirement.
+
+**Pin:** `ammonia → url → idna → idna_adapter 1.2.2 → icu 2.x` declared `rust-version = 1.88`. Rather
+than raise the workspace MSRV, `crates/waymark-web/Cargo.toml` declares an exact
+`idna_adapter = "=1.2.0"`, which resolves the `icu 1.5` line (all ≤ 1.85). This is a deliberate MSRV
+pin; removing it or running a wide `cargo update` re-breaks the 1.85 gate, so re-run the audit after
+any dependency change.
+
+## Binding, status codes, and failure envelopes
+
+**Choice:** the listener is always `127.0.0.1` (`WebConfig` has only `port` and `assets`; port `0`
+asks the OS for a free port). There is no host/interface/LAN option anywhere in the API. Successful
+answers reuse `waymark_core::envelope::success_envelope`; domain failures reuse `failure_envelope` and
+add a `_meta` block carrying `error.details.diagnostics` (or `[]`). Adapter failures reuse
+`adapter_failure_envelope` with the codes `INVALID_QUERY`, `INVALID_ASSET_PATH`, `INVALID_HOST`,
+`INVALID_ORIGIN`, `METHOD_NOT_ALLOWED`, `NOT_FOUND`, and `ASSET_NOT_FOUND`.
+
+Status mapping: `INVALID_*`/`INVALID_ID`/`VALIDATION_ERROR` → 400; `ITEM_NOT_FOUND`/`PROJECT_NOT_FOUND`
+and unknown routes/assets → 404; every other domain failure (parse, I/O, incomplete projection) → 500
+with the registered code, details, and available diagnostics; every non-`GET`/`HEAD` request → 405 with
+`Allow: GET, HEAD`. The method check runs **before** Host/Origin validation so "every non-GET/HEAD is
+405" has no exception; a rejected cross-origin POST still receives no CORS headers.
+
+## API contract (v1)
+
+`GET /api/health` → `{v, ok: true, data: {status: "ok", service: "waymark-web", version,
+read_only: true}, _meta}`. It touches the project not at all.
+
+`GET /api/tree?view=combined|grouped` (default `combined`). `data` for combined:
+`{view: "combined", roots: [Node], unresolved: [Unresolved], categories: [Category]}`. For grouped:
+`{view: "grouped", groups: [{category: Category, roots: [Node]}], unresolved, categories}`. Only
+non-archived items appear; a grouped view lists only categories that have roots, in configured
+(key-sorted) order; a cross-category child remains inside its parent's subtree. `Node` is
+`{id, title, category: {key, name, shape}, status: "open"|"in_progress"|"closed", state:
+"ready"|"in_progress"|"blocked"|"closed", ready: bool, blocked: bool, blocked_reason: string|null,
+parent: id|null, dependencies: [id], children: [Node]}`. `state` precedence is closed → blocked →
+in_progress → ready (a blocked in-progress item reports `blocked`; the actual `status` is still sent).
+`blocked_reason` is prose of the form `waiting on wm-… (unfinished|archived|missing), …` derived from
+`Readiness::blocked_by`. `Unresolved` is `{id, title, category, parent, reason:
+"parent_missing"|"parent_archived"|"parent_cycle"}`. No synthetic root is invented: every parentless
+active item is a root, and an item that no root reaches is in `unresolved`, not promoted.
+
+`Category` is `{key, name, shape}`. `shape` is the category's index in the configured category order
+modulo `SHAPES = ["circle", "square", "triangle", "diamond", "hexagon", "star"]`; the index is stable
+as long as categories are not inserted/reordered before it. `categories` is included in both tree
+views so the frontend does not need a second request.
+
+`GET /api/item/:id` → `{id, title (plain text, never HTML), body_html (sanitized), category, status,
+state, ready, blocked, blocked_reason, owner, creator, created_at, updated_at, closed_at, archived,
+custom_fields (opaque object), relationships: {parent, children, dependencies, dependents, soft_links}}`.
+Custom-field names carry no semantics: values pass through as stored. An archived ID still answers with
+`archived: true` and `state: "closed"`; there is no archive browser or list route.
+
+If the graph cannot be built (damaged document, future `INCOMPLETE_PROJECTION`), the request is a
+failure envelope with the registered code, its details, and `_meta.diagnostics`; no partial tree is
+ever returned as data.
+
+## Safety boundaries
+
+- Host: exactly one `Host` header, `<host>:<port>`, where `host` is `localhost` or an IP for which
+  `IpAddr::is_loopback()` holds, and `port` equals the actual listening port. A missing, repeated,
+  foreign, or wrong-port Host is 400 `INVALID_HOST`.
+- Origin: when present (at most one), it must be exactly `http://<same host>:<same port>` with scheme
+  `http`; `Origin: null`, another scheme, another host, or another port is 400 `INVALID_ORIGIN`.
+  Requests without Origin proceed after the Host check. No CORS headers are ever emitted.
+- Markdown: `pulldown-cmark` rendering followed by `ammonia` with `rel="noopener noreferrer"` on links.
+  Raw HTML is sanitized (script/style/iframe/object/embed/svg and event-handler attributes and
+  `javascript:` URLs do not survive); titles travel only as JSON strings.
+- Assets: `/assets/<path>` maps to `<assets>/<path>`, rejects empty/`.`/`..`/backslash/NUL segments,
+  canonicalizes and requires the target to stay inside the canonical asset root, serves regular files
+  only, and never falls back to a placeholder. Unknown routes are 404 (no SPA history fallback).
+- Read-only: the crate imports only `readiness`, `ops::list`, `ops::tree`, and `ops::read`; no write
+  operation or lock module is referenced. The test suite snapshots every project file before and after
+  all reads and rejected writes and asserts byte identity.
+
+## Server API and launcher
+
+Public items: `WebConfig { port, assets }` (with `new`/`with_port`/`Default`),
+`DEFAULT_PORT = 7331`, `LOOPBACK`, `SHAPES`, `CategoryView`, `WebError`, `Running { addr, url,
+shutdown }`, `bind(project, config) -> Running` (for tests and the launcher), `serve(project, config)`
+(binds, prints the loopback URL to stderr, waits for Ctrl-C), `ensure_assets(dir)`,
+`default_assets_dir()` (`<crate>/ui/build`). `serve` is deliberately not wired into the `waymark` CLI.
+
+`waymark-web-dev`: `--project PATH` (default: current directory, discovered upward), `--port` (default
+7331; `0` is accepted), `--assets DIR` (default: the crate's `ui/build`). Project discovery and the
+asset check both precede binding; missing or invalid projects and missing `index.html` print a clear
+message to stderr and exit 1 without creating, initializing, or modifying anything. The launcher never
+runs npm, never downloads anything, and never serves a placeholder. `GET /` without assets returns 503
+with preparation guidance (API tests do not need them).
+
+## Core change (additive)
+
+`waymark-core::ops::tree::hierarchy_from_graph(&Graph, Option<usize>) -> HierarchyTree` was added so the
+Web read model can build the hierarchy and readiness from one scan. `hierarchy_tree` now delegates its
+whole-project path to it (private `with_meta` preserves the existing `_meta`) and the single-root path
+is unchanged. No existing public signature or behaviour changed.
+
+## What phase 2 (SvelteKit) must know
+
+- Build the frontend into `crates/waymark-web/ui/build` (the default) or pass `--assets` elsewhere.
+- Serve `index.html` at `/` and hashed files at `/assets/...`. With SvelteKit, set
+  `kit.paths.assets = '/assets'` (and keep the app base at `/`) so generated URLs match the route.
+  The server has no history fallback: use a single entry route at `/` (hash routing or in-app state)
+  rather than deep links; unknown paths return 404 JSON.
+- Consume exactly the shapes above; `title` must be inserted as text (never `{@html}`), `body_html` is
+  already sanitized, `state` drives colour/shape and `blocked_reason` is the text marker, `shape` is an
+  index into `SHAPES`, and `categories` is present in both tree views.
+- All preferences (selected view, expansion, dependency visibility, scroll) belong in browser storage
+  keyed by an identifier derived from the normalized project-root path; nothing is sent to the server
+  or written into the project. The API is strictly read-only and has no search/filter/archive/refresh
+  endpoint.
+- Fetch without an `Origin` header (same-origin requests do this automatically) or with the service's
+  exact `http://localhost:<port>` origin. A page opened at `127.0.0.1` gets an origin for `127.0.0.1`,
+  which is accepted; do not proxy through another origin or port.

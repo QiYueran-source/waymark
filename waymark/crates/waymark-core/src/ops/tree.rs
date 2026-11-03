@@ -174,6 +174,18 @@ pub fn hierarchy_tree(
         });
     }
 
+    Ok(hierarchy_from_graph(&graph, depth).with_meta(meta))
+}
+
+/// The hierarchy for an already-built [`Graph`].
+///
+/// Same rules as [`hierarchy_tree`] when no single root is requested: every
+/// parentless active item is a root, and an active item no root reaches is
+/// reported in [`HierarchyTree::unresolved`]. This is an additive seam for
+/// adapters that read the graph once and need the hierarchy and readiness
+/// together (the read-only Web view), so one request cannot see two different
+/// scans.
+pub fn hierarchy_from_graph(graph: &Graph, depth: Option<usize>) -> HierarchyTree {
     let mut roots: Vec<WorkItemId> = Vec::new();
     for item in graph.items() {
         if item.parent.is_none() {
@@ -184,7 +196,7 @@ pub fn hierarchy_tree(
 
     // Reachability, not just "has a parent": a chain that leads into a loop has
     // no root either, and those items must be reported rather than dropped.
-    let reachable = reachable_from(&graph, &roots);
+    let reachable = reachable_from(graph, &roots);
 
     let mut unresolved: Vec<UnresolvedItem> = Vec::new();
     for item in graph.items() {
@@ -211,14 +223,22 @@ pub fn hierarchy_tree(
     }
     unresolved.sort_by(|left, right| left.id.cmp(&right.id));
 
-    Ok(HierarchyTree {
+    HierarchyTree {
         roots: roots
             .iter()
-            .map(|id| build_hierarchy(&graph, id, depth))
+            .map(|id| build_hierarchy(graph, id, depth))
             .collect(),
         unresolved,
-        meta,
-    })
+        meta: complete_meta(graph.diagnostics()),
+    }
+}
+
+impl HierarchyTree {
+    /// Replace the `_meta` block, keeping the tree.
+    fn with_meta(mut self, meta: Meta) -> Self {
+        self.meta = meta;
+        self
+    }
 }
 
 /// The dependency tree of `id`: everything it waits for, bounded by `depth`.

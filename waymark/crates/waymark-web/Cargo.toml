@@ -1,0 +1,34 @@
+[package]
+name = "waymark-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "Read-only Web service and development launcher for Waymark"
+
+[lib]
+name = "waymark_web"
+path = "src/lib.rs"
+
+[[bin]]
+name = "waymark-web-dev"
+path = "src/bin/waymark-web-dev.rs"
+
+[dependencies]
+waymark-core = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true }
+pulldown-cmark = { workspace = true }
+ammonia = { workspace = true }
+# MSRV pin: idna_adapter 1.2.2 pulls icu 2.x (rust-version 1.88). 1.2.0 resolves
+# the icu 1.5 line, whose declared MSRV is within the workspace's 1.85.
+idna_adapter = "=1.2.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
+camino = { workspace = true }
+thiserror = { workspace = true }
+clap = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
