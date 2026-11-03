@@ -4,7 +4,9 @@ use clap::Args;
 use waymark_core::envelope::success_envelope;
 use waymark_core::error::WaymarkError;
 use waymark_core::ops::read;
-use waymark_core::Project;
+use waymark_core::readiness::Readiness;
+use waymark_core::view::{display_state, DisplayState};
+use waymark_core::{Project, WorkItem};
 
 use super::{emit, err_line, render_field_value};
 
@@ -18,6 +20,26 @@ pub struct ShowArgs {
     /// Print the document's Markdown on stdout instead of a field summary.
     #[arg(long)]
     pub raw: bool,
+}
+
+/// The `state` and `blocked by` lines of a human `show`.
+///
+/// The shared decision lives in [`waymark_core::view::display_state`]. This
+/// only maps it onto the CLI's long-standing vocabulary: an archived item is
+/// `archived`, and an unblocked in-progress item still says `ready` here
+/// because the lifecycle `status` line above already says `in_progress`.
+fn readiness_lines(readiness: &Readiness, item: &WorkItem) -> Vec<String> {
+    let label = match display_state(readiness, item) {
+        DisplayState::Closed if item.is_archived() => "archived",
+        DisplayState::InProgress => "ready",
+        other => other.as_str(),
+    };
+    let mut lines = vec![format!("  state       {label}")];
+    if !readiness.blocked_by.is_empty() {
+        let ids: Vec<&str> = readiness.blocked_by.iter().map(|id| id.as_str()).collect();
+        lines.push(format!("  blocked by  {}", ids.join(", ")));
+    }
+    lines
 }
 
 /// Run `waymark show`.
@@ -76,21 +98,8 @@ pub fn run(project: &Project, args: &ShowArgs, json: bool) -> Result<(), Waymark
             err_line(&format!("  soft links  {}{historical}", ids.join(", ")));
         }
         if let Some(readiness) = &read.readiness {
-            err_line(&format!(
-                "  state       {}",
-                if readiness.blocked {
-                    "blocked"
-                } else if readiness.ready {
-                    "ready"
-                } else if read.item.is_archived() {
-                    "archived"
-                } else {
-                    "closed"
-                }
-            ));
-            if !readiness.blocked_by.is_empty() {
-                let ids: Vec<&str> = readiness.blocked_by.iter().map(|id| id.as_str()).collect();
-                err_line(&format!("  blocked by  {}", ids.join(", ")));
+            for line in readiness_lines(readiness, &read.item) {
+                err_line(&line);
             }
         } else {
             err_line("  state       unknown (the project could not be scanned)");
@@ -121,4 +130,37 @@ pub fn run(project: &Project, args: &ShowArgs, json: bool) -> Result<(), Waymark
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use waymark_core::testing::fixtures;
+    use waymark_core::WorkItemId;
+
+    fn blocked_item() -> (WorkItem, Readiness) {
+        let blocker = WorkItemId::parse("wm-000000000002").expect("a valid stable ID");
+        let mut item = fixtures::work_item("wm-000000000001", "task", "Dependent").build();
+        item.dependencies = vec![blocker.clone()];
+        (
+            item,
+            Readiness {
+                ready: false,
+                blocked: true,
+                blocked_by: vec![blocker],
+            },
+        )
+    }
+
+    #[test]
+    fn a_blocked_item_keeps_its_state_and_blocked_by_lines() {
+        let (item, readiness) = blocked_item();
+        assert_eq!(
+            readiness_lines(&readiness, &item),
+            vec![
+                "  state       blocked".to_owned(),
+                "  blocked by  wm-000000000002".to_owned(),
+            ]
+        );
+    }
 }

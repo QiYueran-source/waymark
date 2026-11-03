@@ -6,11 +6,11 @@
 //! (the CLI tests pin them byte for byte), so they must not be re-derived in
 //! two places where one can drift from the other.
 //!
-//! This module is the single dependency-free home for that rendering. It only
-//! reads the domain types and returns [`serde_json::Value`]; adapters decide
-//! where to print, keep their own human-readable prose, and wrap these values in
-//! their envelope. Nothing here reads a file, takes a lock, or decides whether
-//! a write is allowed.
+//! This module is the single dependency-free home for that rendering. It reads
+//! the domain types and returns either a [`serde_json::Value`] or one of the
+//! small display values below; adapters decide where to print and wrap the
+//! values in their envelope. Nothing here reads a file, takes a lock, or
+//! decides whether a write is allowed.
 //!
 //! # The shapes
 //!
@@ -26,16 +26,127 @@
 //! - [`listing_json`] — the complete collection page (summary, rows, projection).
 //! - [`write_result_json`] / [`write_result_json_with`] — the shared
 //!   `{id, path, …, changed, written, item}` core of every write result.
+//! - [`DisplayState`] / [`display_state`] / [`blocked_reason`] — the one
+//!   derivation of the display state and the human blocked-reason prose.
+//!
+//! # The derived display state
+//!
+//! The persisted `status` is lifecycle, not a verdict: an `open` item can still
+//! be blocked, and a blocked `in_progress` item should read as blocked. Every
+//! human-facing adapter needs the same four-value answer, so the precedence
+//! lives here rather than in each adapter: `closed` → `blocked` → `in_progress`
+//! → `ready`. The prose that explains a block
+//! (`waiting on wm-… (unfinished|archived|missing), …`) is part of the same
+//! rule, because the label for a dependency comes from the graph.
+
+use std::fmt;
 
 use camino::Utf8Path;
 use serde_json::{json, Map, Value};
 
 use crate::config::Config;
-use crate::model::WorkItem;
+use crate::model::{Status, WorkItem};
 use crate::ops::list::Listing;
 use crate::ops::tree::{DependencyRow, TreeNode};
 use crate::projection::ScopedRead;
 use crate::query::{ArchiveRange, ListedItem, Projection};
+use crate::readiness::{Graph, Readiness};
+
+/// The display state a reader sees for one work item.
+///
+/// This is a rendering of the persisted lifecycle plus derived readiness, not a
+/// fourth persisted status. The precedence is `closed` → `blocked` →
+/// `in_progress` → `ready`:
+///
+/// - a closed or archived item is [`Closed`](Self::Closed), whatever readiness
+///   says;
+/// - an active item with an unfinished, archived, or missing dependency is
+///   [`Blocked`](Self::Blocked), even when its status is `in_progress`;
+/// - an unblocked `in_progress` item is [`InProgress`](Self::InProgress);
+/// - every other active item is [`Ready`](Self::Ready).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisplayState {
+    /// Active and nothing outstanding.
+    Ready,
+    /// Active, unblocked, and already being worked on.
+    InProgress,
+    /// Active with at least one unfinished, archived, or missing dependency.
+    Blocked,
+    /// Closed, or archived (historical rather than work anybody can start).
+    Closed,
+}
+
+impl DisplayState {
+    /// The stable literal the Web API publishes.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ready => "ready",
+            Self::InProgress => "in_progress",
+            Self::Blocked => "blocked",
+            Self::Closed => "closed",
+        }
+    }
+
+    /// Parse the stable literal.
+    pub fn parse(input: &str) -> Option<Self> {
+        match input {
+            "ready" => Some(Self::Ready),
+            "in_progress" => Some(Self::InProgress),
+            "blocked" => Some(Self::Blocked),
+            "closed" => Some(Self::Closed),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for DisplayState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Derive the display state of `item` from its readiness.
+///
+/// Closed (including archived) wins before blocked, and blocked wins before
+/// in-progress: the persisted status is sent separately, so a blocked
+/// in-progress item is primarily blocked here.
+pub fn display_state(readiness: &Readiness, item: &WorkItem) -> DisplayState {
+    if item.is_archived() || item.status.is_closed() {
+        DisplayState::Closed
+    } else if readiness.blocked {
+        DisplayState::Blocked
+    } else if item.status == Status::InProgress {
+        DisplayState::InProgress
+    } else {
+        DisplayState::Ready
+    }
+}
+
+/// Human-readable reason for a derived block, or `None` when not blocked.
+///
+/// The prose names every dependency in `readiness.blocked_by` with the fact
+/// that makes it an obstacle: an active item is `unfinished`, a known but
+/// archived item is `archived`, and an ID the graph does not know is `missing`.
+pub fn blocked_reason(graph: &Graph, readiness: &Readiness) -> Option<String> {
+    if !readiness.blocked {
+        return None;
+    }
+    let parts: Vec<String> = readiness
+        .blocked_by
+        .iter()
+        .map(|id| {
+            let label = if graph.get(id).is_some() {
+                "unfinished"
+            } else if graph.is_archived(id) {
+                "archived"
+            } else {
+                "missing"
+            };
+            format!("{} ({label})", id.as_str())
+        })
+        .collect();
+    Some(format!("waiting on {}", parts.join(", ")))
+}
 
 /// The persisted fields of one item, without the file that happens to hold it.
 ///
@@ -275,16 +386,102 @@ mod tests {
     use super::*;
     use crate::config::{Category, FieldDecl, FieldType};
     use crate::envelope::Meta;
-    use crate::model::{FieldKey, FieldValue};
+    use crate::model::{FieldKey, FieldValue, Status};
     use crate::ops::tree::TreeNode;
     use crate::query::FieldName;
-    use crate::readiness::Readiness;
+    use crate::readiness::{Graph, Readiness};
     use crate::store::Fingerprint;
-    use crate::testing::fixtures;
+    use crate::testing::{fixtures, instant};
     use crate::WorkItemId;
 
     fn id(literal: &str) -> WorkItemId {
         WorkItemId::parse(literal).expect("a valid stable ID")
+    }
+
+    fn item_with_status(status: Status) -> WorkItem {
+        fixtures::work_item("wm-000000000001", "task", "Fix the thing")
+            .with_status(status)
+            .build()
+    }
+
+    fn blocked_readiness() -> Readiness {
+        Readiness {
+            ready: false,
+            blocked: true,
+            blocked_by: vec![id("wm-000000000003")],
+        }
+    }
+
+    #[test]
+    fn display_state_is_closed_then_blocked_then_in_progress_then_ready() {
+        // Closed beats blocked: a closed item is never waiting on anything.
+        let closed = item_with_status(Status::Closed);
+        assert_eq!(
+            display_state(&blocked_readiness(), &closed),
+            DisplayState::Closed
+        );
+        // Archived is historical, so it reads closed even with a ready verdict.
+        let mut archived = item_with_status(Status::InProgress);
+        archived.archived_at = Some(instant());
+        assert_eq!(
+            display_state(&Readiness::ready(), &archived),
+            DisplayState::Closed
+        );
+        // Blocked beats in-progress: the persisted status is sent separately.
+        let in_progress = item_with_status(Status::InProgress);
+        assert_eq!(
+            display_state(&blocked_readiness(), &in_progress),
+            DisplayState::Blocked
+        );
+        // Unblocked in-progress is its own state, and everything else is ready.
+        assert_eq!(
+            display_state(&Readiness::ready(), &in_progress),
+            DisplayState::InProgress
+        );
+        let open = item_with_status(Status::Open);
+        assert_eq!(
+            display_state(&Readiness::ready(), &open),
+            DisplayState::Ready
+        );
+    }
+
+    #[test]
+    fn display_state_literals_round_trip() {
+        for state in [
+            DisplayState::Ready,
+            DisplayState::InProgress,
+            DisplayState::Blocked,
+            DisplayState::Closed,
+        ] {
+            assert_eq!(DisplayState::parse(state.as_str()), Some(state));
+            assert_eq!(state.to_string(), state.as_str());
+        }
+        assert_eq!(DisplayState::parse("done"), None);
+    }
+
+    #[test]
+    fn blocked_reason_names_unfinished_archived_and_missing_dependencies() {
+        let unfinished = fixtures::work_item("wm-000000000003", "task", "Unfinished").build();
+        let mut archived = fixtures::work_item("wm-000000000002", "task", "Archived").build();
+        archived.archived_at = Some(instant());
+        let mut dependent = fixtures::work_item("wm-000000000001", "task", "Dependent").build();
+        dependent.dependencies = vec![
+            id("wm-000000000009"), // missing: never created
+            id("wm-000000000003"), // active
+            id("wm-000000000002"), // archived
+        ];
+        let graph = Graph::from_items(&[dependent.clone(), unfinished, archived]);
+        let readiness = graph.readiness(&dependent.id).expect("an active item");
+
+        assert!(readiness.blocked);
+        assert_eq!(
+            blocked_reason(&graph, &readiness).as_deref(),
+            Some(
+                "waiting on wm-000000000002 (archived), wm-000000000003 (unfinished), \
+                 wm-000000000009 (missing)"
+            )
+        );
+        assert_eq!(blocked_reason(&graph, &Readiness::ready()), None);
     }
 
     fn item() -> WorkItem {
