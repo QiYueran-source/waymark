@@ -205,10 +205,13 @@ fn prepare_only(
 
     let mut partners = Vec::with_capacity(prepared.soft_links.len());
     for partner_id in &prepared.soft_links {
-        let (partner, entry) = project.load(partner_id)?;
+        // The same mediated read the real write uses: a partner that is archived
+        // or older-generation must refuse the preview too, otherwise the dry run
+        // would promise a creation the write cannot perform.
+        let partner = mediated::load_for_write(project, partner_id.as_str(), "create")?;
         partners.push(ChangedPartner {
-            item: link_partner(partner, &id, now),
-            path: entry.path,
+            item: link_partner(partner.item, &id, now),
+            path: partner.path,
             fingerprint: None,
         });
     }
