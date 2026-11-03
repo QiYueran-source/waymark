@@ -4,10 +4,12 @@
 //! One command family per module; this module owns everything a family would
 //! otherwise duplicate.
 
+pub mod config;
 pub mod create;
 pub mod edit;
 pub mod init;
 pub mod list;
+pub mod project;
 pub mod relationship;
 pub mod show;
 pub mod status;

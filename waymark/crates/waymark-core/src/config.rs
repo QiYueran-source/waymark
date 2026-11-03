@@ -132,6 +132,44 @@ impl FieldType {
         }
     }
 
+    /// Parse one textual value token into a value of this type.
+    ///
+    /// This is the adapter-facing parser: it accepts the plain spellings a person
+    /// types on a command line (`7`, `true`, `hello`, `["a","b"]`) and rejects a
+    /// token whose shape the declared type cannot hold. The domain re-checks the
+    /// result against the type; this only decides what the text *means*.
+    pub fn parse_value(&self, raw: &str) -> Result<FieldValue, String> {
+        match self {
+            Self::String => Ok(FieldValue::String(raw.to_owned())),
+            Self::Integer => {
+                let digits = raw.strip_prefix('-').unwrap_or(raw);
+                if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+                    return Err(format!("expected a decimal integer, found {raw:?}"));
+                }
+                raw.parse::<i64>()
+                    .map(FieldValue::Integer)
+                    .map_err(|_| format!("{raw:?} is outside the range of a 64-bit integer"))
+            }
+            Self::Boolean => match raw {
+                "true" => Ok(FieldValue::Boolean(true)),
+                "false" => Ok(FieldValue::Boolean(false)),
+                other => Err(format!("expected `true` or `false`, found {other:?}")),
+            },
+            Self::List(element) => {
+                let parsed: serde_json::Value = serde_json::from_str(raw)
+                    .map_err(|error| format!("expected a JSON array, found {raw:?}: {error}"))?;
+                let serde_json::Value::Array(items) = parsed else {
+                    return Err(format!("expected a JSON array, found {raw:?}"));
+                };
+                let mut values = Vec::with_capacity(items.len());
+                for item in items {
+                    values.push(parse_list_element(element, item)?);
+                }
+                Ok(FieldValue::List(values))
+            }
+        }
+    }
+
     /// Whether `value` conforms to this type.
     pub fn accepts(&self, value: &FieldValue) -> bool {
         match (self, value) {
@@ -257,17 +295,44 @@ impl Config {
             WaymarkError::config_invalid(source, issues)
                 .with_location(Location::config_key(CONFIG_FILE))
         };
+        match Self::build(text, root, source) {
+            Ok((config, issues)) => {
+                if issues.is_empty() {
+                    Ok(config)
+                } else {
+                    Err(invalid(issues.iter().map(ConfigIssue::render).collect()))
+                }
+            }
+            Err(error) => Err(invalid(vec![error.message().to_owned()])),
+        }
+    }
+
+    /// Parse `text` into a configuration plus every complaint about it.
+    ///
+    /// A document whose TOML cannot be read at all is the only hard failure: the
+    /// error message is the complaint. Everything else yields a usable-in-memory
+    /// configuration (with a bad value replaced by its fallback) and one issue per
+    /// key, which is what `validate` needs to report locatable findings.
+    fn build(
+        text: &str,
+        root: Option<&Utf8Path>,
+        source: &str,
+    ) -> Result<(Self, Vec<ConfigIssue>), WaymarkError> {
+        let malformed = |reason: String| {
+            WaymarkError::config_invalid(source, vec![reason])
+                .with_location(Location::config_key(CONFIG_FILE))
+        };
 
         let value: toml::Value =
-            toml::from_str(text).map_err(|error| invalid(vec![error.to_string()]))?;
+            toml::from_str(text).map_err(|error| malformed(error.to_string()))?;
         let table = value
             .as_table()
-            .ok_or_else(|| invalid(vec!["the document must be a TOML table".to_owned()]))?;
+            .ok_or_else(|| malformed("the document must be a TOML table".to_owned()))?;
 
-        let mut issues: Vec<Issue> = Vec::new();
+        let mut issues: Vec<ConfigIssue> = Vec::new();
         for key in table.keys() {
             if !KNOWN_TOP_LEVEL.contains(&key.as_str()) {
-                issues.push(Issue::key(
+                issues.push(ConfigIssue::key(
                     key,
                     "unknown configuration key (expected version, storage_root, operator, timezone, categories, fields, cache)",
                 ));
@@ -277,12 +342,12 @@ impl Config {
 
         let raw: RawConfig = value
             .try_into()
-            .map_err(|error: toml::de::Error| invalid(vec![error.to_string()]))?;
+            .map_err(|error: toml::de::Error| malformed(error.message().to_owned()))?;
 
         let version = match Version::parse(&raw.version.0) {
             Ok(version) if version.generation == FORMAT_GENERATION => version,
             Ok(version) => {
-                issues.push(Issue::key(
+                issues.push(ConfigIssue::key(
                     "version",
                     format!(
                         "format generation {} is not readable by this release (generation {FORMAT_GENERATION})",
@@ -292,7 +357,7 @@ impl Config {
                 version
             }
             Err(reason) => {
-                issues.push(Issue::key("version", reason));
+                issues.push(ConfigIssue::key("version", reason));
                 Version::current()
             }
         };
@@ -300,7 +365,7 @@ impl Config {
         let timezone = match parse_timezone(raw.timezone.0.trim()) {
             Ok(zone) => zone,
             Err(_) => {
-                issues.push(Issue::key(
+                issues.push(ConfigIssue::key(
                     "timezone",
                     format!("{:?} is not a known IANA time zone", raw.timezone.0),
                 ));
@@ -310,7 +375,10 @@ impl Config {
 
         let operator = match raw.operator {
             Some(operator) if operator.0.trim().is_empty() => {
-                issues.push(Issue::key("operator", "the operator must not be empty"));
+                issues.push(ConfigIssue::key(
+                    "operator",
+                    "the operator must not be empty",
+                ));
                 None
             }
             Some(operator) => Some(operator.0.trim().to_owned()),
@@ -325,7 +393,7 @@ impl Config {
             let parsed = match CategoryKey::parse(&key) {
                 Ok(parsed) => Some(parsed),
                 Err(error) => {
-                    issues.push(Issue::key(
+                    issues.push(ConfigIssue::key(
                         format!("categories.{key}"),
                         format!("not a valid category key: {error}"),
                     ));
@@ -333,7 +401,7 @@ impl Config {
                 }
             };
             if entry.name.0.trim().is_empty() {
-                issues.push(Issue::key(
+                issues.push(ConfigIssue::key(
                     format!("categories.{key}.name"),
                     "a category display name must not be empty",
                 ));
@@ -359,7 +427,7 @@ impl Config {
         let mut fields: BTreeMap<FieldKey, FieldDecl> = BTreeMap::new();
         for (key, entry) in raw.fields {
             if crate::model::RESERVED_FIELD_NAMES.contains(&key.as_str()) {
-                issues.push(Issue::key(
+                issues.push(ConfigIssue::key(
                     format!("fields.{key}"),
                     "a custom field may not shadow a reserved core or computed name",
                 ));
@@ -367,7 +435,7 @@ impl Config {
             let parsed_key = match FieldKey::parse(&key) {
                 Ok(parsed) => Some(parsed),
                 Err(error) => {
-                    issues.push(Issue::key(
+                    issues.push(ConfigIssue::key(
                         format!("fields.{key}"),
                         format!("not a valid custom-field key: {error}"),
                     ));
@@ -377,14 +445,14 @@ impl Config {
             let ty = match FieldType::parse(&entry.ty.0) {
                 Ok(ty) => ty,
                 Err(reason) => {
-                    issues.push(Issue::key(format!("fields.{key}.type"), reason));
+                    issues.push(ConfigIssue::key(format!("fields.{key}.type"), reason));
                     continue;
                 }
             };
             let default = entry.default.map(|default| default.0);
             if let Some(value) = &default {
                 if !ty.accepts(value) {
-                    issues.push(Issue::key(
+                    issues.push(ConfigIssue::key(
                         format!("fields.{key}.default"),
                         format!("the default is not a {}", ty.as_str()),
                     ));
@@ -404,7 +472,7 @@ impl Config {
 
         let cache = raw.cache.map_or_else(CacheSettings::default, |cache| {
             if cache.capacity == 0 {
-                issues.push(Issue::key(
+                issues.push(ConfigIssue::key(
                     "cache.capacity",
                     "the cache capacity must be greater than zero",
                 ));
@@ -415,19 +483,45 @@ impl Config {
             }
         });
 
-        if !issues.is_empty() {
-            return Err(invalid(issues.iter().map(Issue::render).collect()));
-        }
+        Ok((
+            Self {
+                version,
+                storage_root: raw.storage_root.0.trim().to_owned(),
+                categories,
+                operator,
+                timezone,
+                fields,
+                cache,
+            },
+            issues,
+        ))
+    }
 
-        Ok(Self {
-            version,
-            storage_root: raw.storage_root.0.trim().to_owned(),
-            categories,
-            operator,
-            timezone,
-            fields,
-            cache,
-        })
+    /// Every complaint in this document, addressed by key, including the
+    /// filesystem checks that need `root` (symbolic links in a path).
+    ///
+    /// The returned list is empty exactly when [`Config::load`] would succeed.
+    /// It is the finding-oriented counterpart of the aggregate `CONFIG_INVALID`
+    /// error: one entry per key, so a caller can locate each issue instead of
+    /// parsing one rendered message.
+    pub fn issues_at(&self, root: &Utf8Path) -> Vec<ConfigIssue> {
+        match Self::build(&self.to_toml_string(), Some(root), CONFIG_FILE) {
+            Ok((_, issues)) => issues,
+            Err(error) => vec![ConfigIssue::key("", error.message())],
+        }
+    }
+
+    /// Every complaint about the document at `path`, including the filesystem
+    /// checks. A document that is not readable TOML at all is an error whose
+    /// message is the single complaint.
+    pub fn issues_in_file(path: &Utf8Path) -> Result<Vec<ConfigIssue>, WaymarkError> {
+        let text = std::fs::read_to_string(path)
+            .map_err(|source| WaymarkError::io(path.to_string(), "read", &source))?;
+        let root = path
+            .parent()
+            .and_then(Utf8Path::parent)
+            .map(Utf8Path::to_path_buf);
+        Self::build(&text, root.as_deref(), path.as_str()).map(|(_, issues)| issues)
     }
 
     /// Re-validate a configuration changed in memory, without filesystem checks.
@@ -496,14 +590,17 @@ const KNOWN_CATEGORY_KEYS: &[&str] = &["path", "name"];
 const KNOWN_FIELD_KEYS: &[&str] = &["type", "required", "default"];
 const KNOWN_CACHE_KEYS: &[&str] = &["enabled", "capacity"];
 
-fn report_nested_unknowns(table: &toml::map::Map<String, toml::Value>, issues: &mut Vec<Issue>) {
+fn report_nested_unknowns(
+    table: &toml::map::Map<String, toml::Value>,
+    issues: &mut Vec<ConfigIssue>,
+) {
     if let Some(categories) = table.get("categories").and_then(toml::Value::as_table) {
         for (key, value) in categories {
             for nested in value.as_table().map_or_else(Vec::new, |entry| {
                 entry.keys().cloned().collect::<Vec<String>>()
             }) {
                 if !KNOWN_CATEGORY_KEYS.contains(&nested.as_str()) {
-                    issues.push(Issue::key(
+                    issues.push(ConfigIssue::key(
                         format!("categories.{key}.{nested}"),
                         "unknown category key (expected path, name)",
                     ));
@@ -517,7 +614,7 @@ fn report_nested_unknowns(table: &toml::map::Map<String, toml::Value>, issues: &
                 entry.keys().cloned().collect::<Vec<String>>()
             }) {
                 if !KNOWN_FIELD_KEYS.contains(&nested.as_str()) {
-                    issues.push(Issue::key(
+                    issues.push(ConfigIssue::key(
                         format!("fields.{key}.{nested}"),
                         "unknown field key (expected type, required, default)",
                     ));
@@ -528,7 +625,7 @@ fn report_nested_unknowns(table: &toml::map::Map<String, toml::Value>, issues: &
     if let Some(cache) = table.get("cache").and_then(toml::Value::as_table) {
         for key in cache.keys() {
             if !KNOWN_CACHE_KEYS.contains(&key.as_str()) {
-                issues.push(Issue::key(
+                issues.push(ConfigIssue::key(
                     format!("cache.{key}"),
                     "unknown cache key (expected enabled, capacity)",
                 ));
@@ -537,14 +634,21 @@ fn report_nested_unknowns(table: &toml::map::Map<String, toml::Value>, issues: &
     }
 }
 
-/// One configuration complaint, rendered as `key: reason`.
-#[derive(Debug)]
-struct Issue {
-    key: String,
-    reason: String,
+/// One configuration complaint, addressed by the key it is about.
+///
+/// The renderer flattens it into the `key: reason` line `CONFIG_INVALID`
+/// details carry; the pair is public so `validate` can turn each complaint into
+/// its own `Finding` with a `config_key` location instead of one aggregate
+/// error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigIssue {
+    /// The dotted configuration key, for example `categories.bug.path`.
+    pub key: String,
+    /// Why the value was rejected.
+    pub reason: String,
 }
 
-impl Issue {
+impl ConfigIssue {
     fn key(key: impl Into<String>, reason: impl Into<String>) -> Self {
         Self {
             key: key.into(),
@@ -557,7 +661,13 @@ impl Issue {
         self
     }
 
-    fn render(&self) -> String {
+    /// The location this complaint points at.
+    pub fn location(&self) -> Location {
+        Location::config_key(self.key.clone())
+    }
+
+    /// The `key: reason` line, as `CONFIG_INVALID` details carry it.
+    pub fn render(&self) -> String {
         if self.key.is_empty() {
             self.reason.clone()
         } else {
@@ -566,32 +676,53 @@ impl Issue {
     }
 }
 
+/// Parse one JSON token as a scalar of `element`, for a list default.
+fn parse_list_element(element: &FieldType, value: serde_json::Value) -> Result<FieldValue, String> {
+    match (element, value) {
+        (FieldType::String, serde_json::Value::String(text)) => Ok(FieldValue::String(text)),
+        (FieldType::Integer, serde_json::Value::Number(number)) => number
+            .as_i64()
+            .map(FieldValue::Integer)
+            .ok_or_else(|| format!("{number} is not a whole number")),
+        (FieldType::Boolean, serde_json::Value::Bool(flag)) => Ok(FieldValue::Boolean(flag)),
+        (FieldType::List(_), _) => Err("nested lists are not valid custom-field values".to_owned()),
+        (element, other) => Err(format!(
+            "expected a `{}` element, found {other}",
+            element.as_str()
+        )),
+    }
+}
+
 /// Validate a repository-relative path: no absolute prefix, no `..`, no empty
 /// component, POSIX separators.
-fn validate_relative_path(key: &str, raw: &str) -> Vec<Issue> {
+fn validate_relative_path(key: &str, raw: &str) -> Vec<ConfigIssue> {
     let value = raw.trim();
     let mut issues = Vec::new();
     if value.is_empty() {
-        issues.push(Issue::key(key, "a path is required"));
+        issues.push(ConfigIssue::key(key, "a path is required"));
         return issues;
     }
     if value.starts_with('/') || value.starts_with('\\') || value.contains(":\\") {
-        issues.push(Issue::key(
+        issues.push(ConfigIssue::key(
             key,
             "a path must be repository-relative, not absolute",
         ));
     }
     if value.contains('\\') {
-        issues.push(Issue::key(key, "a path must use POSIX separators"));
+        issues.push(ConfigIssue::key(key, "a path must use POSIX separators"));
     }
     if value.split('/').any(|component| component == "..") {
-        issues.push(Issue::key(
+        issues.push(ConfigIssue::key(
             key,
             "a path must not escape the repository root",
         ));
     }
-    if value != "." && value.split('/').any(str::is_empty) {
-        issues.push(Issue::key(
+    // An absolute path's leading component is empty by construction; reporting
+    // both would describe one mistake twice. The absolute-path issue is the
+    // better description, so the empty-component check only speaks when nothing
+    // else already rejected the path.
+    if issues.is_empty() && value != "." && value.split('/').any(str::is_empty) {
+        issues.push(ConfigIssue::key(
             key,
             "a path must not contain an empty component",
         ));
@@ -600,7 +731,7 @@ fn validate_relative_path(key: &str, raw: &str) -> Vec<Issue> {
 }
 
 /// Refuse a path whose existing components under `root` include a symlink.
-fn check_symlink_free(root: Option<&Utf8Path>, relative: &str) -> Vec<Issue> {
+fn check_symlink_free(root: Option<&Utf8Path>, relative: &str) -> Vec<ConfigIssue> {
     let Some(root) = root else {
         return Vec::new();
     };
@@ -613,7 +744,7 @@ fn check_symlink_free(root: Option<&Utf8Path>, relative: &str) -> Vec<Issue> {
         current = current.join(component);
         if let Ok(metadata) = std::fs::symlink_metadata(&current) {
             if metadata.file_type().is_symlink() {
-                issues.push(Issue::key(
+                issues.push(ConfigIssue::key(
                     relative,
                     format!("a path must not traverse the symbolic link {current}"),
                 ));
@@ -624,13 +755,13 @@ fn check_symlink_free(root: Option<&Utf8Path>, relative: &str) -> Vec<Issue> {
 }
 
 /// Reject two category paths that are equal or where one contains the other.
-fn check_overlaps(categories: &BTreeMap<CategoryKey, Category>) -> Vec<Issue> {
+fn check_overlaps(categories: &BTreeMap<CategoryKey, Category>) -> Vec<ConfigIssue> {
     let mut issues = Vec::new();
     let entries: Vec<(&CategoryKey, &Category)> = categories.iter().collect();
     for (index, (left_key, left)) in entries.iter().enumerate() {
         for (right_key, right) in entries.iter().skip(index + 1) {
             if left.path == right.path {
-                issues.push(Issue::key(
+                issues.push(ConfigIssue::key(
                     format!("categories.{right_key}.path"),
                     format!(
                         "the path {:?} is already used by category {left_key}",
@@ -638,7 +769,7 @@ fn check_overlaps(categories: &BTreeMap<CategoryKey, Category>) -> Vec<Issue> {
                     ),
                 ));
             } else if is_path_prefix(&left.path, &right.path) {
-                issues.push(Issue::key(
+                issues.push(ConfigIssue::key(
                     format!("categories.{right_key}.path"),
                     format!(
                         "the path {:?} overlaps category {left_key} at {:?}",
@@ -646,7 +777,7 @@ fn check_overlaps(categories: &BTreeMap<CategoryKey, Category>) -> Vec<Issue> {
                     ),
                 ));
             } else if is_path_prefix(&right.path, &left.path) {
-                issues.push(Issue::key(
+                issues.push(ConfigIssue::key(
                     format!("categories.{left_key}.path"),
                     format!(
                         "the path {:?} overlaps category {right_key} at {:?}",

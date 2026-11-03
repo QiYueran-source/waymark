@@ -22,10 +22,12 @@ use waymark_core::time::SystemClock;
 
 mod cmd;
 
+use cmd::config::ConfigArgs;
 use cmd::create::CreateArgs;
 use cmd::edit::{BodyArgs, FieldArgs, TitleArgs};
 use cmd::init::InitArgs;
 use cmd::list::ListArgs;
+use cmd::project::ProjectArgs;
 use cmd::relationship::DependencyArgs;
 use cmd::show::ShowArgs;
 use cmd::status::{StatusArgs, TransitionArgs};
@@ -85,6 +87,12 @@ enum Command {
     Ready(ListArgs),
     /// List items waiting on an unfinished or missing dependency.
     Blocked(ListArgs),
+    /// Inspect the project itself.
+    Project(ProjectArgs),
+    /// Read, validate, and change the project configuration.
+    Config(ConfigArgs),
+    /// Validate the whole project.
+    Validate,
 }
 
 fn main() -> ExitCode {
@@ -193,5 +201,8 @@ fn run(cli: Cli) -> Result<(), waymark_core::WaymarkError> {
             let project = cmd::open_project(cli.project.as_deref())?;
             cmd::list::run(&project, &args, cmd::list::Which::Blocked, json)
         }
+        Command::Project(args) => cmd::project::run(args, cli.project.as_deref(), json),
+        Command::Config(args) => cmd::config::run(args, cli.project.as_deref(), &options, json),
+        Command::Validate => cmd::project::run_validate(cli.project.as_deref(), json),
     }
 }
