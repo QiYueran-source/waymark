@@ -322,6 +322,12 @@ code {
 	background: var(--sheet);
 }
 
+/* Programmatic focus lands on these scroll containers; keep the ring inside. */
+.tree-pane:focus-visible,
+.detail:focus-visible {
+	outline-offset: -2px;
+}
+
 .status,
 .empty {
 	color: var(--muted);
@@ -715,13 +721,14 @@ code {
 	border-radius: 0 4px 4px 0;
 }
 
-.failure h2 {
+.failure .failure-title {
 	margin: 0;
 	font-size: 1rem;
 	font-weight: 650;
 	color: var(--alert);
 }
 
+/* The diagnostics sub-heading, not the title: the panel's title sits at h3. */
 .failure h3 {
 	margin: 0.35rem 0 0;
 	color: var(--muted);

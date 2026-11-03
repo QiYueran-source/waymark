@@ -2035,3 +2035,32 @@ document/configuration rewrites (a category-key migration's value rewrites can r
   `partners` and `fingerprints` in `data`, matching the CLI envelope. Null and
   non-scalar values are refused adapter-side. The earlier "recorded core gap"
   section above is now closed by this work.
+
+# Review fixes — Web frontend
+
+- **One failure block, parameterised by where it appears.** `ReadFailure` is the
+  only read-failure presentation, used by both the tree read and the item read.
+  Its heading level (`2` or `3`), test id, title, and closing note are props; the
+  detail panel supplies `level={3}`, `detail-failure`, "Could not load this item",
+  and a note about the panel rather than the tree. Opaque custom-field values are
+  rendered with `api.ts::diagnosticText`, the same helper as diagnostics.
+- **Escape is scoped by focus, not by a second copy of the panel.** The detail
+  panel keeps a window `keydown` listener (it must work from any control inside
+  the panel) but ignores the key unless `document.activeElement` is inside the
+  panel. A key pressed in the tree closes nothing; the tree keeps its own keys.
+  Focus moves into the panel's `<aside tabindex="-1">` on open, and the Explorer
+  restores it to the triggering row button on close (falling back to the tree
+  pane, which is `tabindex="-1"`, if the row is gone). If a read replaces the
+  panel content and drops focus on the body, the panel reclaims it; focus the
+  user has deliberately moved elsewhere is never taken back.
+- **Browser preferences are keyed by a `ProjectId`, not by a string that may be a
+  root or a key.** `projectIdFor(root)` is the single producer, called once in
+  the Explorer after `GET /api/health`; `preferenceKey` and `PreferenceStore`
+  accept only that branded type. The old prefix sniffing is gone, so a raw root
+  can never be mistaken for a namespace.
+- **The combined view is a section, not a fake category.** `tree.ts::sectionsFor`
+  returns `{kind: 'combined', roots}` or `{kind: 'category', category, roots}`;
+  the combined section has no category and no key (so there is no `'*'` sentinel
+  to collide with a real category). `visibleRoots`, `summarize`, and `countNodes`
+  are pure helpers in `tree.ts`, and Explorer calls them; the persistence notice
+  is raised by one `persist()` wrapper around every preference write.

@@ -30,7 +30,8 @@
 		dependenciesVisible: boolean;
 		selectedId: string | null;
 		onToggle: (id: string) => void;
-		onSelect: (id: string) => void;
+		/** Row buttons pass themselves so focus can return to them after closing. */
+		onSelect: (id: string, trigger?: HTMLElement) => void;
 	} = $props();
 
 	const expandedSet = $derived(new Set(expanded));

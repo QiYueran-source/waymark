@@ -25,7 +25,8 @@
 		edges: DependencyEdge[];
 		references: ReferenceNode[];
 		onToggle: (id: string) => void;
-		onSelect: (id: string) => void;
+		/** `trigger` is the row button itself, so focus can return to it on close. */
+		onSelect: (id: string, trigger?: HTMLElement) => void;
 	} = $props();
 
 	const shape = $derived(shapeFor(node.category));
@@ -82,7 +83,7 @@
 					type="button"
 					data-testid={`select-${node.id}`}
 					aria-current={selected ? 'true' : undefined}
-					onclick={() => onSelect(node.id)}
+					onclick={(event) => onSelect(node.id, event.currentTarget)}
 				>
 					{node.title}
 				</button>
