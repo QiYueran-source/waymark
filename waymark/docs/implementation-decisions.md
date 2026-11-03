@@ -319,3 +319,149 @@ though deciding a dependency edge scans the project.
 caller can reuse for paging, which a single document write does not produce; the scan is an
 implementation detail of validation, not an artifact handed back. T9 owns the projection cache and can
 revisit the wording if it starts handing one out.
+
+# T6 — hierarchy, soft links, trees, and the batch engine
+
+### `parent set` replaces, and re-setting the same parent is a true no-op
+
+**Choice:** `set_parent(project, id, parent, options)` always writes the single parent field, so naming
+a different parent replaces the old one. When the loaded document already records the requested parent,
+`ParentOutcome { changed: false, written: false, fingerprint: None }` comes back and **nothing** is
+written — `updated_at` does not move and the bytes stay identical. `clear_parent` behaves the same way
+for an item with no parent.
+
+**Why:** the spec says at most one parent, so "set a second" is a replacement, not an error. And a
+no-op that still bumps `updated_at` would make a replay of the same command show up as a change in `git
+log`, which is exactly what an idempotent agent needs not to happen.
+
+### Parent cycles are rejected at write time, and only diagnosed afterwards
+
+**Choice:** `set_parent` walks the proposed parent chain upward and returns
+`CYCLE_DETECTED {kind: "parent", cycle}` with a closed path that starts and ends at the child.
+`Graph::parent_cycles()` reports every parent loop the graph can see, so a loop created by an external
+edit becomes a finding in `_meta.diagnostics`. Nothing repairs it.
+
+**Why:** a rejected write is cheap to recover from; a loop that reaches disk makes every tree read
+ambiguous. The diagnosis after the fact is for edits made outside Waymark, and repairing them silently
+would rewrite someone's document on a read, which no read may do. The walk is bounded by the item count
+so a pre-existing loop cannot hang the write.
+
+### `parent` is not a dependency and not a lifecycle cascade
+
+**Choice:** a parent edge contributes nothing to readiness, and closing a parent does not close or
+reopen a child. The only derived consequences of `parent` are the `children` column in list rows, the
+hierarchy tree, and `HAS_ACTIVE_CHILDREN` at archive time (T7).
+
+**Why:** the spec separates structure from scheduling: hierarchy describes what an item belongs to,
+dependencies describe what it waits for. Conflating them would make "close the epic" a bulk lifecycle
+operation that nobody asked for and that would be very hard to undo.
+
+### Soft links live in `ops::link`, and both documents change in one batch
+
+**Choice:** `add_soft_link` / `remove_soft_link` write `soft_links` on **both** documents, sorted and
+deduplicated, in one `write::replace_batch` call: prevalidate both, stage both, replace both, roll back
+the first if the second fails. A duplicate link, a self-link, or a cross-kind relationship is
+`INVALID_RELATIONSHIP {relation: "soft_links"}`; a missing target is `ITEM_NOT_FOUND` and an archived
+one `ITEM_ARCHIVED`.
+
+**Why:** a symmetric edge stored on one side only is a lie that depends on which document you read.
+Sorting and deduplicating makes the persisted bytes a function of the set, so two agents that add the
+same pair in either order converge instead of producing a spurious write conflict.
+
+### Removing a soft link tolerates a missing or archived partner
+
+**Choice:** `remove_soft_link` requires that the caller's own document lists the partner. If the
+partner's document is missing or archived, only the surviving side is rewritten
+(`LinkOutcome::other == None`), instead of failing.
+
+**Why:** this is the same asymmetry dependencies use, for the same reason: an archived or deleted
+partner cannot be rewritten, and refusing would leave the dangling half-link only repairable by hand.
+Archived documents stay untouched because archive is a tombstone whose relationship fields are
+historical.
+
+### `write::replace_batch` is the shared all-or-nothing engine, and it does not take the lock
+
+**Choice:** `replace_batch(&[BatchTarget]) -> Result<Vec<BatchApplied>, WaymarkError>` prevalidates
+every target (regular file, fingerprint matches, no path twice), stages every new document as a synced
+temporary beside its destination, then renames them in order. On a replace failure it restores the
+already-replaced documents from bytes captured during prevalidation; if a restore also fails it returns
+`ROLLBACK_FAILED {applied, failed, rollback_failed}` and never reports success. The caller holds the
+project write lock; the engine deliberately does not, because a batch usually needs to validate against
+the project under the same lock.
+
+**Why:** T7's archive has to rewrite several documents (the archived item plus its parent's or
+children's views) with the same promise, and a second implementation would drift. Excluding the lock is
+what lets one operation do validation, batch, and projection refresh inside a single critical section
+instead of three.
+
+### A mid-batch failure rolls back, but a crash between renames is not a transaction
+
+**Choice:** the engine's contract is about *reported* failure. A process crash between two renames can
+leave the earlier documents' new bytes on disk; there is no journal and no recovery pass. The spec's
+`ROLLBACK_FAILED` requirement is satisfied because no successful outcome can hide a partial write.
+
+**Why:** a real multi-file transaction needs a journal, and the spec puts `doctor` (T14) in charge of
+repair rather than asking every write to be crash-atomic. Documenting the boundary keeps a later ticket
+from assuming a guarantee this does not give.
+
+### Tree depth: `None` unlimited, `Some(0)` the start alone, `Some(n)` `n` levels below
+
+**Choice:** `hierarchy_tree(project, root: Option<&str>, depth: Option<usize>)` and
+`dependency_tree(project, id, depth, flat)` both read depth that way. A scoped hierarchy read starts at
+the named root and never walks upward.
+
+**Why:** `--depth 1` means "the children" in the spec's own example, and that only works if the start is
+depth zero. `None` for unlimited keeps "no flag" distinct from "zero".
+
+### Trees keep unresolved references as nodes, never as silence
+
+**Choice:** the hierarchy tree has a separate `unresolved: Vec<UnresolvedItem>` section for active items
+whose recorded parent is missing, archived, or part of a loop; they are not promoted to roots.
+`dependency_tree` renders a missing dependency as a `TreeNode { item: None }` leaf. Both reads attach
+the graph's diagnostics to `_meta`, report `complete`, and write nothing.
+
+**Why:** the spec says invalid or missing parent references must not suppress valid trees and unattached
+items belong in a clearly explained unresolved area rather than being hidden or treated as ordinary
+roots. A `TreeNode` with no item is the one representation that cannot be mistaken for a real item,
+because every renderer must handle the `None` case.
+
+### Siblings are ordered by stable ID, and a repeated node is a leaf
+
+**Choice:** children are sorted by stable ID in both trees, matching the list family's final tie-break.
+The dependency tree is a depth-first spanning tree: the first time an item is reached it is expanded,
+and every later reach is a `repeated: true` leaf. A dependency cycle therefore terminates with a
+repeated leaf instead of looping.
+
+**Why:** the graph is a DAG, not a tree, so *some* rule has to pick which occurrence is expanded; stable
+ID order makes the choice identical on every machine for the same snapshot. Marking the repeat keeps
+the fact that the edge exists visible while bounding the output by item count as well as by depth.
+
+### The flat dependency form is pre-order rows with `depth` and `from`
+
+**Choice:** with `flat`, `DependencyTree::flat` is a pre-order `Vec<DependencyRow>` of
+`{id, item, depth, from, repeated}`; `from` names the row's parent row. The nested tree is still built,
+because it costs nothing extra and the CLI renders either.
+
+**Why:** a row list is the shape a table renderer wants, and `from` is what lets it draw the edges
+without re-deriving them. Keeping both forms out of one walk avoids two traversals that could disagree.
+
+### Tree and relationship proofs are one level deep, and never repair
+
+**Choice:** `hierarchy_tree` and `dependency_tree` are read-only and take no `OpOptions`; they never
+take the store lock. `Graph::from_project` still fails the whole read on an unparseable document, which
+is the list family's existing behaviour.
+
+**Why:** a read that silently drops a broken sibling would render a tree that looks complete and is not,
+which is worse than an explicit `PARSE_ERROR`. Scope-local reads around a broken sibling are the
+projection ticket's rule to make.
+
+### The CLI renders hierarchy and dependency edges with different markers
+
+**Choice:** `waymark tree` indents children with `  - `, `waymark dep tree` marks a dependency with
+`  -> `. Human output always goes to stderr and JSON to stdout; both carry the shared envelope. The
+argument shapes are `parent set <ID> <PARENT_ID>`, `parent clear <ID>`, `link add|remove <ID>
+<OTHER_ID>`, `tree [--root ID] [--depth N]`, and `dep tree <ID> [--depth N] [--flat]`.
+
+**Why:** a dependency tree and a hierarchy tree can contain the same items, and a shared marker would
+make a pasted terminal transcript ambiguous. One envelope keeps every adapter on the same result shape,
+which the spec requires of CLI and MCP alike.

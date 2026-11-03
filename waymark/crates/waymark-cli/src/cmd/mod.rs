@@ -6,10 +6,13 @@
 
 pub mod create;
 pub mod init;
+pub mod link;
 pub mod list;
+pub mod parent;
 pub mod relationship;
 pub mod show;
 pub mod status;
+pub mod tree;
 
 use std::io::Write;
 
