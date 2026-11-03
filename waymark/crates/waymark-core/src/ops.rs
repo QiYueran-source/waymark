@@ -35,6 +35,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::lock::LockWait;
+use crate::store::Fingerprint;
 use crate::time::{Clock, SystemClock};
 
 /// The default lock wait, mirrored here so an adapter can build options without
@@ -52,6 +53,13 @@ pub struct OpOptions {
     pub lock_wait: LockWait,
     /// Validate and compute, but do not write.
     pub dry_run: bool,
+    /// The configuration fingerprint a configuration write expects to find.
+    ///
+    /// `None` keeps the historical behaviour: a configuration write re-reads
+    /// the document under the lock and rebases onto it. Supplying a fingerprint
+    /// turns a concurrent hand edit into `WRITE_CONFLICT` instead. Other write
+    /// families ignore it; they guard their own documents individually.
+    pub expected_config_fingerprint: Option<Fingerprint>,
 }
 
 impl OpOptions {
@@ -63,6 +71,7 @@ impl OpOptions {
             operator: None,
             lock_wait: LockWait::default_policy(),
             dry_run: false,
+            expected_config_fingerprint: None,
         }
     }
 
@@ -90,6 +99,12 @@ impl OpOptions {
         self
     }
 
+    /// Require the on-disk configuration to still have `fingerprint`.
+    pub fn with_expected_config_fingerprint(mut self, fingerprint: Fingerprint) -> Self {
+        self.expected_config_fingerprint = Some(fingerprint);
+        self
+    }
+
     /// The acting identity, remembered on the returned result.
     pub fn operator(&self) -> Option<&str> {
         self.operator.as_deref()
@@ -108,6 +123,10 @@ impl std::fmt::Debug for OpOptions {
             .field("operator", &self.operator)
             .field("lock_wait", &self.lock_wait)
             .field("dry_run", &self.dry_run)
+            .field(
+                "expected_config_fingerprint",
+                &self.expected_config_fingerprint,
+            )
             .finish_non_exhaustive()
     }
 }

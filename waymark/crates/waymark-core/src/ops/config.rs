@@ -25,6 +25,7 @@
 //! `ACTION_REQUIRES_MIGRATION`.
 
 use camino::{Utf8Path, Utf8PathBuf};
+use serde_json::json;
 
 use crate::config::{
     default_category_name, Category, Config, ConfigIssue, FieldDecl, FieldType, Version,
@@ -36,7 +37,7 @@ use crate::location::Location;
 use crate::lock::with_project_lock;
 use crate::model::{CategoryKey, FieldKey, FieldValue};
 use crate::ops::OpOptions;
-use crate::store::Project;
+use crate::store::{Fingerprint, Project};
 use crate::time::parse_timezone;
 
 /// The result of one configuration operation.
@@ -624,7 +625,18 @@ fn mediate_with(
 ) -> Result<ConfigOutcome, WaymarkError> {
     let config_path = project.config_path();
     with_project_lock(project, options.lock_wait, || {
+        // Fingerprint the exact bytes on disk, then parse them: a caller that
+        // supplied an expectation is guarding against a concurrent hand edit,
+        // not against this module's canonical rendering.
+        let raw = std::fs::read(&config_path)
+            .map_err(|source| WaymarkError::io(config_path.to_string(), "read", &source))?;
         let current = Config::load(&config_path)?;
+        if let Some(expected) = &options.expected_config_fingerprint {
+            let actual = Fingerprint::of(&raw);
+            if &actual != expected {
+                return Err(config_conflict(&config_path, expected, &actual));
+            }
+        }
         let previous_revision = current.version.revision;
         let current_bytes = current.to_toml_string();
 
@@ -667,6 +679,28 @@ fn mediate_with(
             changed_keys,
         })
     })
+}
+
+/// The `WRITE_CONFLICT` a stale expected configuration fingerprint produces.
+///
+/// The details mirror the work-item conflict shape: the path and the two
+/// fingerprints. A configuration document has no stable item ID, so there is no
+/// `id` key.
+fn config_conflict(
+    path: &Utf8Path,
+    expected: &Fingerprint,
+    actual: &Fingerprint,
+) -> WaymarkError {
+    WaymarkError::new(
+        Code::WriteConflict,
+        format!("{path} changed on disk since it was read; reread and retry"),
+    )
+    .with_details(json!({
+        "path": path.to_string(),
+        "expected_fingerprint": expected.as_str(),
+        "actual_fingerprint": actual.as_str(),
+    }))
+    .with_location(Location::config_key(CONFIG_FILE))
 }
 
 fn config_invalid_error(path: &Utf8Path, issues: &[ConfigIssue]) -> WaymarkError {

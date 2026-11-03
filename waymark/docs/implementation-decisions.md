@@ -2035,3 +2035,21 @@ document/configuration rewrites (a category-key migration's value rewrites can r
   `partners` and `fingerprints` in `data`, matching the CLI envelope. Null and
   non-scalar values are refused adapter-side. The earlier "recorded core gap"
   section above is now closed by this work.
+
+# Review fixes — core operations
+
+## Configuration write fingerprints
+
+- **The expected fingerprint is optional and lives on `OpOptions`.** Configuration
+  writes already take the shared operation options, so `OpOptions::with_expected_config_fingerprint`
+  adds the conflict token without a parallel options type or a breaking signature.
+  Existing callers pass nothing and keep the historical rebase-onto-disk
+  behaviour.
+- **The fingerprint covers the exact on-disk bytes, not the canonical rendering.**
+  The writer reads the file once inside the lock, fingerprints those raw bytes,
+  then parses them. A caller that read a hand-edited (but still valid) document
+  is not told it changed just because serialization would normalize formatting.
+- **A mismatch is `WRITE_CONFLICT` before anything is validated or written.** The
+  details mirror the work-item shape (`path`, `expected_fingerprint`,
+  `actual_fingerprint`); a configuration document has no stable item ID, so the
+  `id` key is absent. The location is `config_key` at the configuration file.
