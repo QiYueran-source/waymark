@@ -11,7 +11,7 @@ use waymark_core::ops::status::{self, StatusOutcome};
 use waymark_core::ops::OpOptions;
 use waymark_core::{Project, Status};
 
-use super::{emit, err_line, item_json};
+use super::{emit, err_line};
 
 /// Arguments of `waymark status`.
 #[derive(Debug, Args)]
@@ -116,14 +116,15 @@ fn set(
 
 /// The `data` block of a status result.
 fn payload(outcome: &StatusOutcome) -> serde_json::Value {
-    serde_json::json!({
-        "id": outcome.item.id.as_str(),
-        "path": outcome.path.to_string(),
-        "previous_status": outcome.previous.as_str(),
-        "status": outcome.item.status.as_str(),
-        "changed": outcome.changed,
-        "written": outcome.written,
-        "closed_at": outcome.item.closed_at.map(|value| value.to_string()),
-        "item": item_json(&outcome.item, &outcome.path),
-    })
+    super::write_json(
+        &outcome.item,
+        &outcome.path,
+        outcome.changed,
+        outcome.written,
+        serde_json::json!({
+            "previous_status": outcome.previous.as_str(),
+            "status": outcome.item.status.as_str(),
+            "closed_at": outcome.item.closed_at.map(|value| value.to_string()),
+        }),
+    )
 }

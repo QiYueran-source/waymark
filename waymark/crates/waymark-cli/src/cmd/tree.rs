@@ -15,7 +15,8 @@ use waymark_core::ops::tree::{
 use waymark_core::ops::OpOptions;
 use waymark_core::Project;
 
-use super::{emit, err_line, item_fields};
+use super::{emit, err_line};
+use waymark_core::view::{dependency_row_json, tree_node_json};
 
 /// Arguments of `waymark tree`.
 #[derive(Debug, Args)]
@@ -67,7 +68,7 @@ pub fn run(project: &Project, args: &TreeArgs, json: bool) -> Result<(), Waymark
             serde_json::json!({
                 "root": args.root,
                 "depth": args.depth,
-                "roots": tree.roots.iter().map(node_json).collect::<Vec<_>>(),
+                "roots": tree.roots.iter().map(tree_node_json).collect::<Vec<_>>(),
                 "unresolved": tree.unresolved.iter().map(|entry| serde_json::json!({
                     "id": entry.id.as_str(),
                     "parent": entry.parent.as_str(),
@@ -98,8 +99,8 @@ pub fn run_dep(
                         "id": args.id,
                         "depth": args.depth,
                         "flat": args.flat,
-                        "tree": node_json(&tree.root),
-                        "rows": tree.flat.iter().map(row_json).collect::<Vec<_>>(),
+                        "tree": tree_node_json(&tree.root),
+                        "rows": tree.flat.iter().map(dependency_row_json).collect::<Vec<_>>(),
                     }),
                     tree.meta.clone(),
                 ))?;
@@ -193,33 +194,4 @@ fn render_findings(findings: &[waymark_core::envelope::Finding]) {
     for finding in findings {
         err_line(&format!("  {}: {}", finding.code, finding.message));
     }
-}
-
-/// The nested machine form of one node.
-fn node_json(node: &TreeNode) -> serde_json::Value {
-    serde_json::json!({
-        "id": node.id.as_str(),
-        "depth": node.depth,
-        "repeated": node.repeated,
-        "resolved": node.item.is_some(),
-        "item": node.item.as_ref().map(|item| {
-            let mut fields = item_fields(item);
-            if let Some(map) = fields.as_object_mut() {
-                map.remove("body");
-            }
-            fields
-        }),
-        "children": node.children.iter().map(node_json).collect::<Vec<_>>(),
-    })
-}
-
-/// The machine form of one flat row.
-fn row_json(row: &DependencyRow) -> serde_json::Value {
-    serde_json::json!({
-        "id": row.id.as_str(),
-        "depth": row.depth,
-        "from": row.from.as_ref().map(|id| id.as_str()),
-        "repeated": row.repeated,
-        "resolved": row.item.is_some(),
-    })
 }

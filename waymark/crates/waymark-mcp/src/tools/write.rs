@@ -30,7 +30,7 @@ use waymark_core::ops::{archive, create, link, owner, parent, r#move, relationsh
 use crate::envelope::{self, ToolResult};
 use crate::server::WaymarkServer;
 use crate::tools::params;
-use crate::tools::read::{item_fields, item_json};
+use waymark_core::view::{item_fields, item_json};
 
 /// Inputs of `waymark_create_work_item`.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -548,16 +548,32 @@ pub struct SetStatusArgs {
     pub dry_run: bool,
 }
 
+/// Render one mediated write: the shared core fields plus this operation's own.
+fn write_data(
+    item: &waymark_core::WorkItem,
+    path: &camino::Utf8Path,
+    changed: bool,
+    written: bool,
+    extra: Value,
+) -> Value {
+    waymark_core::view::write_result_json_with(
+        item,
+        path,
+        changed,
+        written,
+        extra.as_object().cloned().unwrap_or_default(),
+    )
+}
+
 /// One title or body edit as a successful tool result.
 fn edit_result(outcome: &EditOutcome) -> ToolResult {
     envelope::success(
-        json!({
-            "id": outcome.item.id.as_str(),
-            "path": outcome.path.to_string(),
-            "changed": outcome.changed,
-            "written": outcome.written,
-            "item": item_json(&outcome.item, &outcome.path),
-        }),
+        waymark_core::view::write_result_json(
+            &outcome.item,
+            &outcome.path,
+            outcome.changed,
+            outcome.written,
+        ),
         outcome.meta.clone(),
     )
 }
@@ -615,14 +631,13 @@ fn fields_result(outcome: &FieldOutcome) -> ToolResult {
         .map(FieldKey::as_str)
         .collect();
     envelope::success(
-        json!({
-            "id": outcome.item.id.as_str(),
-            "path": outcome.path.to_string(),
-            "changed": outcome.changed,
-            "written": outcome.written,
-            "changed_fields": changed_fields,
-            "item": item_json(&outcome.item, &outcome.path),
-        }),
+        write_data(
+            &outcome.item,
+            &outcome.path,
+            outcome.changed,
+            outcome.written,
+            json!({"changed_fields": changed_fields}),
+        ),
         outcome.meta.clone(),
     )
 }
@@ -630,16 +645,17 @@ fn fields_result(outcome: &FieldOutcome) -> ToolResult {
 /// One status transition as a successful tool result.
 fn status_result(outcome: &status::StatusOutcome) -> ToolResult {
     envelope::success(
-        json!({
-            "id": outcome.item.id.as_str(),
-            "path": outcome.path.to_string(),
-            "previous_status": outcome.previous.as_str(),
-            "status": outcome.item.status.as_str(),
-            "changed": outcome.changed,
-            "written": outcome.written,
-            "closed_at": outcome.item.closed_at.map(|value| value.to_string()),
-            "item": item_json(&outcome.item, &outcome.path),
-        }),
+        write_data(
+            &outcome.item,
+            &outcome.path,
+            outcome.changed,
+            outcome.written,
+            json!({
+                "previous_status": outcome.previous.as_str(),
+                "status": outcome.item.status.as_str(),
+                "closed_at": outcome.item.closed_at.map(|value| value.to_string()),
+            }),
+        ),
         outcome.meta.clone(),
     )
 }
@@ -759,15 +775,16 @@ enum LinkVerb {
 /// One owner transfer as a successful tool result.
 fn owner_result(outcome: &owner::OwnerOutcome) -> ToolResult {
     envelope::success(
-        json!({
-            "id": outcome.item.id.as_str(),
-            "path": outcome.path.to_string(),
-            "previous_owner": outcome.previous_owner,
-            "owner": outcome.item.owner,
-            "changed": outcome.changed,
-            "written": outcome.written,
-            "item": item_json(&outcome.item, &outcome.path),
-        }),
+        write_data(
+            &outcome.item,
+            &outcome.path,
+            outcome.changed,
+            outcome.written,
+            json!({
+                "previous_owner": outcome.previous_owner,
+                "owner": outcome.item.owner,
+            }),
+        ),
         outcome.meta.clone(),
     )
 }
@@ -775,16 +792,17 @@ fn owner_result(outcome: &owner::OwnerOutcome) -> ToolResult {
 /// One category move as a successful tool result.
 fn move_result(outcome: &r#move::MoveOutcome) -> ToolResult {
     envelope::success(
-        json!({
-            "id": outcome.item.id.as_str(),
-            "path": outcome.path.to_string(),
-            "previous_path": outcome.previous_path.to_string(),
-            "previous_category": outcome.previous_category.as_str(),
-            "category": outcome.item.category.as_str(),
-            "changed": outcome.changed,
-            "written": outcome.written,
-            "item": item_json(&outcome.item, &outcome.path),
-        }),
+        write_data(
+            &outcome.item,
+            &outcome.path,
+            outcome.changed,
+            outcome.written,
+            json!({
+                "previous_path": outcome.previous_path.to_string(),
+                "previous_category": outcome.previous_category.as_str(),
+                "category": outcome.item.category.as_str(),
+            }),
+        ),
         outcome.meta.clone(),
     )
 }
@@ -792,19 +810,20 @@ fn move_result(outcome: &r#move::MoveOutcome) -> ToolResult {
 /// One parent change as a successful tool result.
 fn parent_result(outcome: &parent::ParentOutcome, verb: ParentVerb) -> ToolResult {
     envelope::success(
-        json!({
-            "id": outcome.item.id.as_str(),
-            "path": outcome.path.to_string(),
-            "verb": match verb {
-                ParentVerb::Set => "set",
-                ParentVerb::Clear => "clear",
-            },
-            "parent": outcome.parent.as_ref().map(|id| id.as_str()),
-            "previous_parent": outcome.previous_parent.as_ref().map(|id| id.as_str()),
-            "changed": outcome.changed,
-            "written": outcome.written,
-            "item": item_json(&outcome.item, &outcome.path),
-        }),
+        write_data(
+            &outcome.item,
+            &outcome.path,
+            outcome.changed,
+            outcome.written,
+            json!({
+                "verb": match verb {
+                    ParentVerb::Set => "set",
+                    ParentVerb::Clear => "clear",
+                },
+                "parent": outcome.parent.as_ref().map(|id| id.as_str()),
+                "previous_parent": outcome.previous_parent.as_ref().map(|id| id.as_str()),
+            }),
+        ),
         outcome.meta.clone(),
     )
 }
@@ -812,15 +831,16 @@ fn parent_result(outcome: &parent::ParentOutcome, verb: ParentVerb) -> ToolResul
 /// One dependency change as a successful tool result.
 fn dependency_result(outcome: &relationship::RelationshipOutcome) -> ToolResult {
     envelope::success(
-        json!({
-            "id": outcome.item.id.as_str(),
-            "path": outcome.path.to_string(),
-            "dependency": outcome.dependency.as_str(),
-            "dependencies": outcome.item.dependencies.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-            "changed": outcome.changed,
-            "written": outcome.written,
-            "item": item_json(&outcome.item, &outcome.path),
-        }),
+        write_data(
+            &outcome.item,
+            &outcome.path,
+            outcome.changed,
+            outcome.written,
+            json!({
+                "dependency": outcome.dependency.as_str(),
+                "dependencies": outcome.item.dependencies.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
+            }),
+        ),
         outcome.meta.clone(),
     )
 }
@@ -828,22 +848,23 @@ fn dependency_result(outcome: &relationship::RelationshipOutcome) -> ToolResult 
 /// One soft-link change as a successful tool result.
 fn link_result(outcome: &link::LinkOutcome, verb: LinkVerb) -> ToolResult {
     envelope::success(
-        json!({
-            "id": outcome.item.id.as_str(),
-            "path": outcome.path.to_string(),
-            "other": outcome.other_id.as_str(),
-            "other_path": outcome.other_path.as_ref().map(|path| path.to_string()),
-            "verb": match verb {
-                LinkVerb::Add => "add",
-                LinkVerb::Remove => "remove",
-            },
-            "soft_links": outcome.item.soft_links.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-            "changed": outcome.changed,
-            "written": outcome.written,
-            "fingerprints": outcome.fingerprints.iter().map(|fingerprint| fingerprint.as_str()).collect::<Vec<_>>(),
-            "item": item_json(&outcome.item, &outcome.path),
-            "other_item": outcome.other.as_ref().zip(outcome.other_path.as_ref()).map(|(item, path)| item_json(item, path)),
-        }),
+        write_data(
+            &outcome.item,
+            &outcome.path,
+            outcome.changed,
+            outcome.written,
+            json!({
+                "other": outcome.other_id.as_str(),
+                "other_path": outcome.other_path.as_ref().map(|path| path.to_string()),
+                "verb": match verb {
+                    LinkVerb::Add => "add",
+                    LinkVerb::Remove => "remove",
+                },
+                "soft_links": outcome.item.soft_links.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
+                "fingerprints": outcome.fingerprints.iter().map(|fingerprint| fingerprint.as_str()).collect::<Vec<_>>(),
+                "other_item": outcome.other.as_ref().zip(outcome.other_path.as_ref()).map(|(item, path)| item_json(item, path)),
+            }),
+        ),
         outcome.meta.clone(),
     )
 }

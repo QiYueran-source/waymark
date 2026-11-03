@@ -11,7 +11,7 @@ use waymark_core::ops::relationship::{self, RelationshipOutcome};
 use waymark_core::ops::OpOptions;
 use waymark_core::Project;
 
-use super::{emit, err_line, item_json};
+use super::{emit, err_line};
 
 /// Arguments of `waymark dependency`.
 #[derive(Debug, Args)]
@@ -116,13 +116,14 @@ fn apply(
 
 /// The `data` block of a relationship result.
 fn payload(outcome: &RelationshipOutcome) -> serde_json::Value {
-    serde_json::json!({
-        "id": outcome.item.id.as_str(),
-        "path": outcome.path.to_string(),
-        "dependency": outcome.dependency.as_str(),
-        "dependencies": outcome.item.dependencies.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-        "changed": outcome.changed,
-        "written": outcome.written,
-        "item": item_json(&outcome.item, &outcome.path),
-    })
+    super::write_json(
+        &outcome.item,
+        &outcome.path,
+        outcome.changed,
+        outcome.written,
+        serde_json::json!({
+            "dependency": outcome.dependency.as_str(),
+            "dependencies": outcome.item.dependencies.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
+        }),
+    )
 }

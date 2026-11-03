@@ -11,7 +11,7 @@ use waymark_core::ops::parent::{self, ParentOutcome};
 use waymark_core::ops::OpOptions;
 use waymark_core::Project;
 
-use super::{emit, err_line, item_json};
+use super::{emit, err_line};
 
 /// Arguments of `waymark parent`.
 #[derive(Debug, Args)]
@@ -135,17 +135,18 @@ fn report(
 
 /// The `data` block of a parent result.
 fn payload(outcome: &ParentOutcome, verb: Verb) -> serde_json::Value {
-    serde_json::json!({
-        "id": outcome.item.id.as_str(),
-        "path": outcome.path.to_string(),
-        "verb": match verb {
-            Verb::Set => "set",
-            Verb::Clear => "clear",
-        },
-        "parent": outcome.parent.as_ref().map(|id| id.as_str()),
-        "previous_parent": outcome.previous_parent.as_ref().map(|id| id.as_str()),
-        "changed": outcome.changed,
-        "written": outcome.written,
-        "item": item_json(&outcome.item, &outcome.path),
-    })
+    super::write_json(
+        &outcome.item,
+        &outcome.path,
+        outcome.changed,
+        outcome.written,
+        serde_json::json!({
+            "verb": match verb {
+                Verb::Set => "set",
+                Verb::Clear => "clear",
+            },
+            "parent": outcome.parent.as_ref().map(|id| id.as_str()),
+            "previous_parent": outcome.previous_parent.as_ref().map(|id| id.as_str()),
+        }),
+    )
 }

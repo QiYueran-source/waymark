@@ -12,7 +12,7 @@ use waymark_core::ops::r#move::{self, MoveOutcome};
 use waymark_core::ops::OpOptions;
 use waymark_core::{CategoryKey, Project};
 
-use super::{emit, err_line, item_json};
+use super::{emit, err_line};
 
 /// Arguments of `waymark move`.
 #[derive(Debug, Args)]
@@ -80,14 +80,15 @@ pub fn run(
 
 /// The `data` block of a move result.
 fn payload(outcome: &MoveOutcome) -> serde_json::Value {
-    serde_json::json!({
-        "id": outcome.item.id.as_str(),
-        "path": outcome.path.to_string(),
-        "previous_path": outcome.previous_path.to_string(),
-        "previous_category": outcome.previous_category.as_str(),
-        "category": outcome.item.category.as_str(),
-        "changed": outcome.changed,
-        "written": outcome.written,
-        "item": item_json(&outcome.item, &outcome.path),
-    })
+    super::write_json(
+        &outcome.item,
+        &outcome.path,
+        outcome.changed,
+        outcome.written,
+        serde_json::json!({
+            "previous_path": outcome.previous_path.to_string(),
+            "previous_category": outcome.previous_category.as_str(),
+            "category": outcome.item.category.as_str(),
+        }),
+    )
 }

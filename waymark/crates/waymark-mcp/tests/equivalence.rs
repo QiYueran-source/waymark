@@ -648,3 +648,65 @@ async fn migrations_match_the_cli() {
     );
     client.shutdown().await;
 }
+
+/// The read renderers are the shared `waymark_core::view` ones, so both
+/// adapters must publish the same `data` block for the same project.
+#[tokio::test]
+async fn read_renderings_match_the_cli() {
+    let fixture = common::fixture(&["one", "two"]);
+    let id = fixture.ids[0].clone();
+    let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    async fn mcp_data(
+        client: &common::Client,
+        tool: &str,
+        arguments: serde_json::Value,
+    ) -> serde_json::Value {
+        let result = client.call(tool, arguments).await;
+        common::envelope(&result)["data"].clone()
+    }
+
+    let cases = [
+        (
+            "waymark_get_work_item",
+            json!({"id": id}),
+            vec!["show", id.as_str()],
+        ),
+        (
+            "waymark_list_work_items",
+            json!({"limit": 100}),
+            vec!["list", "--limit", "100"],
+        ),
+        ("waymark_config_read", json!({}), vec!["config", "show"]),
+        ("waymark_get_tree", json!({}), vec!["tree"]),
+        (
+            "waymark_get_dependency_tree",
+            json!({"id": id}),
+            vec!["dep", "tree", id.as_str()],
+        ),
+        (
+            "waymark_search_work_items",
+            json!({"text": "one", "limit": 100}),
+            vec!["search", "one", "--limit", "100"],
+        ),
+    ];
+    for (tool, arguments, cli_args) in cases {
+        let mcp = mcp_data(&client, tool, arguments).await;
+        let cli = common::cli_json(&cli_root, &cli_args);
+        // The two projects live at different paths; nothing else may differ.
+        let normalize = |value: &serde_json::Value, root: &camino::Utf8Path| {
+            value
+                .to_string()
+                .replace(root.as_str(), "<root>")
+                .replace(&format!("{}/", root), "<root>/")
+        };
+        assert_eq!(
+            normalize(&mcp, &fixture.root),
+            normalize(&cli["data"], &cli_root),
+            "{tool} differs from `waymark {cli_args:?}`"
+        );
+    }
+
+    client.shutdown().await;
+}

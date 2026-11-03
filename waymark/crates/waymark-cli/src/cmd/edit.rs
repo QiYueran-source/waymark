@@ -44,7 +44,7 @@ use waymark_core::ops::edit::{self, EditOutcome, FieldChange, FieldChangeEntry, 
 use waymark_core::ops::OpOptions;
 use waymark_core::{FieldValue, Project};
 
-use super::{emit, err_line, item_json};
+use super::{emit, err_line};
 
 /// Arguments of `waymark title`.
 #[derive(Debug, Args)]
@@ -400,14 +400,13 @@ fn render_edit(
     describe: fn(&EditOutcome) -> String,
 ) -> Result<(), WaymarkError> {
     if json {
-        emit(&success_envelope(
-            serde_json::json!({
-                "id": outcome.item.id.as_str(),
-                "path": outcome.path.to_string(),
-                "changed": outcome.changed,
-                "written": outcome.written,
-                "item": item_json(&outcome.item, &outcome.path),
-            }),
+        super::emit(&success_envelope(
+            waymark_core::view::write_result_json(
+                &outcome.item,
+                &outcome.path,
+                outcome.changed,
+                outcome.written,
+            ),
             outcome.meta.clone(),
         ))?;
         return Ok(());
@@ -438,14 +437,13 @@ fn render_fields(outcome: &FieldOutcome, json: bool) -> Result<(), WaymarkError>
         .collect();
     if json {
         emit(&success_envelope(
-            serde_json::json!({
-                "id": outcome.item.id.as_str(),
-                "path": outcome.path.to_string(),
-                "changed": outcome.changed,
-                "written": outcome.written,
-                "changed_fields": changed_fields,
-                "item": item_json(&outcome.item, &outcome.path),
-            }),
+            super::write_json(
+                &outcome.item,
+                &outcome.path,
+                outcome.changed,
+                outcome.written,
+                serde_json::json!({"changed_fields": changed_fields}),
+            ),
             outcome.meta.clone(),
         ))?;
         return Ok(());

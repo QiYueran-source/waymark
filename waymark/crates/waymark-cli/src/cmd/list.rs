@@ -14,14 +14,13 @@
 //! work.
 
 use clap::Args;
-use serde_json::Value;
 use waymark_core::envelope::success_envelope;
 use waymark_core::error::{ValidationIssue, WaymarkError};
 use waymark_core::ops::list::{self, Listing};
 use waymark_core::ops::status::parse_status;
 use waymark_core::query::{
-    projected_row, ArchiveRange, FieldKey, FieldOp, FieldPredicate, Filters, Projection, Query,
-    Sort, SortField, Window,
+    ArchiveRange, FieldKey, FieldOp, FieldPredicate, Filters, Projection, Query, Sort, SortField,
+    Window,
 };
 use waymark_core::{CategoryKey, FieldValue, Project, WorkItemId};
 
@@ -417,24 +416,8 @@ pub fn run_with_query(
 pub fn render(listing: &Listing, args: &ListArgs, json: bool) -> Result<(), WaymarkError> {
     let projection = args.projection()?;
     if json {
-        let rows: Vec<Value> = listing
-            .items
-            .iter()
-            .map(|row| projected_row(row, &projection))
-            .collect();
         emit(&success_envelope(
-            serde_json::json!({
-                "items": rows,
-                "count": listing.len(),
-                "total": listing.total,
-                "offset": listing.offset,
-                "limit": listing.limit,
-                "archive": args.archive_range().ok().map(|range| range.as_str()),
-                "fields": projection.fields.as_ref().map(|fields| {
-                    fields.iter().map(|field| field.as_str()).collect::<Vec<_>>()
-                }),
-                "compact": projection.compact,
-            }),
+            waymark_core::view::listing_json(listing, &projection, args.archive_range()?),
             listing.meta.clone(),
         ))?;
         return Ok(());

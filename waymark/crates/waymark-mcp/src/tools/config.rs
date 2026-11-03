@@ -12,7 +12,7 @@ use rmcp::tool;
 use rmcp::tool_router;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::json;
 use waymark_core::envelope::Meta;
 use waymark_core::error::{Code, WaymarkError};
 use waymark_core::ops::config::{self, ConfigOutcome, FieldAttribute, Scalar};
@@ -140,7 +140,7 @@ impl WaymarkServer {
             let project = self.project()?;
             let config = config::show(&project)?;
             Ok(envelope::success(
-                json!({"config": config_json(&config)}),
+                json!({"config": waymark_core::view::config_json(&config)}),
                 Meta::direct_file_scoped(),
             ))
         })
@@ -359,7 +359,7 @@ impl WaymarkServer {
 fn config_result(outcome: &ConfigOutcome) -> ToolResult {
     envelope::success(
         json!({
-            "config": config_json(&outcome.config),
+            "config": waymark_core::view::config_json(&outcome.config),
             "changed": outcome.changed,
             "changed_keys": outcome.changed_keys,
             "previous_revision": outcome.previous_revision,
@@ -399,46 +399,4 @@ fn diagnose(start: &Utf8Path) -> Result<Report, WaymarkError> {
         }
         Err(error) => Err(error),
     }
-}
-
-/// The machine form of one configuration document.
-fn config_json(config: &Config) -> Value {
-    json!({
-        "version": config.version.to_string(),
-        "generation": config.version.generation,
-        "revision": config.version.revision,
-        "storage_root": config.storage_root,
-        "operator": config.operator,
-        "timezone": config.timezone.name(),
-        "categories": config
-            .categories
-            .iter()
-            .map(|(key, category)| {
-                (
-                    key.as_str().to_owned(),
-                    json!({
-                        "key": key.as_str(),
-                        "path": category.path,
-                        "name": category.name,
-                    }),
-                )
-            })
-            .collect::<serde_json::Map<String, Value>>(),
-        "fields": config
-            .fields
-            .iter()
-            .map(|(key, declaration)| {
-                (
-                    key.as_str().to_owned(),
-                    json!({
-                        "key": key.as_str(),
-                        "type": declaration.ty.as_str(),
-                        "required": declaration.required,
-                        "default": declaration.default,
-                    }),
-                )
-            })
-            .collect::<serde_json::Map<String, Value>>(),
-        "cache": {"enabled": config.cache.enabled, "capacity": config.cache.capacity},
-    })
 }

@@ -130,40 +130,25 @@ pub fn lock_wait(milliseconds: Option<u64>) -> LockWait {
     }
 }
 
-/// The machine form of one item: the persisted fields, no prose.
-pub fn item_json(item: &WorkItem, path: &camino::Utf8Path) -> Value {
-    let mut value = item_fields(item);
-    if let Some(map) = value.as_object_mut() {
-        map.insert("path".to_owned(), serde_json::json!(path.to_string()));
-    }
-    value
-}
-
-/// The persisted fields of one item, without the file it happens to live in.
+/// Render one mediated write: the shared core fields plus this operation's own.
 ///
-/// `show` names the document; a page of many items does not, because the path is
-/// a fact about one file and a listing is not about files.
-pub fn item_fields(item: &WorkItem) -> Value {
-    serde_json::json!({
-        "schema": item.schema,
-        "needs_migration": item.needs_migration(),
-        "id": item.id.as_str(),
-        "title": item.title,
-        "category": item.category.as_str(),
-        "status": item.status.as_str(),
-        "owner": item.owner,
-        "creator": item.creator,
-        "created_at": item.created_at.to_string(),
-        "updated_at": item.updated_at.to_string(),
-        "closed_at": item.closed_at.map(|value| value.to_string()),
-        "parent": item.parent.as_ref().map(|id| id.as_str().to_owned()),
-        "dependencies": item.dependencies.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-        "soft_links": item.soft_links.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-        "custom_fields": item.custom_fields,
-        "archived_at": item.archived_at.map(|value| value.to_string()),
-        "archive_reason": item.archive_reason,
-        "body": item.body,
-    })
+/// `id`, `path`, `changed`, `written`, and `item` come from
+/// [`waymark_core::view::write_result_json_with`]; `extra` is only what this
+/// operation owns.
+pub fn write_json(
+    item: &WorkItem,
+    path: &camino::Utf8Path,
+    changed: bool,
+    written: bool,
+    extra: Value,
+) -> Value {
+    waymark_core::view::write_result_json_with(
+        item,
+        path,
+        changed,
+        written,
+        extra.as_object().cloned().unwrap_or_default(),
+    )
 }
 
 /// Render a custom field for human output.

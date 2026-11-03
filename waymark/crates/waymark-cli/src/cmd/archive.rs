@@ -96,7 +96,7 @@ fn payload(outcome: &ArchiveOutcome) -> serde_json::Value {
                 "path": item.path.to_string(),
             }))
             .collect::<Vec<_>>(),
-        "item": super::item_fields(&outcome.item),
+        "item": waymark_core::view::item_fields(&outcome.item),
     })
 }
 

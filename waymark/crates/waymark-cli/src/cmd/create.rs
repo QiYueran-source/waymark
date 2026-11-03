@@ -19,7 +19,8 @@ use waymark_core::ops::{create, OpOptions};
 use waymark_core::Project;
 
 use super::edit::parse_field_value;
-use super::{emit, err_line, item_json};
+use super::{emit, err_line};
+use waymark_core::view::item_json;
 
 /// Arguments of `waymark create`.
 #[derive(Debug, Args)]

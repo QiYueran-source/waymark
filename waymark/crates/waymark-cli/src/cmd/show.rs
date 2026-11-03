@@ -6,7 +6,7 @@ use waymark_core::error::WaymarkError;
 use waymark_core::ops::read;
 use waymark_core::Project;
 
-use super::{emit, err_line, item_json, render_field_value};
+use super::{emit, err_line, render_field_value};
 
 /// Arguments of `waymark show`.
 #[derive(Debug, Args)]
@@ -28,39 +28,7 @@ pub fn run(project: &Project, args: &ShowArgs, json: bool) -> Result<(), Waymark
 
     if json {
         emit(&success_envelope(
-            serde_json::json!({
-                "id": read.item.id.as_str(),
-                "path": read.path.to_string(),
-                "category": read.category.as_str(),
-                "fingerprint": read.fingerprint.as_str(),
-                "item": item_json(&read.item, &read.path),
-                "needs_migration": read.item.needs_migration(),
-                "archived": read.item.is_archived(),
-                "relationships": {
-                    // An archived item's own edges are history: they no longer
-                    // participate in the active graph, so the payload says so
-                    // rather than letting a reader mistake them for live ones.
-                    "historical": read.item.is_archived(),
-                    "parent": read.item.parent.as_ref().map(|id| id.as_str().to_owned()),
-                    "dependencies": read.item.dependencies.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-                    "soft_links": read.item.soft_links.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-                    "children": read.children.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-                    "dependents": read.dependents.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-                },
-                "ready": read.readiness.as_ref().map(|readiness| readiness.ready),
-                "blocked": read.readiness.as_ref().map(|readiness| readiness.blocked),
-                "blocked_by": read
-                    .readiness
-                    .as_ref()
-                    .map(|readiness| {
-                        readiness
-                            .blocked_by
-                            .iter()
-                            .map(|id| id.as_str())
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default(),
-            }),
+            waymark_core::view::read_json(&read),
             read.meta,
         ))?;
     } else if args.raw {

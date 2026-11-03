@@ -11,7 +11,8 @@ use waymark_core::ops::link::{self, LinkOutcome};
 use waymark_core::ops::OpOptions;
 use waymark_core::Project;
 
-use super::{emit, err_line, item_json};
+use super::{emit, err_line};
+use waymark_core::view::item_json;
 
 /// Arguments of `waymark link`.
 #[derive(Debug, Args)]
@@ -113,20 +114,21 @@ fn apply(
 
 /// The `data` block of a link result.
 fn payload(outcome: &LinkOutcome, verb: Verb) -> serde_json::Value {
-    serde_json::json!({
-        "id": outcome.item.id.as_str(),
-        "path": outcome.path.to_string(),
-        "other": outcome.other_id.as_str(),
-        "other_path": outcome.other_path.as_ref().map(|path| path.to_string()),
-        "verb": match verb {
-            Verb::Add => "add",
-            Verb::Remove => "remove",
-        },
-        "soft_links": outcome.item.soft_links.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-        "changed": outcome.changed,
-        "written": outcome.written,
-        "fingerprints": outcome.fingerprints.iter().map(|f| f.as_str()).collect::<Vec<_>>(),
-        "item": item_json(&outcome.item, &outcome.path),
-        "other_item": outcome.other.as_ref().zip(outcome.other_path.as_ref()).map(|(item, path)| item_json(item, path)),
-    })
+    super::write_json(
+        &outcome.item,
+        &outcome.path,
+        outcome.changed,
+        outcome.written,
+        serde_json::json!({
+            "other": outcome.other_id.as_str(),
+            "other_path": outcome.other_path.as_ref().map(|path| path.to_string()),
+            "verb": match verb {
+                Verb::Add => "add",
+                Verb::Remove => "remove",
+            },
+            "soft_links": outcome.item.soft_links.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
+            "fingerprints": outcome.fingerprints.iter().map(|f| f.as_str()).collect::<Vec<_>>(),
+            "other_item": outcome.other.as_ref().zip(outcome.other_path.as_ref()).map(|(item, path)| item_json(item, path)),
+        }),
+    )
 }
