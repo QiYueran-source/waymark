@@ -36,6 +36,12 @@ pub struct MigrateVersionArgs {
     /// without writing.
     #[serde(default)]
     pub dry_run: bool,
+
+    /// Wait at most this many milliseconds for the project write lock.
+    /// Omitted uses the shared default wait; `0` fails immediately with the
+    /// retryable `LOCK_TIMEOUT` code.
+    #[serde(default)]
+    pub lock_timeout_ms: Option<u64>,
 }
 
 /// Inputs of `waymark_migrate_schema`.
@@ -48,6 +54,12 @@ pub struct MigrateSchemaArgs {
     /// without writing.
     #[serde(default)]
     pub dry_run: bool,
+
+    /// Wait at most this many milliseconds for the project write lock.
+    /// Omitted uses the shared default wait; `0` fails immediately with the
+    /// retryable `LOCK_TIMEOUT` code.
+    #[serde(default)]
+    pub lock_timeout_ms: Option<u64>,
 }
 
 /// The single action a schema migration may take.
@@ -91,6 +103,12 @@ pub struct MigrateStorageArgs {
     /// without writing.
     #[serde(default)]
     pub dry_run: bool,
+
+    /// Wait at most this many milliseconds for the project write lock.
+    /// Omitted uses the shared default wait; `0` fails immediately with the
+    /// retryable `LOCK_TIMEOUT` code.
+    #[serde(default)]
+    pub lock_timeout_ms: Option<u64>,
 }
 
 /// The single action a storage migration may take.
@@ -129,6 +147,9 @@ impl WaymarkServer {
     /// writes. Returns every affected item, the per-target outcomes, and the
     /// configuration revision move. `dry_run` checks everything and writes
     /// nothing.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_migrate_version",
         annotations(
@@ -146,7 +167,7 @@ impl WaymarkServer {
             let report = migrate::migrate_version(
                 &project,
                 args.target_generation,
-                &params::options(args.dry_run),
+                &params::options(args.dry_run, args.lock_timeout_ms),
             )?;
             Ok(migration_result(&report))
         })
@@ -156,6 +177,9 @@ impl WaymarkServer {
     /// default. Exactly one action per call. Returns the affected files and
     /// count, the per-target outcomes, and the configuration revision move.
     /// `dry_run` checks everything and writes nothing.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_migrate_schema",
         annotations(
@@ -171,7 +195,11 @@ impl WaymarkServer {
         envelope::respond(|| {
             let action = schema_action(&args.action)?;
             let project = self.project()?;
-            let report = migrate::migrate_schema(&project, action, &params::options(args.dry_run))?;
+            let report = migrate::migrate_schema(
+                &project,
+                action,
+                &params::options(args.dry_run, args.lock_timeout_ms),
+            )?;
             Ok(migration_result(&report))
         })
     }
@@ -180,6 +208,9 @@ impl WaymarkServer {
     /// category key. Exactly one action per call. Returns the planned or
     /// completed directory moves, the rewritten category values, and the
     /// affected files. `dry_run` checks everything and writes nothing.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_migrate_storage",
         annotations(
@@ -195,8 +226,11 @@ impl WaymarkServer {
         envelope::respond(|| {
             let action = storage_action(&args.action)?;
             let project = self.project()?;
-            let report =
-                migrate::migrate_storage(&project, &action, &params::options(args.dry_run))?;
+            let report = migrate::migrate_storage(
+                &project,
+                &action,
+                &params::options(args.dry_run, args.lock_timeout_ms),
+            )?;
             Ok(migration_result(&report))
         })
     }

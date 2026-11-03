@@ -854,3 +854,44 @@ async fn write_conflict_and_stale_generation_reuse_the_shared_errors() {
 
     client.shutdown().await;
 }
+
+/// Every writing tool accepts the shared per-operation lock override, and a
+/// zero value fails fast with the retryable `LOCK_TIMEOUT` while the lock is
+/// held.
+#[tokio::test]
+async fn a_zero_lock_timeout_fails_fast_while_the_lock_is_held() {
+    let fixture = common::fixture(&["one"]);
+    let id = fixture.ids[0].clone();
+    let client = common::Client::connect(fixture.root.clone()).await;
+    let project = fixture.project();
+
+    let (acquired_tx, acquired_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+    let holder = std::thread::spawn(move || {
+        waymark_core::lock::with_project_lock(
+            &project,
+            waymark_core::lock::LockWait::default_policy(),
+            || {
+                acquired_tx.send(()).expect("the test observes the lock");
+                release_rx.recv().expect("the test releases the lock");
+                Ok::<(), waymark_core::error::WaymarkError>(())
+            },
+        )
+        .expect("the holder releases the lock");
+    });
+    acquired_rx.recv().expect("the lock is held");
+
+    let result = client
+        .call(
+            "waymark_set_title",
+            json!({"id": id, "title": "blocked", "lock_timeout_ms": 0}),
+        )
+        .await;
+    let error = common::business_error(&result);
+    assert_eq!(error["code"], "LOCK_TIMEOUT", "{error}");
+    assert_eq!(error["retryable"], true, "{error}");
+
+    release_tx.send(()).expect("the holder is released");
+    holder.join().expect("the holder thread ends");
+    client.shutdown().await;
+}

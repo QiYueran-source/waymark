@@ -5,7 +5,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use waymark_core::config::{FieldType, CONFIG_FILE};
 use waymark_core::error::Code;
 use waymark_core::model::FieldKey;
-use waymark_core::ops::config::{self, FieldAttribute, Scalar};
+use waymark_core::ops::config::{self, FieldAttribute, InitRequest, Scalar};
 use waymark_core::ops::create::CreateRequest;
 use waymark_core::ops::{create, OpOptions};
 use waymark_core::store::Fingerprint;
@@ -730,4 +730,49 @@ fn an_invalid_configuration_cannot_be_opened_as_a_project() {
     let findings = config::validate_config_path(&project.config_path());
     assert_eq!(findings.len(), 1, "{findings:?}");
     assert!(findings[0].message.contains("categories.task.path"));
+}
+
+/// `init` builds the domain configuration in core: the adapter supplies the
+/// request, not the category records or the paths.
+#[test]
+fn init_builds_the_requested_configuration_in_core() {
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let root = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).expect("a UTF-8 path");
+
+    let project = config::init(
+        &root,
+        InitRequest::new()
+            .with_storage_root("docs/work")
+            .with_category("bug")
+            .with_operator("frank")
+            .with_timezone("Asia/Shanghai"),
+        false,
+    )
+    .expect("init succeeds");
+
+    let config = project.config();
+    assert_eq!(config.storage_root, "docs/work");
+    assert_eq!(config.operator.as_deref(), Some("frank"));
+    assert_eq!(config.timezone.name(), "Asia/Shanghai");
+    assert_eq!(config.categories.len(), 1);
+    let bug = config.categories.get(&key("bug")).expect("bug is declared");
+    assert_eq!(bug.path, "docs/work/bug");
+    assert_eq!(bug.name, "Bug");
+    assert!(root.join("docs/work/bug").is_dir());
+
+    // An empty request uses the domain defaults, not an adapter's copy.
+    let default_root = root.join("default");
+    let project =
+        config::init(&default_root, InitRequest::new(), false).expect("the default init succeeds");
+    let config = project.config();
+    assert_eq!(config.storage_root, "work");
+    assert_eq!(config.operator, None);
+    assert_eq!(config.timezone.name(), "UTC");
+    assert_eq!(config.categories.len(), 1);
+    let task = config
+        .categories
+        .get(&key("task"))
+        .expect("task is declared");
+    assert_eq!(task.path, "work/task");
+    assert!(default_root.join("work/task").is_dir());
 }

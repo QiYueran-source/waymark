@@ -12,15 +12,13 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use waymark_core::error::{ValidationIssue, WaymarkError};
-use waymark_core::model::{FieldKey, WorkItem};
+use waymark_core::model::FieldKey;
 use waymark_core::ops::list::{self, Listing};
 use waymark_core::ops::read;
-use waymark_core::ops::tree::{
-    dependency_tree, hierarchy_tree, DependencyRow, HierarchyTree, TreeNode,
-};
-use waymark_core::projection::ScopedRead;
+use waymark_core::ops::tree::{dependency_tree, hierarchy_tree, HierarchyTree};
 use waymark_core::query::{projected_row, ArchiveRange, Projection, Query};
 use waymark_core::stats::{self, statistics_json, StatsRequest};
+use waymark_core::view;
 use waymark_core::Project;
 
 use crate::envelope::{self, ToolResult};
@@ -81,12 +79,27 @@ pub struct ListArgs {
     pub compact: bool,
 }
 
-/// The collection arguments of `search`, which has no filter or archive range.
+/// The collection arguments of `search`.
+///
+/// Search follows the same archive-range and filter rules as the list tools:
+/// the needle selects within the filtered population, it does not define a
+/// separate one.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SearchArgs {
     /// Case-insensitive substring to look for in the title, the frontmatter,
     /// and the body. Must be non-empty.
     pub text: String,
+
+    /// Structured filter document, the same vocabulary as `waymark query
+    /// --filter` and the list tools. A hit must also match it.
+    #[serde(default)]
+    pub filter: Option<Value>,
+
+    /// Archive slice to read: `active` (default), `archived`, or `all`.
+    /// Archived items are never mixed into `active`. When present this
+    /// overrides `filter.archive`, because one request has one range.
+    #[serde(default)]
+    pub archive: Option<String>,
 
     /// Ordering: `rank` (default), `created_at`, `updated_at`, `title`,
     /// `status`, or `field:<key>`.
@@ -189,16 +202,14 @@ impl SearchArgs {
             )
             .at_field("text"));
         }
-        let mut query = params::query_from(
-            None,
-            None,
+        params::query_from(
+            self.filter.as_ref(),
+            self.archive.as_deref(),
             self.sort.as_deref(),
             self.desc,
             self.limit,
             self.offset,
-        )?;
-        query.filters.archive = ArchiveRange::Active;
-        Ok(query)
+        )
     }
 
     fn projection(&self) -> Result<Projection, WaymarkError> {
@@ -224,7 +235,7 @@ impl WaymarkServer {
         envelope::respond(|| {
             let project = self.project()?;
             let read = read::read_scoped(&project, &args.id)?;
-            Ok(envelope::success(work_item_data(&read), read.meta))
+            Ok(envelope::success(view::read_json(&read), read.meta))
         })
     }
 
@@ -250,9 +261,11 @@ impl WaymarkServer {
 
     /// Search titles, frontmatter, and bodies case-insensitively. Title hits
     /// are returned before body/frontmatter-only hits; within each group the
-    /// shared sort decides. No snippets and no body text are returned. The
-    /// same page, ordering, and projection arguments as list apply, and the
-    /// default limit is 50.
+    /// shared sort decides. No snippets and no body text are returned. Search
+    /// follows the same archive-range and filter rules as the list tools: the
+    /// `filter` document and `archive` range select the population, and the
+    /// needle selects within it. The same page, ordering, and projection
+    /// arguments as list apply, and the default limit is 50.
     #[tool(
         name = "waymark_search_work_items",
         annotations(title = "Search work items")
@@ -333,8 +346,8 @@ impl WaymarkServer {
                     "id": args.id,
                     "depth": args.depth,
                     "flat": args.flat,
-                    "tree": node_json(&tree.root),
-                    "rows": tree.flat.iter().map(row_json).collect::<Vec<_>>(),
+                    "tree": view::tree_node_json(&tree.root),
+                    "rows": tree.flat.iter().map(view::dependency_row_json).collect::<Vec<_>>(),
                 }),
                 tree.meta.clone(),
             ))
@@ -426,23 +439,7 @@ fn collection_result(
 
 /// The machine form of a collection page.
 fn listing_data(listing: &Listing, query: &Query, projection: &Projection) -> Value {
-    let rows: Vec<Value> = listing
-        .items
-        .iter()
-        .map(|row| projected_row(row, projection))
-        .collect();
-    json!({
-        "items": rows,
-        "count": listing.len(),
-        "total": listing.total,
-        "offset": listing.offset,
-        "limit": listing.limit,
-        "archive": query.filters.archive.as_str(),
-        "fields": projection.fields.as_ref().map(|fields| {
-            fields.iter().map(|field| field.as_str()).collect::<Vec<_>>()
-        }),
-        "compact": projection.compact,
-    })
+    view::listing_json(listing, projection, query.filters.archive)
 }
 
 /// The machine form of one bounded hierarchy read.
@@ -450,107 +447,11 @@ fn tree_data(tree: &HierarchyTree, args: &TreeArgs) -> Value {
     json!({
         "root": args.root,
         "depth": args.depth,
-        "roots": tree.roots.iter().map(node_json).collect::<Vec<_>>(),
+        "roots": tree.roots.iter().map(view::tree_node_json).collect::<Vec<_>>(),
         "unresolved": tree.unresolved.iter().map(|entry| json!({
             "id": entry.id.as_str(),
             "parent": entry.parent.as_str(),
             "reason": entry.reason.as_str(),
         })).collect::<Vec<_>>(),
     })
-}
-
-/// The nested machine form of one tree node.
-fn node_json(node: &TreeNode) -> Value {
-    json!({
-        "id": node.id.as_str(),
-        "depth": node.depth,
-        "repeated": node.repeated,
-        "resolved": node.item.is_some(),
-        "item": node.item.as_ref().map(|item| {
-            let mut fields = item_fields(item);
-            if let Some(map) = fields.as_object_mut() {
-                map.remove("body");
-            }
-            fields
-        }),
-        "children": node.children.iter().map(node_json).collect::<Vec<_>>(),
-    })
-}
-
-/// The machine form of one flat dependency row.
-fn row_json(row: &DependencyRow) -> Value {
-    json!({
-        "id": row.id.as_str(),
-        "depth": row.depth,
-        "from": row.from.as_ref().map(|id| id.as_str()),
-        "repeated": row.repeated,
-        "resolved": row.item.is_some(),
-    })
-}
-
-/// The machine form of one item read, matching the CLI's `show --json` data.
-fn work_item_data(read: &ScopedRead) -> Value {
-    json!({
-        "id": read.item.id.as_str(),
-        "path": read.path.to_string(),
-        "category": read.category.as_str(),
-        "fingerprint": read.fingerprint.as_str(),
-        "item": item_json(&read.item, &read.path),
-        "needs_migration": read.item.needs_migration(),
-        "archived": read.item.is_archived(),
-        "relationships": {
-            "historical": read.item.is_archived(),
-            "parent": read.item.parent.as_ref().map(|id| id.as_str().to_owned()),
-            "dependencies": read.item.dependencies.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-            "soft_links": read.item.soft_links.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-            "children": read.children.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-            "dependents": read.dependents.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-        },
-        "ready": read.readiness.as_ref().map(|readiness| readiness.ready),
-        "blocked": read.readiness.as_ref().map(|readiness| readiness.blocked),
-        "blocked_by": read
-            .readiness
-            .as_ref()
-            .map(|readiness| {
-                readiness
-                    .blocked_by
-                    .iter()
-                    .map(|id| id.as_str())
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default(),
-    })
-}
-
-/// The persisted fields of one item, without the file that happens to hold it.
-pub(crate) fn item_fields(item: &WorkItem) -> Value {
-    json!({
-        "schema": item.schema,
-        "needs_migration": item.needs_migration(),
-        "id": item.id.as_str(),
-        "title": item.title,
-        "category": item.category.as_str(),
-        "status": item.status.as_str(),
-        "owner": item.owner,
-        "creator": item.creator,
-        "created_at": item.created_at.to_string(),
-        "updated_at": item.updated_at.to_string(),
-        "closed_at": item.closed_at.map(|value| value.to_string()),
-        "parent": item.parent.as_ref().map(|id| id.as_str().to_owned()),
-        "dependencies": item.dependencies.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-        "soft_links": item.soft_links.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-        "custom_fields": item.custom_fields,
-        "archived_at": item.archived_at.map(|value| value.to_string()),
-        "archive_reason": item.archive_reason,
-        "body": item.body,
-    })
-}
-
-/// The persisted fields plus the document path.
-pub(crate) fn item_json(item: &WorkItem, path: &camino::Utf8Path) -> Value {
-    let mut value = item_fields(item);
-    if let Some(map) = value.as_object_mut() {
-        map.insert("path".to_owned(), json!(path.to_string()));
-    }
-    value
 }

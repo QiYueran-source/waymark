@@ -9,10 +9,8 @@
 use camino::Utf8Path;
 use clap::Args;
 use waymark_core::envelope::success_envelope;
-use waymark_core::error::{Code, WaymarkError};
-use waymark_core::ops::config::locate_config_path;
+use waymark_core::error::WaymarkError;
 use waymark_core::ops::doctor::{self, DoctorOptions, Report};
-use waymark_core::{Config, Project};
 
 use super::{emit, err_line, invocation_dir, EXIT_OK};
 
@@ -54,34 +52,16 @@ pub fn run_validate(
 
 /// Resolve the project and run the shared diagnostics.
 ///
-/// A project whose configuration cannot be opened still deserves a diagnosis, so
-/// the configuration is loaded first: a configuration problem yields a
-/// configuration-scoped report instead of `PROJECT_NOT_FOUND` or a bare
-/// `CONFIG_INVALID` failure with no findings.
+/// A project whose configuration cannot be opened still deserves a diagnosis,
+/// so the shared core entry point maps `CONFIG_INVALID` and
+/// `UNSUPPORTED_VERSION` to a configuration-scoped report instead of a bare
+/// failure with no findings.
 fn diagnose(project: Option<&Utf8Path>, options: DoctorOptions) -> Result<Report, WaymarkError> {
     let start = match project {
         Some(path) => path.to_path_buf(),
         None => invocation_dir()?,
     };
-    let config_path = locate_config_path(&start)?;
-    match Config::load(&config_path) {
-        Ok(_) => {
-            let root = config_path
-                .parent()
-                .and_then(Utf8Path::parent)
-                .ok_or_else(|| {
-                    WaymarkError::internal(format!(
-                        "the configuration path {config_path} has no project root"
-                    ))
-                })?;
-            let project = Project::open(root)?;
-            doctor::diagnose_with(&project, options)
-        }
-        Err(error) if matches!(error.code(), Code::ConfigInvalid | Code::UnsupportedVersion) => {
-            doctor::diagnose_config(&config_path, options)
-        }
-        Err(error) => Err(error),
-    }
+    doctor::diagnose_from(&start, options)
 }
 
 /// Emit the report and choose the process exit from the registry.

@@ -30,7 +30,7 @@ use waymark_core::ops::{archive, create, link, owner, parent, r#move, relationsh
 use crate::envelope::{self, ToolResult};
 use crate::server::WaymarkServer;
 use crate::tools::params;
-use crate::tools::read::{item_fields, item_json};
+use waymark_core::view::{item_fields, item_json};
 
 /// Inputs of `waymark_create_work_item`.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -73,6 +73,12 @@ pub struct CreateWorkItemArgs {
     /// Validate and report what would be written, without writing.
     #[serde(default)]
     pub dry_run: bool,
+
+    /// Wait at most this many milliseconds for the project write lock.
+    /// Omitted uses the shared default wait; `0` fails immediately with the
+    /// retryable `LOCK_TIMEOUT` code.
+    #[serde(default)]
+    pub lock_timeout_ms: Option<u64>,
 }
 
 /// Inputs of `waymark_set_title`.
@@ -88,6 +94,12 @@ pub struct SetTitleArgs {
     /// Report the change without writing it.
     #[serde(default)]
     pub dry_run: bool,
+
+    /// Wait at most this many milliseconds for the project write lock.
+    /// Omitted uses the shared default wait; `0` fails immediately with the
+    /// retryable `LOCK_TIMEOUT` code.
+    #[serde(default)]
+    pub lock_timeout_ms: Option<u64>,
 }
 
 /// Inputs of `waymark_replace_body`.
@@ -103,6 +115,12 @@ pub struct ReplaceBodyArgs {
     /// Report the change without writing it.
     #[serde(default)]
     pub dry_run: bool,
+
+    /// Wait at most this many milliseconds for the project write lock.
+    /// Omitted uses the shared default wait; `0` fails immediately with the
+    /// retryable `LOCK_TIMEOUT` code.
+    #[serde(default)]
+    pub lock_timeout_ms: Option<u64>,
 }
 
 /// Inputs of `waymark_update_custom_fields`.
@@ -118,6 +136,12 @@ pub struct UpdateCustomFieldsArgs {
     /// Report the change without writing it.
     #[serde(default)]
     pub dry_run: bool,
+
+    /// Wait at most this many milliseconds for the project write lock.
+    /// Omitted uses the shared default wait; `0` fails immediately with the
+    /// retryable `LOCK_TIMEOUT` code.
+    #[serde(default)]
+    pub lock_timeout_ms: Option<u64>,
 }
 
 /// One custom-field change map.
@@ -143,6 +167,9 @@ impl WaymarkServer {
     /// rewritten soft-link partner, one fingerprint per written document, and
     /// whether the store changed. `dry_run` performs every check and reports the
     /// same shape without writing.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_create_work_item",
         annotations(
@@ -176,7 +203,11 @@ impl WaymarkServer {
             for link in args.soft_links {
                 request = request.with_soft_link(link);
             }
-            let created = create::create(&project, request, &params::options(args.dry_run))?;
+            let created = create::create(
+                &project,
+                request,
+                &params::options(args.dry_run, args.lock_timeout_ms),
+            )?;
             Ok(envelope::success(
                 json!({
                     "id": created.item.id.as_str(),
@@ -195,6 +226,9 @@ impl WaymarkServer {
 
     /// Replace the title of one item. A repeat of the current title is a true
     /// no-op. Returns the complete item and the `changed`/`written` flags.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_set_title",
         annotations(
@@ -210,7 +244,7 @@ impl WaymarkServer {
                 &project,
                 &args.id,
                 &args.title,
-                &params::options(args.dry_run),
+                &params::options(args.dry_run, args.lock_timeout_ms),
             )?;
             Ok(edit_result(&outcome))
         })
@@ -219,6 +253,9 @@ impl WaymarkServer {
     /// Replace the body of one item. An empty body clears it; a present body is
     /// canonicalized to exactly one trailing newline. Returns the complete item
     /// and the `changed`/`written` flags.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_replace_body",
         annotations(
@@ -237,7 +274,7 @@ impl WaymarkServer {
                 &project,
                 &args.id,
                 Some(&args.body),
-                &params::options(args.dry_run),
+                &params::options(args.dry_run, args.lock_timeout_ms),
             )?;
             Ok(edit_result(&outcome))
         })
@@ -248,6 +285,9 @@ impl WaymarkServer {
     /// write. A `null` set value, an unknown key, a duplicate/conflicting key,
     /// or clearing a required field is `VALIDATION_ERROR`. Returns the complete
     /// item, the changed keys, and the `changed`/`written` flags.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_update_custom_fields",
         annotations(
@@ -268,7 +308,7 @@ impl WaymarkServer {
                 &project,
                 &args.id,
                 &changes,
-                &params::options(args.dry_run),
+                &params::options(args.dry_run, args.lock_timeout_ms),
             )?;
             Ok(fields_result(&outcome))
         })
@@ -277,6 +317,9 @@ impl WaymarkServer {
     /// Set the lifecycle status of one item to `open`, `in_progress`, or
     /// `closed`. Repeating the current status is a true no-op. Returns the
     /// previous status, the new status, `closed_at`, and the complete item.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_set_status",
         annotations(
@@ -289,8 +332,12 @@ impl WaymarkServer {
         envelope::respond(|| {
             let status = status::parse_status(&args.status)?;
             let project = self.project()?;
-            let outcome =
-                status::set_status(&project, &args.id, status, &params::options(args.dry_run))?;
+            let outcome = status::set_status(
+                &project,
+                &args.id,
+                status,
+                &params::options(args.dry_run, args.lock_timeout_ms),
+            )?;
             Ok(status_result(&outcome))
         })
     }
@@ -299,6 +346,9 @@ impl WaymarkServer {
     /// with the same rule creation uses; repeating the current owner is a true
     /// no-op. A configured operator that differs from the owner produces the
     /// advisory `OWNER_MISMATCH` warning in `_meta` without blocking the write.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_transfer_owner",
         annotations(
@@ -317,7 +367,7 @@ impl WaymarkServer {
                 &project,
                 &args.id,
                 &args.owner,
-                &params::options(args.dry_run),
+                &params::options(args.dry_run, args.lock_timeout_ms),
             )?;
             Ok(owner_result(&outcome))
         })
@@ -327,6 +377,9 @@ impl WaymarkServer {
     /// the category's directory and the persisted `category` changes. Refused
     /// with `WRITE_CONFLICT` if the destination is occupied, and a same-category
     /// request is a true no-op.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_move_work_item",
         annotations(
@@ -346,7 +399,7 @@ impl WaymarkServer {
                 &project,
                 &args.id,
                 &category,
-                &params::options(args.dry_run),
+                &params::options(args.dry_run, args.lock_timeout_ms),
             )?;
             Ok(move_result(&outcome))
         })
@@ -355,6 +408,9 @@ impl WaymarkServer {
     /// Give one item a parent, replacing any parent it already has. Re-setting
     /// the same parent is a true no-op; a cycle, a self-parent, an archived
     /// endpoint, and a missing parent are all refused by the domain.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_set_parent",
         annotations(
@@ -370,7 +426,7 @@ impl WaymarkServer {
                 &project,
                 &args.id,
                 &args.parent,
-                &params::options(args.dry_run),
+                &params::options(args.dry_run, args.lock_timeout_ms),
             )?;
             Ok(parent_result(&outcome, ParentVerb::Set))
         })
@@ -378,6 +434,9 @@ impl WaymarkServer {
 
     /// Remove one item's parent. Clearing an item that has no parent is a true
     /// no-op.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_clear_parent",
         annotations(
@@ -392,7 +451,11 @@ impl WaymarkServer {
     ) -> ToolResult {
         envelope::respond(|| {
             let project = self.project()?;
-            let outcome = parent::clear_parent(&project, &args.id, &params::options(args.dry_run))?;
+            let outcome = parent::clear_parent(
+                &project,
+                &args.id,
+                &params::options(args.dry_run, args.lock_timeout_ms),
+            )?;
             Ok(parent_result(&outcome, ParentVerb::Clear))
         })
     }
@@ -400,6 +463,9 @@ impl WaymarkServer {
     /// Make one item wait for a blocking item. A self-reference, a duplicate
     /// edge, and an edge that would close a cycle are refused by the domain;
     /// the target must exist and be active.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_add_dependency",
         annotations(
@@ -418,7 +484,7 @@ impl WaymarkServer {
                 &project,
                 &args.id,
                 &args.blocking,
-                &params::options(args.dry_run),
+                &params::options(args.dry_run, args.lock_timeout_ms),
             )?;
             Ok(dependency_result(&outcome))
         })
@@ -427,6 +493,9 @@ impl WaymarkServer {
     /// Remove the hard dependency of one item on a blocking item. Removing an
     /// edge that is not there is `INVALID_RELATIONSHIP`; a missing target is
     /// allowed, so a dangling pointer can be cleaned up.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_remove_dependency",
         annotations(
@@ -445,7 +514,7 @@ impl WaymarkServer {
                 &project,
                 &args.id,
                 &args.blocking,
-                &params::options(args.dry_run),
+                &params::options(args.dry_run, args.lock_timeout_ms),
             )?;
             Ok(dependency_result(&outcome))
         })
@@ -453,6 +522,9 @@ impl WaymarkServer {
 
     /// Associate two items with a symmetric, non-blocking soft link. Both
     /// documents are replaced as one all-or-nothing batch.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_add_soft_link",
         annotations(
@@ -471,7 +543,7 @@ impl WaymarkServer {
                 &project,
                 &args.id,
                 &args.other,
-                &params::options(args.dry_run),
+                &params::options(args.dry_run, args.lock_timeout_ms),
             )?;
             Ok(link_result(&outcome, LinkVerb::Add))
         })
@@ -480,6 +552,9 @@ impl WaymarkServer {
     /// Remove the soft link between two items. Removing a link that is not there
     /// is `INVALID_RELATIONSHIP`; when the other document is missing or
     /// archived, the surviving side alone is cleaned up.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_remove_soft_link",
         annotations(
@@ -498,7 +573,7 @@ impl WaymarkServer {
                 &project,
                 &args.id,
                 &args.other,
-                &params::options(args.dry_run),
+                &params::options(args.dry_run, args.lock_timeout_ms),
             )?;
             Ok(link_result(&outcome, LinkVerb::Remove))
         })
@@ -508,6 +583,9 @@ impl WaymarkServer {
     /// optional reason is stored; inbound edges from active items are removed in
     /// the same all-or-nothing batch. Re-archiving is `ALREADY_ARCHIVED`, and an
     /// active child blocks it with `HAS_ACTIVE_CHILDREN`.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_archive_work_item",
         annotations(
@@ -526,7 +604,7 @@ impl WaymarkServer {
                 &project,
                 &args.id,
                 args.reason.as_deref(),
-                &params::options(args.dry_run),
+                &params::options(args.dry_run, args.lock_timeout_ms),
             )?;
             Ok(archive_result(&outcome))
         })
@@ -546,18 +624,40 @@ pub struct SetStatusArgs {
     /// Report the change without writing it.
     #[serde(default)]
     pub dry_run: bool,
+
+    /// Wait at most this many milliseconds for the project write lock.
+    /// Omitted uses the shared default wait; `0` fails immediately with the
+    /// retryable `LOCK_TIMEOUT` code.
+    #[serde(default)]
+    pub lock_timeout_ms: Option<u64>,
+}
+
+/// Render one mediated write: the shared core fields plus this operation's own.
+fn write_data(
+    item: &waymark_core::WorkItem,
+    path: &camino::Utf8Path,
+    changed: bool,
+    written: bool,
+    extra: Value,
+) -> Value {
+    waymark_core::view::write_result_json_with(
+        item,
+        path,
+        changed,
+        written,
+        extra.as_object().cloned().unwrap_or_default(),
+    )
 }
 
 /// One title or body edit as a successful tool result.
 fn edit_result(outcome: &EditOutcome) -> ToolResult {
     envelope::success(
-        json!({
-            "id": outcome.item.id.as_str(),
-            "path": outcome.path.to_string(),
-            "changed": outcome.changed,
-            "written": outcome.written,
-            "item": item_json(&outcome.item, &outcome.path),
-        }),
+        waymark_core::view::write_result_json(
+            &outcome.item,
+            &outcome.path,
+            outcome.changed,
+            outcome.written,
+        ),
         outcome.meta.clone(),
     )
 }
@@ -615,14 +715,13 @@ fn fields_result(outcome: &FieldOutcome) -> ToolResult {
         .map(FieldKey::as_str)
         .collect();
     envelope::success(
-        json!({
-            "id": outcome.item.id.as_str(),
-            "path": outcome.path.to_string(),
-            "changed": outcome.changed,
-            "written": outcome.written,
-            "changed_fields": changed_fields,
-            "item": item_json(&outcome.item, &outcome.path),
-        }),
+        write_data(
+            &outcome.item,
+            &outcome.path,
+            outcome.changed,
+            outcome.written,
+            json!({"changed_fields": changed_fields}),
+        ),
         outcome.meta.clone(),
     )
 }
@@ -630,16 +729,17 @@ fn fields_result(outcome: &FieldOutcome) -> ToolResult {
 /// One status transition as a successful tool result.
 fn status_result(outcome: &status::StatusOutcome) -> ToolResult {
     envelope::success(
-        json!({
-            "id": outcome.item.id.as_str(),
-            "path": outcome.path.to_string(),
-            "previous_status": outcome.previous.as_str(),
-            "status": outcome.item.status.as_str(),
-            "changed": outcome.changed,
-            "written": outcome.written,
-            "closed_at": outcome.item.closed_at.map(|value| value.to_string()),
-            "item": item_json(&outcome.item, &outcome.path),
-        }),
+        write_data(
+            &outcome.item,
+            &outcome.path,
+            outcome.changed,
+            outcome.written,
+            json!({
+                "previous_status": outcome.previous.as_str(),
+                "status": outcome.item.status.as_str(),
+                "closed_at": outcome.item.closed_at.map(|value| value.to_string()),
+            }),
+        ),
         outcome.meta.clone(),
     )
 }
@@ -656,6 +756,12 @@ pub struct TransferOwnerArgs {
     /// Report the change without writing it.
     #[serde(default)]
     pub dry_run: bool,
+
+    /// Wait at most this many milliseconds for the project write lock.
+    /// Omitted uses the shared default wait; `0` fails immediately with the
+    /// retryable `LOCK_TIMEOUT` code.
+    #[serde(default)]
+    pub lock_timeout_ms: Option<u64>,
 }
 
 /// Inputs of `waymark_move_work_item`.
@@ -670,6 +776,12 @@ pub struct MoveWorkItemArgs {
     /// Report the change without writing it.
     #[serde(default)]
     pub dry_run: bool,
+
+    /// Wait at most this many milliseconds for the project write lock.
+    /// Omitted uses the shared default wait; `0` fails immediately with the
+    /// retryable `LOCK_TIMEOUT` code.
+    #[serde(default)]
+    pub lock_timeout_ms: Option<u64>,
 }
 
 /// Inputs of `waymark_set_parent`.
@@ -684,6 +796,12 @@ pub struct SetParentArgs {
     /// Report the change without writing it.
     #[serde(default)]
     pub dry_run: bool,
+
+    /// Wait at most this many milliseconds for the project write lock.
+    /// Omitted uses the shared default wait; `0` fails immediately with the
+    /// retryable `LOCK_TIMEOUT` code.
+    #[serde(default)]
+    pub lock_timeout_ms: Option<u64>,
 }
 
 /// Inputs of `waymark_clear_parent`.
@@ -695,6 +813,12 @@ pub struct ClearParentArgs {
     /// Report the change without writing it.
     #[serde(default)]
     pub dry_run: bool,
+
+    /// Wait at most this many milliseconds for the project write lock.
+    /// Omitted uses the shared default wait; `0` fails immediately with the
+    /// retryable `LOCK_TIMEOUT` code.
+    #[serde(default)]
+    pub lock_timeout_ms: Option<u64>,
 }
 
 /// Inputs of `waymark_add_dependency` and `waymark_remove_dependency`.
@@ -709,6 +833,12 @@ pub struct DependencyArgs {
     /// Report the change without writing it.
     #[serde(default)]
     pub dry_run: bool,
+
+    /// Wait at most this many milliseconds for the project write lock.
+    /// Omitted uses the shared default wait; `0` fails immediately with the
+    /// retryable `LOCK_TIMEOUT` code.
+    #[serde(default)]
+    pub lock_timeout_ms: Option<u64>,
 }
 
 /// Inputs of `waymark_add_soft_link` and `waymark_remove_soft_link`.
@@ -723,6 +853,12 @@ pub struct SoftLinkArgs {
     /// Report the change without writing it.
     #[serde(default)]
     pub dry_run: bool,
+
+    /// Wait at most this many milliseconds for the project write lock.
+    /// Omitted uses the shared default wait; `0` fails immediately with the
+    /// retryable `LOCK_TIMEOUT` code.
+    #[serde(default)]
+    pub lock_timeout_ms: Option<u64>,
 }
 
 /// Inputs of `waymark_archive_work_item`.
@@ -740,6 +876,12 @@ pub struct ArchiveWorkItemArgs {
     /// writing.
     #[serde(default)]
     pub dry_run: bool,
+
+    /// Wait at most this many milliseconds for the project write lock.
+    /// Omitted uses the shared default wait; `0` fails immediately with the
+    /// retryable `LOCK_TIMEOUT` code.
+    #[serde(default)]
+    pub lock_timeout_ms: Option<u64>,
 }
 
 /// Which parent verb ran, so the payload cannot disagree with the operation.
@@ -759,15 +901,16 @@ enum LinkVerb {
 /// One owner transfer as a successful tool result.
 fn owner_result(outcome: &owner::OwnerOutcome) -> ToolResult {
     envelope::success(
-        json!({
-            "id": outcome.item.id.as_str(),
-            "path": outcome.path.to_string(),
-            "previous_owner": outcome.previous_owner,
-            "owner": outcome.item.owner,
-            "changed": outcome.changed,
-            "written": outcome.written,
-            "item": item_json(&outcome.item, &outcome.path),
-        }),
+        write_data(
+            &outcome.item,
+            &outcome.path,
+            outcome.changed,
+            outcome.written,
+            json!({
+                "previous_owner": outcome.previous_owner,
+                "owner": outcome.item.owner,
+            }),
+        ),
         outcome.meta.clone(),
     )
 }
@@ -775,16 +918,17 @@ fn owner_result(outcome: &owner::OwnerOutcome) -> ToolResult {
 /// One category move as a successful tool result.
 fn move_result(outcome: &r#move::MoveOutcome) -> ToolResult {
     envelope::success(
-        json!({
-            "id": outcome.item.id.as_str(),
-            "path": outcome.path.to_string(),
-            "previous_path": outcome.previous_path.to_string(),
-            "previous_category": outcome.previous_category.as_str(),
-            "category": outcome.item.category.as_str(),
-            "changed": outcome.changed,
-            "written": outcome.written,
-            "item": item_json(&outcome.item, &outcome.path),
-        }),
+        write_data(
+            &outcome.item,
+            &outcome.path,
+            outcome.changed,
+            outcome.written,
+            json!({
+                "previous_path": outcome.previous_path.to_string(),
+                "previous_category": outcome.previous_category.as_str(),
+                "category": outcome.item.category.as_str(),
+            }),
+        ),
         outcome.meta.clone(),
     )
 }
@@ -792,19 +936,20 @@ fn move_result(outcome: &r#move::MoveOutcome) -> ToolResult {
 /// One parent change as a successful tool result.
 fn parent_result(outcome: &parent::ParentOutcome, verb: ParentVerb) -> ToolResult {
     envelope::success(
-        json!({
-            "id": outcome.item.id.as_str(),
-            "path": outcome.path.to_string(),
-            "verb": match verb {
-                ParentVerb::Set => "set",
-                ParentVerb::Clear => "clear",
-            },
-            "parent": outcome.parent.as_ref().map(|id| id.as_str()),
-            "previous_parent": outcome.previous_parent.as_ref().map(|id| id.as_str()),
-            "changed": outcome.changed,
-            "written": outcome.written,
-            "item": item_json(&outcome.item, &outcome.path),
-        }),
+        write_data(
+            &outcome.item,
+            &outcome.path,
+            outcome.changed,
+            outcome.written,
+            json!({
+                "verb": match verb {
+                    ParentVerb::Set => "set",
+                    ParentVerb::Clear => "clear",
+                },
+                "parent": outcome.parent.as_ref().map(|id| id.as_str()),
+                "previous_parent": outcome.previous_parent.as_ref().map(|id| id.as_str()),
+            }),
+        ),
         outcome.meta.clone(),
     )
 }
@@ -812,15 +957,16 @@ fn parent_result(outcome: &parent::ParentOutcome, verb: ParentVerb) -> ToolResul
 /// One dependency change as a successful tool result.
 fn dependency_result(outcome: &relationship::RelationshipOutcome) -> ToolResult {
     envelope::success(
-        json!({
-            "id": outcome.item.id.as_str(),
-            "path": outcome.path.to_string(),
-            "dependency": outcome.dependency.as_str(),
-            "dependencies": outcome.item.dependencies.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-            "changed": outcome.changed,
-            "written": outcome.written,
-            "item": item_json(&outcome.item, &outcome.path),
-        }),
+        write_data(
+            &outcome.item,
+            &outcome.path,
+            outcome.changed,
+            outcome.written,
+            json!({
+                "dependency": outcome.dependency.as_str(),
+                "dependencies": outcome.item.dependencies.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
+            }),
+        ),
         outcome.meta.clone(),
     )
 }
@@ -828,22 +974,23 @@ fn dependency_result(outcome: &relationship::RelationshipOutcome) -> ToolResult 
 /// One soft-link change as a successful tool result.
 fn link_result(outcome: &link::LinkOutcome, verb: LinkVerb) -> ToolResult {
     envelope::success(
-        json!({
-            "id": outcome.item.id.as_str(),
-            "path": outcome.path.to_string(),
-            "other": outcome.other_id.as_str(),
-            "other_path": outcome.other_path.as_ref().map(|path| path.to_string()),
-            "verb": match verb {
-                LinkVerb::Add => "add",
-                LinkVerb::Remove => "remove",
-            },
-            "soft_links": outcome.item.soft_links.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-            "changed": outcome.changed,
-            "written": outcome.written,
-            "fingerprints": outcome.fingerprints.iter().map(|fingerprint| fingerprint.as_str()).collect::<Vec<_>>(),
-            "item": item_json(&outcome.item, &outcome.path),
-            "other_item": outcome.other.as_ref().zip(outcome.other_path.as_ref()).map(|(item, path)| item_json(item, path)),
-        }),
+        write_data(
+            &outcome.item,
+            &outcome.path,
+            outcome.changed,
+            outcome.written,
+            json!({
+                "other": outcome.other_id.as_str(),
+                "other_path": outcome.other_path.as_ref().map(|path| path.to_string()),
+                "verb": match verb {
+                    LinkVerb::Add => "add",
+                    LinkVerb::Remove => "remove",
+                },
+                "soft_links": outcome.item.soft_links.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
+                "fingerprints": outcome.fingerprints.iter().map(|fingerprint| fingerprint.as_str()).collect::<Vec<_>>(),
+                "other_item": outcome.other.as_ref().zip(outcome.other_path.as_ref()).map(|(item, path)| item_json(item, path)),
+            }),
+        ),
         outcome.meta.clone(),
     )
 }

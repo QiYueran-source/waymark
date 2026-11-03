@@ -159,45 +159,11 @@ fn main() -> ExitCode {
     };
 
     let json = cli.json;
-    // Diagnostics choose their exit from the report they emit, so they do not
-    // travel through the generic failure mapping: a strict run still answers
-    // with the success envelope and then exits with the registry's class.
-    match &cli.command {
-        Command::Doctor(args) => {
-            return finish(
-                cmd::doctor::run_doctor(
-                    DoctorArgs {
-                        strict: args.strict,
-                    },
-                    cli.project.as_deref(),
-                    json,
-                ),
-                json,
-            );
-        }
-        Command::Validate(args) => {
-            return finish(
-                cmd::doctor::run_validate(
-                    ValidateArgs {
-                        strict: args.strict,
-                    },
-                    cli.project.as_deref(),
-                    json,
-                ),
-                json,
-            );
-        }
-        _ => {}
-    }
-    match run(cli) {
-        Ok(()) => ExitCode::from(EXIT_OK),
-        Err(error) => finish(Err(error), json),
-    }
+    finish(run(cli), json)
 }
 
-/// Finish a diagnostic-looking result: a chosen exit, or the registry's mapping
-/// for a real failure. `finish(Err(..))` reuses the same failure path `main` has
-/// always used.
+/// Finish a command result: a chosen exit, or the registry's mapping for a
+/// real failure.
 fn finish(result: Result<u8, waymark_core::WaymarkError>, json: bool) -> ExitCode {
     match result {
         Ok(code) => ExitCode::from(code),
@@ -211,123 +177,161 @@ fn finish(result: Result<u8, waymark_core::WaymarkError>, json: bool) -> ExitCod
     }
 }
 
-fn run(cli: Cli) -> Result<(), waymark_core::WaymarkError> {
+/// Run one command and return the process exit it asks for.
+///
+/// Every command but the diagnostics exits zero on success; `doctor` and
+/// `validate` choose their exit from the report they emit, so they return the
+/// class directly instead of travelling through the generic failure mapping.
+fn run(cli: Cli) -> Result<u8, waymark_core::WaymarkError> {
     let json = cli.json;
     let options = OpOptions::new()
         .with_clock(Arc::new(SystemClock))
         .with_lock_wait(cmd::lock_wait(cli.lock_timeout_ms));
 
     match cli.command {
-        Command::Init(args) => cmd::init::run(args, cli.project.as_deref(), json),
+        Command::Init(args) => ok(cmd::init::run(args, cli.project.as_deref(), json)),
         Command::Create(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
-            cmd::create::run(&project, args, &options, json)
+            ok(cmd::create::run(&project, args, &options, json))
         }
         Command::Show(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
-            cmd::show::run(&project, &args, json)
+            ok(cmd::show::run(&project, &args, json))
         }
         Command::Status(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
-            cmd::status::run(&project, args, &options, json)
+            ok(cmd::status::run(&project, args, &options, json))
         }
         Command::Title(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
-            cmd::edit::run_title(&project, args, &options, json)
+            ok(cmd::edit::run_title(&project, args, &options, json))
         }
         Command::Body(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
-            cmd::edit::run_body(&project, args, &options, json)
+            ok(cmd::edit::run_body(&project, args, &options, json))
         }
         Command::Field(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
-            cmd::edit::run_field(&project, args, &options, json)
+            ok(cmd::edit::run_field(&project, args, &options, json))
         }
         Command::Owner(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
-            cmd::owner::run(&project, args, &options, json)
+            ok(cmd::owner::run(&project, args, &options, json))
         }
         Command::Move(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
-            cmd::r#move::run(&project, args, &options, json)
+            ok(cmd::r#move::run(&project, args, &options, json))
         }
         Command::Start(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
-            cmd::status::convenience(
+            ok(cmd::status::convenience(
                 &project,
                 &args,
                 waymark_core::Status::InProgress,
                 &options,
                 json,
-            )
+            ))
         }
         Command::Close(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
-            cmd::status::convenience(
+            ok(cmd::status::convenience(
                 &project,
                 &args,
                 waymark_core::Status::Closed,
                 &options,
                 json,
-            )
+            ))
         }
         Command::Reopen(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
-            cmd::status::convenience(&project, &args, waymark_core::Status::Open, &options, json)
+            ok(cmd::status::convenience(
+                &project,
+                &args,
+                waymark_core::Status::Open,
+                &options,
+                json,
+            ))
         }
         Command::Dependency(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
-            cmd::relationship::run(&project, args, &options, json)
+            ok(cmd::relationship::run(&project, args, &options, json))
         }
         Command::Parent(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
-            cmd::parent::run(&project, args, &options, json)
+            ok(cmd::parent::run(&project, args, &options, json))
         }
         Command::Link(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
-            cmd::link::run(&project, args, &options, json)
+            ok(cmd::link::run(&project, args, &options, json))
         }
         Command::Tree(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
-            cmd::tree::run(&project, &args, json)
+            ok(cmd::tree::run(&project, &args, json))
         }
         Command::Dep(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
-            cmd::tree::run_dep(&project, args, &options, json)
+            ok(cmd::tree::run_dep(&project, args, &options, json))
         }
         Command::List(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
-            cmd::list::run(&project, &args, cmd::list::Which::All, json)
+            ok(cmd::list::run(&project, &args, cmd::list::Which::All, json))
         }
         Command::Ready(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
-            cmd::list::run(&project, &args, cmd::list::Which::Ready, json)
+            ok(cmd::list::run(
+                &project,
+                &args,
+                cmd::list::Which::Ready,
+                json,
+            ))
         }
         Command::Blocked(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
-            cmd::list::run(&project, &args, cmd::list::Which::Blocked, json)
+            ok(cmd::list::run(
+                &project,
+                &args,
+                cmd::list::Which::Blocked,
+                json,
+            ))
         }
         Command::Query(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
-            cmd::query::run_query(&project, &args, json)
+            ok(cmd::query::run_query(&project, &args, json))
         }
         Command::Search(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
-            cmd::query::run_search(&project, &args, json)
+            ok(cmd::query::run_search(&project, &args, json))
         }
         Command::Stats(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
-            cmd::query::run_stats(&project, &args, json)
+            ok(cmd::query::run_stats(&project, &args, json))
         }
         Command::Archive(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
-            cmd::archive::run(&project, &args, &options, json)
+            ok(cmd::archive::run(&project, &args, &options, json))
         }
-        Command::Project(args) => cmd::project::run(args, cli.project.as_deref(), json),
-        Command::Git(args) => cmd::git::run(args, cli.project.as_deref(), json),
-        Command::AgentDoc(args) => cmd::agent_doc::run(Cli::command(), &args, json),
-        Command::Config(args) => cmd::config::run(args, cli.project.as_deref(), &options, json),
-        Command::Migrate(args) => cmd::migrate::run(args, cli.project.as_deref(), &options, json),
-        Command::Doctor(_) | Command::Validate(_) => Ok(()),
+        Command::Project(args) => ok(cmd::project::run(args, cli.project.as_deref(), json)),
+        Command::Git(args) => ok(cmd::git::run(args, cli.project.as_deref(), json)),
+        Command::AgentDoc(args) => ok(cmd::agent_doc::run(Cli::command(), &args, json)),
+        Command::Config(args) => ok(cmd::config::run(
+            args,
+            cli.project.as_deref(),
+            &options,
+            json,
+        )),
+        Command::Migrate(args) => ok(cmd::migrate::run(
+            args,
+            cli.project.as_deref(),
+            &options,
+            json,
+        )),
+        Command::Doctor(args) => cmd::doctor::run_doctor(args, cli.project.as_deref(), json),
+        Command::Validate(args) => cmd::doctor::run_validate(args, cli.project.as_deref(), json),
     }
+}
+
+/// A command that exits zero on success.
+fn ok<T>(result: Result<T, waymark_core::WaymarkError>) -> Result<u8, waymark_core::WaymarkError> {
+    result?;
+    Ok(EXIT_OK)
 }

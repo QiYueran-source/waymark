@@ -12,7 +12,7 @@ use waymark_core::ops::owner::{self, OwnerOutcome};
 use waymark_core::ops::OpOptions;
 use waymark_core::Project;
 
-use super::{emit, err_line, item_json};
+use super::{emit, err_line};
 
 /// Arguments of `waymark owner`.
 #[derive(Debug, Args)]
@@ -94,13 +94,14 @@ fn transfer(
 
 /// The `data` block of an owner transfer result.
 fn payload(outcome: &OwnerOutcome) -> serde_json::Value {
-    serde_json::json!({
-        "id": outcome.item.id.as_str(),
-        "path": outcome.path.to_string(),
-        "previous_owner": outcome.previous_owner,
-        "owner": outcome.item.owner,
-        "changed": outcome.changed,
-        "written": outcome.written,
-        "item": item_json(&outcome.item, &outcome.path),
-    })
+    super::write_json(
+        &outcome.item,
+        &outcome.path,
+        outcome.changed,
+        outcome.written,
+        serde_json::json!({
+            "previous_owner": outcome.previous_owner,
+            "owner": outcome.item.owner,
+        }),
+    )
 }

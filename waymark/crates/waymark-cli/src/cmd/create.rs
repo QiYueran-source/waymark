@@ -18,8 +18,8 @@ use waymark_core::ops::create::CreateRequest;
 use waymark_core::ops::{create, OpOptions};
 use waymark_core::Project;
 
-use super::edit::parse_field_value;
-use super::{emit, err_line, item_json};
+use super::{emit, err_line};
+use waymark_core::view::item_json;
 
 /// Arguments of `waymark create`.
 #[derive(Debug, Args)]
@@ -165,7 +165,8 @@ fn read_stdin() -> Result<String, WaymarkError> {
 
 /// Parse every `--field KEY=VALUE` token against the declared field type.
 ///
-/// This is the same text grammar `field update --set` uses. An undeclared key
+/// This is the shared `FieldType::parse_value` grammar, the same one
+/// `field update --set` and `migrate schema --default` use. An undeclared key
 /// keeps its raw text so the domain reports "not declared" instead of guessing a
 /// type from it; the domain still owns the declaration and required-field rules.
 fn field_values(
@@ -198,7 +199,7 @@ fn field_values(
             fields.push((key, FieldValue::String(value.to_owned())));
             continue;
         };
-        match parse_field_value(declaration, value) {
+        match declaration.ty.parse_value(value) {
             Ok(value) => fields.push((key, value)),
             Err(reason) => {
                 issues.push(ValidationIssue::new(format!("custom_fields.{key}"), reason));

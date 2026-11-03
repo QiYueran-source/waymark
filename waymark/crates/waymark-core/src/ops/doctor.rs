@@ -223,6 +223,76 @@ impl DoctorOptions {
     }
 }
 
+/// A project opened for diagnosis, or the report that replaces it when the
+/// configuration cannot be opened at all.
+#[derive(Debug)]
+pub enum Diagnosis {
+    /// The configuration loaded; the whole project can be reviewed.
+    Project(Box<Project>),
+    /// The configuration is invalid or from an unsupported generation; only a
+    /// configuration-scoped report can be produced.
+    Configuration(Report),
+}
+
+impl Diagnosis {
+    /// The project when the configuration opened.
+    pub fn project(&self) -> Option<&Project> {
+        match self {
+            Self::Project(project) => Some(project),
+            Self::Configuration(_) => None,
+        }
+    }
+
+    /// The configuration-scoped report when it did not.
+    pub fn configuration_report(&self) -> Option<&Report> {
+        match self {
+            Self::Project(_) => None,
+            Self::Configuration(report) => Some(report),
+        }
+    }
+}
+
+/// Locate and open the project at or above `start`, keeping a broken
+/// configuration diagnosable.
+///
+/// This is the one derivation of the project root from the located
+/// configuration document, and the one place `CONFIG_INVALID` and
+/// `UNSUPPORTED_VERSION` are mapped to a configuration-scoped report instead of
+/// a bare failure. Adapters call [`diagnose_from`] for the complete run.
+pub fn open_for_diagnosis(
+    start: &Utf8Path,
+    options: DoctorOptions,
+) -> Result<Diagnosis, WaymarkError> {
+    let config_path = crate::ops::config::locate_config_path(start)?;
+    match Config::load(&config_path) {
+        Ok(_) => {
+            // `.waymark/config.toml` sits one directory under the project root.
+            let root = config_path
+                .parent()
+                .and_then(Utf8Path::parent)
+                .ok_or_else(|| {
+                    WaymarkError::internal(format!(
+                        "the configuration path {config_path} has no project root"
+                    ))
+                })?;
+            Ok(Diagnosis::Project(Box::new(Project::open(root)?)))
+        }
+        Err(error) if matches!(error.code(), Code::ConfigInvalid | Code::UnsupportedVersion) => Ok(
+            Diagnosis::Configuration(diagnose_config(&config_path, options)?),
+        ),
+        Err(error) => Err(error),
+    }
+}
+
+/// Run every project-wide diagnostic starting from `start`, even when the
+/// configuration at the discovered project cannot be opened.
+pub fn diagnose_from(start: &Utf8Path, options: DoctorOptions) -> Result<Report, WaymarkError> {
+    match open_for_diagnosis(start, options)? {
+        Diagnosis::Project(project) => diagnose_with(&project, options),
+        Diagnosis::Configuration(report) => Ok(report),
+    }
+}
+
 /// Run every project-wide diagnostic against a project.
 pub fn diagnose(project: &Project) -> Result<Report, WaymarkError> {
     diagnose_with(project, DoctorOptions::new())

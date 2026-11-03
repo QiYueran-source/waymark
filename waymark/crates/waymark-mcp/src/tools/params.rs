@@ -22,13 +22,15 @@ use waymark_core::query::{
 /// The MCP collection default, quoted in every collection tool's description.
 pub const DEFAULT_LIMIT: usize = MCP_DEFAULT_LIMIT;
 
-/// The production operation options, with the dry-run flag a tool asked for.
+/// The production operation options, with the flags a tool asked for.
 ///
-/// The clock, the lock-wait policy, and the effective operator are the core
-/// defaults: MCP has no per-call override, and `OWNER_MISMATCH` is computed
-/// against the configured operator exactly as the CLI computes it.
-pub fn options(dry_run: bool) -> OpOptions {
-    let options = OpOptions::new();
+/// The clock and the effective operator are the core defaults.
+/// `lock_timeout_ms` is the same per-operation override the CLI exposes as
+/// `--lock-timeout-ms`; `OWNER_MISMATCH` is computed against the configured
+/// operator exactly as the CLI computes it.
+pub fn options(dry_run: bool, lock_timeout_ms: Option<u64>) -> OpOptions {
+    let options =
+        OpOptions::new().with_lock_wait(waymark_core::ops::lock_wait_from_millis(lock_timeout_ms));
     if dry_run {
         options.dry_run()
     } else {

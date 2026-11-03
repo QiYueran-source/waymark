@@ -4,8 +4,12 @@
 //! flags cannot express every predicate, so it accepts a JSON filter document.
 //! `search` is the only read that opens the body. `stats` is counts only.
 //!
-//! All three reuse the argument structs in [`super::list`], so the filter, sort,
-//! window, and projection vocabulary cannot drift between them.
+//! `search` and `stats` reuse the argument structs in [`super::list`], so the
+//! filter, sort, window, and projection vocabulary cannot drift between them.
+//! `query` takes the shared window/projection flags but not the filter flags:
+//! its filter document is the only filter input, so a flag can never silently
+//! contradict the document or make the rendered metadata disagree with the
+//! range that was actually read.
 
 use clap::Args;
 use serde_json::Value;
@@ -17,7 +21,7 @@ use waymark_core::search::{self, SearchRequest};
 use waymark_core::stats::{self, statistics_json, StatsRequest};
 use waymark_core::Project;
 
-use super::list::{self as list_cmd, ListArgs};
+use super::list::{self as list_cmd, ListArgs, ViewArgs};
 use super::{emit, err_line};
 
 /// `waymark query`: a list read driven by a structured filter document.
@@ -27,9 +31,10 @@ pub struct QueryArgs {
     #[arg(long, value_name = "JSON|@FILE|-")]
     pub filter: String,
 
-    /// Every list flag except the filter flags, which the document owns.
+    /// Ordering, window, and projection. The document owns every filter,
+    /// including the archive range, so there are no filter flags here.
     #[command(flatten)]
-    pub options: ListArgs,
+    pub view: ViewArgs,
 }
 
 /// `waymark search <text>`.
@@ -87,13 +92,24 @@ fn read_filter(source: &str) -> Result<Value, WaymarkError> {
 
 /// Run `query`.
 pub fn run_query(project: &Project, args: &QueryArgs, json: bool) -> Result<(), WaymarkError> {
+    // The structured document is the only filter input; the flags own sort,
+    // window, and projection, and an empty document means "no filters at all".
     let filters = Filters::from_json(&read_filter(&args.filter)?)?;
-    let query = args.options.query()?;
-    // The structured document owns the filters; the flags still own sort, window,
-    // and projection, and an empty document means "no filters at all".
-    let query = query.with_filters(filters);
+    let (sort, window) = args.view.sort_and_window()?;
+    let query = Query {
+        filters,
+        sort,
+        window,
+    };
     let listing = list_cmd::run_with_query(project, &query, list_cmd::Which::All)?;
-    list_cmd::render(&listing, &args.options, json)
+    // Report the archive range that was actually read: it came from the
+    // document, not from a flag this command no longer has.
+    list_cmd::render(
+        &listing,
+        &args.view.projection()?,
+        query.filters.archive,
+        json,
+    )
 }
 
 /// Build the shared query for `search`, which validates its own arguments.

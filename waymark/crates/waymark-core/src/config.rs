@@ -140,7 +140,21 @@ impl FieldType {
     /// result against the type; this only decides what the text *means*.
     pub fn parse_value(&self, raw: &str) -> Result<FieldValue, String> {
         match self {
-            Self::String => Ok(FieldValue::String(raw.to_owned())),
+            // A string is either a JSON string literal or a bare token taken
+            // verbatim. A structured token for a string field is a mistake, not
+            // content: it is almost always a value meant for a `list:*` field.
+            Self::String if raw.starts_with('"') => match serde_json::from_str(raw) {
+                Ok(serde_json::Value::String(text)) => Ok(FieldValue::String(text)),
+                Ok(_) => Err("a string value must be a JSON string literal".to_owned()),
+                Err(error) => Err(format!("not a valid JSON string literal: {error}")),
+            },
+            Self::String => match serde_json::from_str::<serde_json::Value>(raw) {
+                Ok(serde_json::Value::Array(_) | serde_json::Value::Object(_)) => Err(
+                    "a string value may not be a JSON array or object; quote it to keep it as text"
+                        .to_owned(),
+                ),
+                _ => Ok(FieldValue::String(raw.to_owned())),
+            },
             Self::Integer => {
                 let digits = raw.strip_prefix('-').unwrap_or(raw);
                 if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {

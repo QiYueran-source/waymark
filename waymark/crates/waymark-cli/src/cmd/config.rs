@@ -5,7 +5,6 @@
 //! stderr; `--json` is one envelope on stdout. No arm re-implements a rule.
 
 use clap::{Args, Subcommand};
-use serde_json::Value;
 use waymark_core::config::FieldType;
 use waymark_core::envelope::{success_envelope, Finding, Meta};
 use waymark_core::error::WaymarkError;
@@ -308,52 +307,10 @@ fn argument(name: &str, reason: String) -> WaymarkError {
     WaymarkError::validation(name, vec![waymark_core::ValidationIssue::new(name, reason)])
 }
 
-/// The machine form of one configuration document.
-pub fn config_json(config: &waymark_core::Config) -> Value {
-    serde_json::json!({
-        "version": config.version.to_string(),
-        "generation": config.version.generation,
-        "revision": config.version.revision,
-        "storage_root": config.storage_root,
-        "operator": config.operator,
-        "timezone": config.timezone.name(),
-        "categories": config
-            .categories
-            .iter()
-            .map(|(key, category)| {
-                (
-                    key.as_str().to_owned(),
-                    serde_json::json!({
-                        "key": key.as_str(),
-                        "path": category.path,
-                        "name": category.name,
-                    }),
-                )
-            })
-            .collect::<serde_json::Map<String, Value>>(),
-        "fields": config
-            .fields
-            .iter()
-            .map(|(key, declaration)| {
-                (
-                    key.as_str().to_owned(),
-                    serde_json::json!({
-                        "key": key.as_str(),
-                        "type": declaration.ty.as_str(),
-                        "required": declaration.required,
-                        "default": declaration.default,
-                    }),
-                )
-            })
-            .collect::<serde_json::Map<String, Value>>(),
-        "cache": {"enabled": config.cache.enabled, "capacity": config.cache.capacity},
-    })
-}
-
 fn render_config(config: &waymark_core::Config, json: bool) -> Result<(), WaymarkError> {
     if json {
         emit(&success_envelope(
-            serde_json::json!({"config": config_json(config)}),
+            serde_json::json!({"config": waymark_core::view::config_json(config)}),
             Meta::direct_file_scoped(),
         ))?;
         return Ok(());
@@ -403,7 +360,7 @@ fn render_outcome(outcome: &ConfigOutcome, json: bool, action: &str) -> Result<(
     if json {
         emit(&success_envelope(
             serde_json::json!({
-                "config": config_json(&outcome.config),
+                "config": waymark_core::view::config_json(&outcome.config),
                 "changed": outcome.changed,
                 "changed_keys": outcome.changed_keys,
                 "previous_revision": outcome.previous_revision,

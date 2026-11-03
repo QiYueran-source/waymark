@@ -2240,3 +2240,48 @@ takes the `ArchiveRange` and `Projection` explicitly because those are caller ch
   to collide with a real category). `visibleRoots`, `summarize`, and `countNodes`
   are pure helpers in `tree.ts`, and Explorer calls them; the persistence notice
   is raised by one `persist()` wrapper around every preference write.
+
+# Review fixes — adapters
+
+- **A1 — renderers live in `waymark_core::view`, and adapters only add fields
+  their operation owns.** The CLI and MCP render the same item, tree node,
+  dependency row, config document, listing page, and scoped read through the
+  shared functions. Mediated writes that already published exactly
+  `{id, path, changed, written, item}` use `write_result_json_with` with their
+  extra fields. Two call-site shapes stay deliberately different: `create`
+  publishes no `changed` flag (a create is always a write), and `archive` has
+  no `changed` and carries a path-less `item` plus `removals`/`affected`, so
+  forcing either through the shared core would change the envelope contract.
+- **A2 — the string grammar moved into core, not into a second copy.** The CLI
+  copy was the more careful one (a JSON string literal is unquoted; a JSON
+  array/object is refused for a string field), so that rule now lives in
+  `FieldType::parse_value`. `create --field`, `field update --set`, and
+  `migrate schema --default` call it; no adapter has a grammar of its own.
+- **A3 — `query` takes option (a): the filter flags are gone.** The structured
+  document is the only filter input; only the ordering, window, and projection
+  flags remain (shared as `ViewArgs`). A filter flag is a usage error rather
+  than a silently ignored input, and the rendered `archive` value comes from
+  the query that actually ran. This is the truthful end state without inventing
+  precedence rules between two filter sources.
+- **A4 — `lock_timeout_ms` is a per-operation option on every locking tool.**
+  Both adapters translate it through `waymark_core::ops::lock_wait_from_millis`
+  (`None` = the ten-second default, `0` = fail fast). `waymark_project_init` is
+  the one writer without it: creation cannot contend for a project lock it has
+  not created yet.
+- **A5 — search is a list-shaped read, not a reduced surface.** The MCP search
+  tool takes the same `filter` and `archive` inputs as the list tools; the
+  needle selects within that population. The CLI and MCP default limits remain
+  deliberately different (100 vs 50), as documented by the `list` tool.
+- **A6 — `init` configuration is built by `ops::config::InitRequest` /
+  `ops::config::init`.** The domain owns the defaults, the category display
+  name, and the path under the storage root; CLI and MCP only translate their
+  inputs into the request.
+- **A7 — one project-root derivation and one broken-configuration mapping.**
+  `ops::doctor::open_for_diagnosis` locates the configuration, derives the root,
+  opens the project, or returns a configuration-scoped report for
+  `CONFIG_INVALID`/`UNSUPPORTED_VERSION`. `diagnose_from` runs the complete
+  review; both adapters call it and no longer carry the block.
+- **A8 — diagnostics use the single CLI dispatch.** `run` returns the chosen
+  exit for every command; the special doctor/validate match and the dead arm
+  are gone. The existing exit contract is unchanged: findings exit 0 by
+  default, `--strict` returns the invalid-data class.

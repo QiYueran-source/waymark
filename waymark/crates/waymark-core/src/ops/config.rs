@@ -59,6 +59,106 @@ pub struct ConfigOutcome {
     pub changed_keys: Vec<String>,
 }
 
+/// The inputs `init` needs to write a project's first configuration.
+///
+/// Every field is optional so the adapter passes only what the caller chose;
+/// the domain owns the defaults (`work` for the storage root, `task` for the
+/// one category) and the construction of the paths under the root.
+#[derive(Debug, Clone, Default)]
+pub struct InitRequest {
+    /// Repository-relative storage root; defaults to `work`.
+    pub storage_root: Option<String>,
+    /// The one category to declare; defaults to `task`.
+    pub category: Option<String>,
+    /// Advisory operator identity to record.
+    pub operator: Option<String>,
+    /// IANA time zone to record; defaults to `UTC`.
+    pub timezone: Option<String>,
+}
+
+impl InitRequest {
+    /// A request with every default.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Use this repository-relative storage root.
+    pub fn with_storage_root(mut self, storage_root: impl Into<String>) -> Self {
+        self.storage_root = Some(storage_root.into());
+        self
+    }
+
+    /// Declare this category key.
+    pub fn with_category(mut self, category: impl Into<String>) -> Self {
+        self.category = Some(category.into());
+        self
+    }
+
+    /// Record this operator identity.
+    pub fn with_operator(mut self, operator: impl Into<String>) -> Self {
+        self.operator = Some(operator.into());
+        self
+    }
+
+    /// Record this IANA time zone.
+    pub fn with_timezone(mut self, timezone: impl Into<String>) -> Self {
+        self.timezone = Some(timezone.into());
+        self
+    }
+
+    /// Build the fresh configuration this request describes.
+    pub fn config(&self) -> Result<Config, WaymarkError> {
+        let key = CategoryKey::parse(
+            self.category
+                .as_deref()
+                .unwrap_or(crate::config::DEFAULT_CATEGORY_KEY),
+        )
+        .map_err(|error| {
+            WaymarkError::config_invalid("init", vec![format!("category: {error}")])
+        })?;
+
+        let mut config = Config::fresh();
+        config.storage_root = self
+            .storage_root
+            .clone()
+            .unwrap_or_else(|| crate::config::DEFAULT_STORAGE_ROOT.to_owned());
+        config.categories.clear();
+        config.categories.insert(
+            key.clone(),
+            Category {
+                path: format!("{}/{}", config.storage_root, key.as_str()),
+                name: default_category_name(&key),
+            },
+        );
+        if let Some(operator) = &self.operator {
+            config.operator = Some(operator.clone());
+        }
+        if let Some(timezone) = &self.timezone {
+            config.timezone = parse_timezone(timezone).map_err(|error| {
+                WaymarkError::config_invalid("init", vec![format!("timezone: {error}")])
+            })?;
+        }
+        Ok(config)
+    }
+}
+
+/// Create a project whose first configuration is the requested layout.
+///
+/// This is the one place an adapter-independent `init` lives: the category
+/// path under the storage root, the display name, and the defaults are domain
+/// facts, not CLI presentation.
+pub fn init(root: &Utf8Path, request: InitRequest, force: bool) -> Result<Project, WaymarkError> {
+    let config = request.config()?;
+    Project::init(
+        root,
+        crate::store::InitOptions {
+            force,
+            config: Some(config),
+            operator: None,
+        },
+    )
+}
+
 /// One scalar `config set` may address.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scalar {

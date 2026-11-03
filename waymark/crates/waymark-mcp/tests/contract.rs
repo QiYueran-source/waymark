@@ -427,3 +427,28 @@ async fn write_schemas_are_single_target_and_migration_actions_are_tagged_unions
 
     client.shutdown().await;
 }
+
+/// A tool that can write exposes the same per-operation lock override as the
+/// CLI's `--lock-timeout-ms`; a future write tool cannot silently omit it.
+#[tokio::test]
+async fn every_write_tool_exposes_the_shared_lock_override() {
+    let fixture = common::fixture(&[]);
+    let client = common::Client::connect(fixture.root.clone()).await;
+    for tool in client.tools().await {
+        let schema = tool_schema(&tool);
+        if schema["properties"].get("dry_run").is_some() {
+            assert!(
+                schema["properties"].get("lock_timeout_ms").is_some(),
+                "{} writes but has no lock_timeout_ms",
+                tool.name
+            );
+            let description = tool.description.as_deref().unwrap_or_default();
+            assert!(
+                description.contains("lock_timeout_ms"),
+                "{} does not document lock_timeout_ms",
+                tool.name
+            );
+        }
+    }
+    client.shutdown().await;
+}

@@ -12,12 +12,11 @@ use rmcp::tool;
 use rmcp::tool_router;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::json;
 use waymark_core::envelope::Meta;
-use waymark_core::error::{Code, WaymarkError};
+use waymark_core::error::WaymarkError;
 use waymark_core::ops::config::{self, ConfigOutcome, FieldAttribute, Scalar};
 use waymark_core::ops::doctor::{self, DoctorOptions, Report};
-use waymark_core::{Config, Project};
 
 use crate::envelope::{self, ToolResult};
 use crate::server::WaymarkServer;
@@ -36,6 +35,12 @@ pub struct ConfigSetArgs {
     /// Validate and report the change without writing.
     #[serde(default)]
     pub dry_run: bool,
+
+    /// Wait at most this many milliseconds for the project write lock.
+    /// Omitted uses the shared default wait; `0` fails immediately with the
+    /// retryable `LOCK_TIMEOUT` code.
+    #[serde(default)]
+    pub lock_timeout_ms: Option<u64>,
 }
 
 /// Inputs of `waymark_config_add_category`.
@@ -54,6 +59,12 @@ pub struct ConfigAddCategoryArgs {
     /// Validate and report the change without writing.
     #[serde(default)]
     pub dry_run: bool,
+
+    /// Wait at most this many milliseconds for the project write lock.
+    /// Omitted uses the shared default wait; `0` fails immediately with the
+    /// retryable `LOCK_TIMEOUT` code.
+    #[serde(default)]
+    pub lock_timeout_ms: Option<u64>,
 }
 
 /// Inputs of `waymark_config_update_category`.
@@ -69,6 +80,12 @@ pub struct ConfigUpdateCategoryArgs {
     /// Validate and report the change without writing.
     #[serde(default)]
     pub dry_run: bool,
+
+    /// Wait at most this many milliseconds for the project write lock.
+    /// Omitted uses the shared default wait; `0` fails immediately with the
+    /// retryable `LOCK_TIMEOUT` code.
+    #[serde(default)]
+    pub lock_timeout_ms: Option<u64>,
 }
 
 /// Inputs of `waymark_config_remove_category`.
@@ -81,6 +98,12 @@ pub struct ConfigRemoveCategoryArgs {
     /// Validate and report the change without writing.
     #[serde(default)]
     pub dry_run: bool,
+
+    /// Wait at most this many milliseconds for the project write lock.
+    /// Omitted uses the shared default wait; `0` fails immediately with the
+    /// retryable `LOCK_TIMEOUT` code.
+    #[serde(default)]
+    pub lock_timeout_ms: Option<u64>,
 }
 
 /// Inputs of `waymark_config_add_field`.
@@ -106,6 +129,12 @@ pub struct ConfigAddFieldArgs {
     /// Validate and report the change without writing.
     #[serde(default)]
     pub dry_run: bool,
+
+    /// Wait at most this many milliseconds for the project write lock.
+    /// Omitted uses the shared default wait; `0` fails immediately with the
+    /// retryable `LOCK_TIMEOUT` code.
+    #[serde(default)]
+    pub lock_timeout_ms: Option<u64>,
 }
 
 /// Inputs of `waymark_config_update_field`.
@@ -124,6 +153,12 @@ pub struct ConfigUpdateFieldArgs {
     /// Validate and report the change without writing.
     #[serde(default)]
     pub dry_run: bool,
+
+    /// Wait at most this many milliseconds for the project write lock.
+    /// Omitted uses the shared default wait; `0` fails immediately with the
+    /// retryable `LOCK_TIMEOUT` code.
+    #[serde(default)]
+    pub lock_timeout_ms: Option<u64>,
 }
 
 #[tool_router(router = config_router, vis = "pub(crate)")]
@@ -140,7 +175,7 @@ impl WaymarkServer {
             let project = self.project()?;
             let config = config::show(&project)?;
             Ok(envelope::success(
-                json!({"config": config_json(&config)}),
+                json!({"config": waymark_core::view::config_json(&config)}),
                 Meta::direct_file_scoped(),
             ))
         })
@@ -191,6 +226,9 @@ impl WaymarkServer {
     /// or `cache.capacity`. Takes the shared write lock, bumps the revision,
     /// and returns the updated configuration. An empty `operator` clears it.
     /// `dry_run` performs every check and writes nothing.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_config_set",
         annotations(
@@ -207,7 +245,7 @@ impl WaymarkServer {
                 &project,
                 scalar,
                 &args.value,
-                &params::options(args.dry_run),
+                &params::options(args.dry_run, args.lock_timeout_ms),
             )?;
             Ok(config_result(&outcome))
         })
@@ -215,6 +253,9 @@ impl WaymarkServer {
 
     /// Declare a new category. The directory is created on a real run; a dry
     /// run validates the path and creates nothing.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_config_add_category",
         annotations(
@@ -235,7 +276,7 @@ impl WaymarkServer {
                 &key,
                 &args.path,
                 args.name.as_deref(),
-                &params::options(args.dry_run),
+                &params::options(args.dry_run, args.lock_timeout_ms),
             )?;
             Ok(config_result(&outcome))
         })
@@ -243,6 +284,9 @@ impl WaymarkServer {
 
     /// Change a category's display name. Items and directories are untouched;
     /// a directory move is a storage migration.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_config_update_category",
         annotations(
@@ -262,7 +306,7 @@ impl WaymarkServer {
                 &project,
                 &key,
                 &args.name,
-                &params::options(args.dry_run),
+                &params::options(args.dry_run, args.lock_timeout_ms),
             )?;
             Ok(config_result(&outcome))
         })
@@ -270,6 +314,9 @@ impl WaymarkServer {
 
     /// Remove a category that no work item uses, active or archived. The
     /// refusal names every item that still uses it.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_config_remove_category",
         annotations(
@@ -285,13 +332,20 @@ impl WaymarkServer {
         envelope::respond(|| {
             let key = params::category_key(&args.key)?;
             let project = self.project()?;
-            let outcome = config::remove_category(&project, &key, &params::options(args.dry_run))?;
+            let outcome = config::remove_category(
+                &project,
+                &key,
+                &params::options(args.dry_run, args.lock_timeout_ms),
+            )?;
             Ok(config_result(&outcome))
         })
     }
 
     /// Declare an optional custom field. A required declaration is a schema
     /// migration and is refused with `ACTION_REQUIRES_MIGRATION`.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_config_add_field",
         annotations(
@@ -314,7 +368,7 @@ impl WaymarkServer {
                 ty,
                 args.required,
                 args.default.as_deref(),
-                &params::options(args.dry_run),
+                &params::options(args.dry_run, args.lock_timeout_ms),
             )?;
             Ok(config_result(&outcome))
         })
@@ -324,6 +378,9 @@ impl WaymarkServer {
     /// `required` to false, or set/clear the `default`. A type change and
     /// making a field required are migrations and are refused with
     /// `ACTION_REQUIRES_MIGRATION`.
+    ///
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_config_update_field",
         annotations(
@@ -345,7 +402,7 @@ impl WaymarkServer {
                 &key,
                 attribute,
                 &args.value,
-                &params::options(args.dry_run),
+                &params::options(args.dry_run, args.lock_timeout_ms),
             )?;
             Ok(config_result(&outcome))
         })
@@ -359,7 +416,7 @@ impl WaymarkServer {
 fn config_result(outcome: &ConfigOutcome) -> ToolResult {
     envelope::success(
         json!({
-            "config": config_json(&outcome.config),
+            "config": waymark_core::view::config_json(&outcome.config),
             "changed": outcome.changed,
             "changed_keys": outcome.changed_keys,
             "previous_revision": outcome.previous_revision,
@@ -376,69 +433,8 @@ fn report_result(report: Report) -> ToolResult {
 
 /// Resolve the project and run the shared diagnostics.
 ///
-/// Mirrors the CLI: the configuration file is located without parsing so a
-/// broken configuration still gets a configuration-scoped report instead of a
-/// bare `CONFIG_INVALID` failure with no findings.
+/// The core entry point owns the project-root derivation and maps a broken
+/// configuration to a configuration-scoped report, exactly as the CLI does.
 fn diagnose(start: &Utf8Path) -> Result<Report, WaymarkError> {
-    let config_path = config::locate_config_path(start)?;
-    match Config::load(&config_path) {
-        Ok(_) => {
-            let root = config_path
-                .parent()
-                .and_then(Utf8Path::parent)
-                .ok_or_else(|| {
-                    WaymarkError::internal(format!(
-                        "the configuration path {config_path} has no project root"
-                    ))
-                })?;
-            let project = Project::open(root)?;
-            doctor::diagnose_with(&project, DoctorOptions::new())
-        }
-        Err(error) if matches!(error.code(), Code::ConfigInvalid | Code::UnsupportedVersion) => {
-            doctor::diagnose_config(&config_path, DoctorOptions::new())
-        }
-        Err(error) => Err(error),
-    }
-}
-
-/// The machine form of one configuration document.
-fn config_json(config: &Config) -> Value {
-    json!({
-        "version": config.version.to_string(),
-        "generation": config.version.generation,
-        "revision": config.version.revision,
-        "storage_root": config.storage_root,
-        "operator": config.operator,
-        "timezone": config.timezone.name(),
-        "categories": config
-            .categories
-            .iter()
-            .map(|(key, category)| {
-                (
-                    key.as_str().to_owned(),
-                    json!({
-                        "key": key.as_str(),
-                        "path": category.path,
-                        "name": category.name,
-                    }),
-                )
-            })
-            .collect::<serde_json::Map<String, Value>>(),
-        "fields": config
-            .fields
-            .iter()
-            .map(|(key, declaration)| {
-                (
-                    key.as_str().to_owned(),
-                    json!({
-                        "key": key.as_str(),
-                        "type": declaration.ty.as_str(),
-                        "required": declaration.required,
-                        "default": declaration.default,
-                    }),
-                )
-            })
-            .collect::<serde_json::Map<String, Value>>(),
-        "cache": {"enabled": config.cache.enabled, "capacity": config.cache.capacity},
-    })
+    doctor::diagnose_from(start, DoctorOptions::new())
 }

@@ -42,6 +42,19 @@ use crate::time::{Clock, SystemClock};
 /// importing the lock module.
 pub const DEFAULT_LOCK_WAIT: Duration = crate::write::DEFAULT_LOCK_WAIT;
 
+/// Translate a millisecond override into a lock-wait policy.
+///
+/// Both adapters expose the same `lock_timeout_ms` option, so the meaning is
+/// shared: `None` keeps the default ten-second wait, `Some(0)` fails
+/// immediately when the lock is held, and any other value bounds the wait.
+pub fn lock_wait_from_millis(milliseconds: Option<u64>) -> LockWait {
+    match milliseconds {
+        Some(0) => LockWait::immediate(),
+        Some(value) => LockWait::new(Duration::from_millis(value)),
+        None => LockWait::default_policy(),
+    }
+}
+
 /// Everything an operation needs from its caller that is not domain input.
 #[derive(Clone)]
 pub struct OpOptions {
