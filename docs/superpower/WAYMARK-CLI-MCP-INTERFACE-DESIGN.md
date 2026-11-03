@@ -122,13 +122,14 @@ waymark config update ...
 waymark validate
 waymark doctor
 waymark sync
-waymark migrate plan ...
-waymark migrate apply ...
+waymark migrate version --to <generation> [--dry-run]
+waymark migrate schema --remove-field <key> [--dry-run]
+waymark migrate storage --root <path> | --category-path <key>=<path> | --category-key <old>=<new> [--dry-run]
 waymark git history ...
 waymark git diff ...
 ```
 
-CLI 负责把人类参数转换成共享函数请求，并将结构化业务错误映射为稳定退出码。破坏性、内在涉及多个文件或项目级的操作应支持 dry-run 或 plan/apply 机制，具体范围待细化。
+CLI 负责把人类参数转换成共享函数请求，并将结构化业务错误映射为稳定退出码。迁移没有 plan 文件、没有 plan/apply 握手：`--dry-run` 做完整只读检查并输出受影响清单，正式执行重新做同样的检查后写入。加字段属于配置操作（`config field add`），删字段只通过 `migrate schema --remove-field`，不存在 `config field remove`。
 
 ### 3.2 工作项读取与查询
 
@@ -197,13 +198,14 @@ waymark_config_update
 waymark_validate
 waymark_doctor
 waymark_sync_projection
-waymark_migration_plan
-waymark_migration_apply
+waymark_migrate_version
+waymark_migrate_schema
+waymark_migrate_storage
 waymark_git_history
 waymark_git_diff
 ```
 
-CLI 与 MCP 对这些能力不做产品级区别；确认、dry-run、plan/apply、锁、冲突和恢复语义由共享函数统一定义。
+CLI 与 MCP 对这些能力不做产品级区别；`dry_run`、锁、冲突和恢复语义由共享函数统一定义。
 
 ### 4.2 读取与查询
 
@@ -273,7 +275,7 @@ CLI 和 MCP 共享以下约束：
 - title、body、自定义字段操作的完整 MCP schema 和返回值；
 - 是否提供复合 `edit` 命令，以及跨领域编辑是否原子；
 - 读取查询的分页、排序、投影和 archive 参数；
-- 配置修改和迁移的具体 kind、plan/apply schema；
+- 三类迁移的完整请求/响应 envelope，以及 `--dry-run` 输出的机器可读结构；
 - Git 能力是否在两个适配器中使用完全相同的参数。
 
 这些问题属于下一轮接口细化，不改变本文已经确定的共享函数库、CLI/MCP 能力平等和编辑领域分拆原则。
