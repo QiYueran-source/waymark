@@ -23,9 +23,10 @@
 //! every document parsed and the inventory contained no uncertain
 //! item-shaped path; it is [`Completeness::Scoped`] as soon as one document
 //! failed or one path that is *shaped* like a work-item document could not be
-//! inventoried (a case variant, a symlink, or an unreadable entry). A file that
-//! is plainly not a work item — a stray `README.md`, a `.txt` note — is project
-//! noise and does not by itself make the world partial.
+//! inventoried (a case variant or an unreadable entry). A file that is plainly
+//! not a work item — a stray `README.md`, a `.txt` note — is project noise and
+//! does not by itself make the world partial; a symlink is the store's own
+//! refusal, not a document.
 //! Freshness is [`Freshness::Fresh`] only after that verification.
 //!
 //! # Content fingerprints, not timestamps
