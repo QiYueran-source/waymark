@@ -445,6 +445,29 @@ fn list_in_human_mode_writes_a_table_to_stderr_and_nothing_to_stdout() {
 }
 
 #[test]
+fn the_human_narrative_names_the_edge_in_reading_order() {
+    let (_dir, root) = project();
+    let blocker = create(&root, "blocker");
+    let dependent = create(&root, "dependent");
+
+    let result = run(waymark()
+        .arg("--project")
+        .arg(&root)
+        .arg("dependency")
+        .arg("add")
+        .arg(&dependent)
+        .arg(&blocker));
+    assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
+    assert!(
+        result
+            .stderr()
+            .contains(&format!("{dependent} depends on {blocker}")),
+        "{}",
+        result.stderr()
+    );
+}
+
+#[test]
 fn show_reports_readiness_children_and_dependents() {
     let (_dir, root) = project();
     let blocker = create(&root, "blocker");

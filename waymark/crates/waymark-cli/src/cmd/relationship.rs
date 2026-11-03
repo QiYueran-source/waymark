@@ -105,7 +105,7 @@ fn apply(
         };
         err_line(&format!(
             "{prefix}{} {} {}",
-            relation, outcome.item.id, outcome.dependency
+            outcome.item.id, relation, outcome.dependency
         ));
         for warning in &outcome.meta.warnings {
             err_line(&format!("  {}: {}", warning.code, warning.message));
