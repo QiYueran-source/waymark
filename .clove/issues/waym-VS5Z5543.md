@@ -120,7 +120,7 @@ Produce a handoff-ready functional specification for Waymark, a general-purpose,
 
 ## Not yet specified
 
-The remaining interface-design work is to settle the exact public CLI command tree, MCP tool names, request/response schemas, archive-range and pagination parameters, batch operation shapes, dry-run coverage, and which convenience aliases are retained. The shared function-library boundary and equal CLI/MCP capability coverage are settled; command spelling and transport schemas remain open until the interface design ticket is resolved.
+The remaining interface-design work is to settle the exact public CLI command tree, MCP tool names, request/response schemas, archive-range and pagination parameters, batch operation shapes, dry-run coverage, and which convenience aliases are retained. The shared function-library boundary, equal CLI/MCP capability coverage, and the initial separation of title/body/custom-field editing from protected core-field operations are settled; command spelling and transport schemas remain open until the interface design ticket is resolved.
 
 The archive, in-process projection/cache, body-editing, projection validation, query-range, migration, relationship-operation, lifecycle/ownership, creation, timezone, and adapter-parity contracts resolved so far are recorded above and must be reflected in the functional specification and implementation tickets. The design is ready for a consistency pass and then synchronization to the functional specification and implementation tickets when requested.
 
