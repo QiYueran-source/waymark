@@ -12,6 +12,32 @@ use serde::{Deserialize, Serialize};
 /// The on-disk format generation this release writes and reads.
 pub const FORMAT_GENERATION: u32 = 1;
 
+/// Frontmatter keys a custom field may not shadow: the persisted v1 fields plus
+/// the values computed from the projection.
+pub const RESERVED_FIELD_NAMES: &[&str] = &[
+    "schema",
+    "id",
+    "title",
+    "category",
+    "status",
+    "owner",
+    "creator",
+    "created_at",
+    "updated_at",
+    "closed_at",
+    "parent",
+    "dependencies",
+    "soft_links",
+    "custom_fields",
+    "archived_at",
+    "archive_reason",
+    "ready",
+    "blocked",
+    "blocked_by",
+    "children",
+    "dependents",
+];
+
 /// The lifecycle states a work item can be in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
