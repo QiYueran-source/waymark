@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/waymark-core",
     "crates/waymark-cli",
+    "crates/waymark-web",
 ]
 
 [workspace.package]
@@ -27,8 +28,13 @@ libc = "0.2"
 getrandom = "0.2"
 serde_norway = "0.9"
 clap = { version = "4", features = ["derive"] }
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync"] }
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+ammonia = "4"
 
 waymark-core = { path = "crates/waymark-core" }
+waymark-web = { path = "crates/waymark-web" }
 
 [profile.release]
 lto = "thin"
