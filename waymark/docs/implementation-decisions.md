@@ -320,6 +320,101 @@ caller can reuse for paging, which a single document write does not produce; the
 implementation detail of validation, not an artifact handed back. T9 owns the projection cache and can
 revisit the wording if it starts handing one out.
 
+## Editing (T4)
+
+### The field change set is a sequence, and `null` is its own variant
+
+**Choice:** `ops::edit::FieldChangeEntry { key: String, change: FieldChange }` where `FieldChange` is
+`Set(FieldValue) | Clear | Null`. `update_custom_fields` takes `&[FieldChangeEntry]`, not a map.
+
+**Why:** a `BTreeMap` would silently collapse a duplicate key, and the spec requires duplicate and
+set-and-clear conflicts to be *rejected*. A sequence preserves the mistake long enough to report it,
+and the operation groups by key itself. `FieldChange::Null` exists so a structured caller (JSON, MCP)
+can send an explicit `null` and be told it is not a value instead of the adapter having to silently map
+it onto `Clear`; it is never persisted.
+
+### `changed_fields` lists every key whose value or presence moved
+
+**Choice:** `FieldOutcome::changed_fields: Vec<FieldKey>` in key order, naming a key when its value or
+presence differs from what was read. A `set` repeating the stored value and a `clear` of an unset key
+are not changes; an empty `changed_fields` is exactly the "no effective change, no write" case.
+
+**Why:** the spec says the operation returns "the changed field names". Reporting requested keys rather
+than effective ones would claim a change that did not happen, and reporting only *sets* would hide the
+clear that the caller asked for.
+
+### One `EditOutcome` for title and body, a wider `FieldOutcome` for fields
+
+**Choice:** `set_title` and `replace_body` return `EditOutcome { item, path, changed, written, meta }`;
+`update_custom_fields` returns `FieldOutcome` with the same fields plus `changed_fields`.
+
+**Why:** both carry the complete resulting item, the `changed` flag, the `_meta` block (so the
+`OWNER_MISMATCH` warning reaches the envelope), and `written` — which differs from `changed` on a dry
+run. Keeping `written` on the outcome matches `StatusOutcome` and `RelationshipOutcome`, so no adapter
+has to re-derive "was this real" from the options it passed in.
+
+### Validation runs before the lock, and the whole set before the single write
+
+**Choice:** `validate_changes` is called before `with_project_lock`, and applies nothing until every
+entry is accepted.
+
+**Why:** a rejected change set must not hold the store lock (or wait for it) on behalf of a request
+that cannot succeed, and a partially applied set would be exactly the "validates the whole change set
+before one write" failure the ticket forbids. Reading the item is still inside the lock, because the
+values are applied to the document that is actually committed.
+
+### Title validation trims first, then rejects
+
+**Choice:** the title is `trim()`ed, then rejected if empty or if the *trimmed* value contains `\n` or
+`\r`. Internal whitespace, including tabs and runs of spaces, is preserved verbatim.
+
+**Why:** trailing/leading whitespace is never part of a title, but reflowing internal whitespace would
+silently change text the caller wrote. Checking line breaks on the trimmed value lets a title typed with
+a trailing newline through while still making a real second line an error.
+
+### Body canonicalization is `serialize::canonical_body`
+
+**Choice:** `replace_body` reuses `canonical_body`, which normalizes CRLF to LF, collapses the trailing
+run of newlines to exactly one, and returns zero bytes for a newline-only body. The stored value is the
+canonical form, so `changed` compares canonical values.
+
+**Why:** the writer already owns this rule and the parser applies it on read; a second copy in the edit
+operation could disagree with the bytes a round-trip produces, and then every `body replace` of an
+already-canonical body would look "changed".
+
+### CLI body input: `--body` and `--body-file` are exclusive, `-` means stdin, neither means no-op
+
+**Choice:** neither flag leaves the body unchanged (not cleared); `--body -` and `--body-file -` both
+read stdin to EOF; a file is read as UTF-8 and a read failure is `IO_ERROR`. There is no interactive
+editor.
+
+**Why:** the spec says absent input leaves the body alone and an explicit empty value clears it, which
+maps exactly onto "flag absent" vs `--body ""`. Deciding that `-` (in either position) means stdin keeps
+the two options symmetric and keeps large bodies out of argv.
+
+### CLI field values are parsed by declared type, never guessed from the literal
+
+**Choice:** `integer` accepts only `-?[0-9]+` (so `+3`, `3.0`, `1_000`, `0x10` are rejected);
+`boolean` accepts exactly `true`/`false`; `list:*` requires a JSON array checked element-wise;
+`string` accepts a JSON string literal when the token starts with `"`, a JSON array/object is rejected,
+and anything else is taken verbatim (including the empty string and embedded `=`). `KEY=VALUE` splits on
+the *first* `=`.
+
+**Why:** the spec forbids implicit conversion and says a string takes "an unambiguous token or a JSON
+string literal". Splitting on the first `=` is what lets a string value contain an `=`, and rejecting a
+structured token for a string field reports the mismatch at the field instead of quietly storing JSON
+text in it.
+
+### `--operator` is still not a CLI flag, so an owner mismatch can only come from the configuration
+
+**Choice:** the editing commands do not add an operator flag; the CLI test produces `OWNER_MISMATCH` by
+setting `operator` in `.waymark/config.toml` to a name that is not the item owner.
+
+**Why:** the adapter has one way to state the acting identity today (the configuration). Adding a
+per-command override is a cross-cutting accountability decision, not part of this ticket; the domain
+operation already takes the override through `OpOptions`, so a later ticket can expose it without
+touching `ops::edit`.
+
 # T6 — hierarchy, soft links, trees, and the batch engine
 
 ### `parent set` replaces, and re-setting the same parent is a true no-op

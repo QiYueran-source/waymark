@@ -5,6 +5,7 @@
 //! otherwise duplicate.
 
 pub mod create;
+pub mod edit;
 pub mod init;
 pub mod link;
 pub mod list;
