@@ -2,11 +2,12 @@
 schema: 1
 id: waym-3Y19NH3K
 title: 'Walking skeleton: initialize, create, and read a work item'
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-11-03T05:43:10.781Z
-updated: 2026-11-03T05:43:10.781Z
+updated: 2026-11-03T16:50:39.344Z
+closed: 2026-11-03T16:50:39.344Z
 parent: waym-WMSPEC01
 labels: [ready-for-agent]
 deps: []

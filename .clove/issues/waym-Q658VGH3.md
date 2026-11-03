@@ -2,11 +2,12 @@
 schema: 1
 id: waym-Q658VGH3
 title: Lifecycle, dependencies, and readiness
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-11-03T05:43:38.266Z
-updated: 2026-11-03T05:43:38.266Z
+updated: 2026-11-03T16:50:39.466Z
+closed: 2026-11-03T16:50:39.466Z
 parent: waym-WMSPEC01
 labels: [ready-for-agent]
 deps: [waym-0GQKACVA]

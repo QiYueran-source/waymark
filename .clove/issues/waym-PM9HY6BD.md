@@ -2,11 +2,12 @@
 schema: 1
 id: waym-PM9HY6BD
 title: 'Archive: irreversible logical deletion'
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-11-03T05:43:38.307Z
-updated: 2026-11-03T05:43:38.307Z
+updated: 2026-11-03T16:50:39.508Z
+closed: 2026-11-03T16:50:39.508Z
 parent: waym-WMSPEC01
 labels: [ready-for-agent]
 deps: [waym-T6MEVAQZ]

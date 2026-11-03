@@ -2,11 +2,12 @@
 schema: 1
 id: waym-W33EB5P1
 title: MCP adapter over the shared library
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-11-03T05:43:42.063Z
-updated: 2026-11-03T05:43:42.063Z
+updated: 2026-11-03T16:50:39.567Z
+closed: 2026-11-03T16:50:39.567Z
 parent: waym-WMSPEC01
 labels: [ready-for-agent]
 deps: [waym-Y1ZTWK25]

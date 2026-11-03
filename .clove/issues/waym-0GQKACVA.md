@@ -2,11 +2,12 @@
 schema: 1
 id: waym-0GQKACVA
 title: Error registry, envelopes, and exit mapping
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-11-03T05:43:38.205Z
-updated: 2026-11-03T05:43:38.205Z
+updated: 2026-11-03T16:50:39.408Z
+closed: 2026-11-03T16:50:39.408Z
 parent: waym-WMSPEC01
 labels: [ready-for-agent]
 deps: [waym-3Y19NH3K]

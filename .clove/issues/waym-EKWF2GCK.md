@@ -2,11 +2,12 @@
 schema: 1
 id: waym-EKWF2GCK
 title: Versioning and migration
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-11-03T05:43:42.021Z
-updated: 2026-11-03T05:43:42.021Z
+updated: 2026-11-03T16:50:39.623Z
+closed: 2026-11-03T16:50:39.623Z
 parent: waym-WMSPEC01
 labels: [ready-for-agent]
 deps: [waym-0XVE8PGE, waym-940D5VC9]

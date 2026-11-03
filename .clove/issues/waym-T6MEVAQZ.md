@@ -2,11 +2,12 @@
 schema: 1
 id: waym-T6MEVAQZ
 title: Parent, soft links, and tree reads
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-11-03T05:43:38.288Z
-updated: 2026-11-03T05:43:38.288Z
+updated: 2026-11-03T16:50:39.485Z
+closed: 2026-11-03T16:50:39.485Z
 parent: waym-WMSPEC01
 labels: [ready-for-agent]
 deps: [waym-Q658VGH3]

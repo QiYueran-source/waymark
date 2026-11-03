@@ -2,11 +2,12 @@
 schema: 1
 id: waym-940D5VC9
 title: Projection, completeness, and cache
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-11-03T05:43:42.003Z
-updated: 2026-11-03T05:43:42.003Z
+updated: 2026-11-03T16:50:39.546Z
+closed: 2026-11-03T16:50:39.546Z
 parent: waym-WMSPEC01
 labels: [ready-for-agent]
 deps: [waym-Y1ZTWK25]

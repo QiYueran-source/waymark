@@ -2,11 +2,12 @@
 schema: 1
 id: waym-ZH9RGQRA
 title: Git history, diff, and generated agent documentation
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-11-03T05:43:42.101Z
-updated: 2026-11-03T05:43:42.101Z
+updated: 2026-11-03T16:50:39.586Z
+closed: 2026-11-03T16:50:39.586Z
 parent: waym-WMSPEC01
 labels: [ready-for-agent]
 deps: [waym-Y1ZTWK25]

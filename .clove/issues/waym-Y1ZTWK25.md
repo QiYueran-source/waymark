@@ -2,11 +2,12 @@
 schema: 1
 id: waym-Y1ZTWK25
 title: Collection queries, search, and statistics
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-11-03T05:43:41.984Z
-updated: 2026-11-03T05:43:41.984Z
+updated: 2026-11-03T16:50:39.525Z
+closed: 2026-11-03T16:50:39.525Z
 parent: waym-WMSPEC01
 labels: [ready-for-agent]
 deps: [waym-PM9HY6BD, waym-Q658VGH3]
