@@ -159,7 +159,9 @@ waymark stats
 ### 3.3 工作项和编辑
 
 ```text
-waymark create ...
+waymark create <title> --category <key> --owner <who> [--creator <who>]
+  [--body <text> | --body-file <path>] [--field <key=value>]...
+  [--parent <id>] [--depends-on <id>]... [--link <id>]...
 waymark title set <id> <title>
 waymark body replace <id> --body <text>
 waymark body replace <id> --body-file <path>
