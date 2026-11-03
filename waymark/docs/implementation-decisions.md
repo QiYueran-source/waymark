@@ -668,3 +668,92 @@ argument shapes are `parent set <ID> <PARENT_ID>`, `parent clear <ID>`, `link ad
 **Why:** a dependency tree and a hierarchy tree can contain the same items, and a shared marker would
 make a pasted terminal transcript ambiguous. One envelope keeps every adapter on the same result shape,
 which the spec requires of CLI and MCP alike.
+
+### Archive reads the target without the archived-item write refusal
+
+**Choice:** `ops::mediated` exposes `load_entry_any`, which reads and fingerprint-checks a document but
+does not apply the `ITEM_ARCHIVED` refusal; `load_entry` keeps the refusal and is what every other
+mediated write uses. `ops::archive` is the only caller of the unguarded form and answers
+`ALREADY_ARCHIVED` itself. It also derives the target from the same complete scan it uses for inbound
+edges rather than locating it separately once more.
+
+**Why:** the refusal and the re-archive answer are different rejections of the same state, and archive
+must produce the specific one. Rather than duplicating the read in archive (and hoping the two reads
+agree), the scan is the single source of both the target bytes and its fingerprint. A target this scan
+has already read and hashed is also exactly what the batch has to conflict-check against.
+
+### Archive stages its inbound cleanup as one batch, target included
+
+**Choice:** the archived target and every active file it cleans are replaced through a single
+`replace_batch` call, target first, then affected files in stable-ID order. A file that loses nothing
+is not touched at all — not even a rewrite with identical bytes — so `updated_at` moves only for files
+whose content actually changed. The target never gets a new `updated_at`.
+
+**Why:** "all or nothing" has to include the marker, or a failure mid-cleanup would leave an item
+archived while an active file still points at it. Excluding the no-op files keeps the batch, and the
+conflict surface, proportional to the relationships that actually existed.
+
+### A broken sibling fails archive instead of being skipped
+
+**Choice:** archive scans every document and propagates a parse or ID-mismatch failure. `show` and the
+tree family can degrade with a diagnostic because they answer about one item or one subtree; archive
+cannot, because the file it could not read might be the one holding an inbound edge.
+
+**Why:** silently skipping the unreadable file would archive the target and leave a dangling active
+reference behind, which is exactly the state the inbound cleanup exists to prevent.
+
+### A blank archive reason is stored as no reason at all
+
+**Choice:** `archive_reason` is trimmed, and a whitespace-only value is treated as `None`, so the
+document omits the key. The reason is otherwise stored verbatim, including internal newlines, which the
+canonical serializer emits as a double-quoted scalar.
+
+**Why:** an empty scalar and an absent key differ in the canonical form but say the same thing to a
+human; only one of them can be canonical, so the omitted form wins. Multi-line reasons are real prose
+and must not be silently flattened, so they get the serializer's existing quoted form.
+
+### `ALREADY_ARCHIVED` carries `{id}`, exactly as the registry already specifies
+
+**Choice:** the archive ticket's prose says re-archive reports `ALREADY_ARCHIVED {archived_at}`; the
+error registry, the spec's code table, and the existing `already_archived` constructor all say `{id}`.
+The implementation keeps `{id}` and does not change the registry, the golden file, or the constructor.
+
+**Why:** the details keys are pinned by the golden registry, and `{id}` is the field a caller needs to
+correlate the failure — the whole point of the code is that the timestamp is *not* being replaced, so
+reporting it would invite a caller to treat it as authoritative. The `ArchiveOutcome` already carries
+`archived_at` for successful archives, so no information is lost.
+
+### The archived-only range is exclusive and reports archived rows as closed
+
+**Choice:** `list::Filters` gains `archive: ArchiveRange` (`Active` by default, `Archived` opt-in) with
+`with_archived()` / `with_active()` builders; `Graph` keeps archived items in a lookup table exposed by
+`archived_items()` and answers `readiness_any` with `Readiness::closed()` for them. `list --archived`
+lists retired work; `ready --archived` and `blocked --archived` are empty because their own selection is
+readiness, and an archived item has none.
+
+**Why:** the spec forbids mixing archived items into the active graph, so the two ranges cannot be a
+single population with a filter predicate. Reusing `closed()` is the only answer that is true of an
+archived item and also excludes it from `ready`/`blocked` without a second, parallel rule.
+
+### `show` marks an archived item's own edges as historical
+
+**Choice:** `show` reports `archived` and `relationships.historical: true` for an archived item, and the
+human rendering suffixes `parent`, `depends on`, and `soft links` with `(historical)`. The fields
+themselves are printed unchanged.
+
+**Why:** the archive operation strips *inbound* edges but deliberately leaves the archived item's own
+edges alone as context; without a marker a reader would take them for live references that the graph
+has already stopped honouring. The marker is on the relation block and not on each field, so the shape
+of the payload does not change.
+
+### `waymark archive` renders the plan on both dry runs and real archives
+
+**Choice:** `waymark archive <ID> [--reason TEXT] [--dry-run]` prints `archived` (or `would be archived`)
+followed by the marker instant, the unchanged status, and one line per planned removal naming the
+source item and the relation field. JSON carries `removals: [{from, relation}]`, `affected: [{id, path}]`,
+`written`, and the full item under `item`.
+
+**Why:** a real archive usually cleans several files the caller never named, so the removals are the
+answer the caller needs whether or not they asked for a dry run. `--archived` was added to the shared
+`ListArgs`, which puts it on `list`, `ready`, and `blocked` at once — the three already share one filter
+vocabulary, and giving only `list` the range would have made `ready --archived` a parse error.

@@ -22,6 +22,7 @@ use waymark_core::time::SystemClock;
 
 mod cmd;
 
+use cmd::archive::ArchiveArgs;
 use cmd::config::ConfigArgs;
 use cmd::create::CreateArgs;
 use cmd::edit::{BodyArgs, FieldArgs, TitleArgs};
@@ -98,6 +99,8 @@ enum Command {
     Ready(ListArgs),
     /// List items waiting on an unfinished or missing dependency.
     Blocked(ListArgs),
+    /// Retire one work item without deleting it.
+    Archive(ArchiveArgs),
     /// Inspect the project itself.
     Project(ProjectArgs),
     /// Read, validate, and change the project configuration.
@@ -227,6 +230,10 @@ fn run(cli: Cli) -> Result<(), waymark_core::WaymarkError> {
         Command::Blocked(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
             cmd::list::run(&project, &args, cmd::list::Which::Blocked, json)
+        }
+        Command::Archive(args) => {
+            let project = cmd::open_project(cli.project.as_deref())?;
+            cmd::archive::run(&project, &args, &options, json)
         }
         Command::Project(args) => cmd::project::run(args, cli.project.as_deref(), json),
         Command::Config(args) => cmd::config::run(args, cli.project.as_deref(), &options, json),

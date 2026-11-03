@@ -7,6 +7,11 @@
 //! `ready` and `blocked` are derived views: neither writes, and neither invents
 //! a status. That is why `--status` on them still means the persisted lifecycle
 //! state, even though their own selection is about readiness.
+//!
+//! `--archived` asks for the archived-only range instead of the active one. It
+//! is never a mix: `list --archived` lists retired work, and `ready --archived`
+//! / `blocked --archived` are empty because readiness is a fact about active
+//! work.
 
 use clap::Args;
 use waymark_core::envelope::success_envelope;
@@ -38,11 +43,18 @@ pub struct ListArgs {
     /// Only items in this category.
     #[arg(long, value_name = "KEY")]
     pub category: Option<String>,
+
+    /// Read the archived-only range instead of the active one.
+    #[arg(long)]
+    pub archived: bool,
 }
 
 impl ListArgs {
     fn filters(&self) -> Result<Filters, WaymarkError> {
         let mut filters = Filters::new();
+        if self.archived {
+            filters = filters.with_archived();
+        }
         if let Some(status) = &self.status {
             filters = filters.with_status(parse_status(status)?);
         }
@@ -99,7 +111,9 @@ fn render(listing: &Listing, json: bool) -> Result<(), WaymarkError> {
             "{}  {:<12} {:<8} {}",
             row.item.id,
             row.item.status.as_str(),
-            if row.readiness.blocked {
+            if row.item.is_archived() {
+                "archived"
+            } else if row.readiness.blocked {
                 "blocked"
             } else if row.readiness.ready {
                 "ready"

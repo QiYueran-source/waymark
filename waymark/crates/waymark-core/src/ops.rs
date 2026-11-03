@@ -13,6 +13,7 @@
 //! The operations are the domain. Adapters decide where to print; they do not
 //! decide what is allowed.
 
+pub mod archive;
 pub mod config;
 pub mod create;
 pub mod edit;

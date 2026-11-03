@@ -80,7 +80,12 @@ pub fn run(project: &Project, args: &ShowArgs, json: bool) -> Result<(), Waymark
                 "category": read.category.as_str(),
                 "fingerprint": read.fingerprint.as_str(),
                 "item": item_json(&read.item, &read.path),
+                "archived": read.item.is_archived(),
                 "relationships": {
+                    // An archived item's own edges are history: they no longer
+                    // participate in the active graph, so the payload says so
+                    // rather than letting a reader mistake them for live ones.
+                    "historical": read.item.is_archived(),
                     "parent": read.item.parent.as_ref().map(|id| id.as_str().to_owned()),
                     "dependencies": read.item.dependencies.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
                     "soft_links": read.item.soft_links.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
@@ -119,8 +124,13 @@ pub fn run(project: &Project, args: &ShowArgs, json: bool) -> Result<(), Waymark
         if let Some(closed_at) = read.item.closed_at {
             err_line(&format!("  closed      {closed_at}"));
         }
+        let historical = if read.item.is_archived() {
+            " (historical)"
+        } else {
+            ""
+        };
         if let Some(parent) = &read.item.parent {
-            err_line(&format!("  parent      {parent}"));
+            err_line(&format!("  parent      {parent}{historical}"));
         }
         if !read.item.dependencies.is_empty() {
             let ids: Vec<&str> = read
@@ -129,11 +139,11 @@ pub fn run(project: &Project, args: &ShowArgs, json: bool) -> Result<(), Waymark
                 .iter()
                 .map(|id| id.as_str())
                 .collect();
-            err_line(&format!("  depends on  {}", ids.join(", ")));
+            err_line(&format!("  depends on  {}{historical}", ids.join(", ")));
         }
         if !read.item.soft_links.is_empty() {
             let ids: Vec<&str> = read.item.soft_links.iter().map(|id| id.as_str()).collect();
-            err_line(&format!("  soft links  {}", ids.join(", ")));
+            err_line(&format!("  soft links  {}{historical}", ids.join(", ")));
         }
         if let Some(readiness) = &derived.readiness {
             err_line(&format!(
