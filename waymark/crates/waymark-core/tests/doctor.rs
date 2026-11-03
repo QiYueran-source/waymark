@@ -314,8 +314,10 @@ fn custom_field_configuration_drift_is_reported_per_field() {
     .unwrap()
     .with_clock(fixtures::shared_clock())
     .with_id_source(Box::new(waymark_core::testing::SequentialIds::new()));
-    let id = create_item(&project, "with effort");
-    let mut item = read_item(&task_path(&project, id.as_str()));
+    // Written by hand: the point of the case is drift from an existing
+    // document, not what creation would have accepted.
+    let id = WorkItemId::parse("wm-000000000000").unwrap();
+    let mut item = fixtures::work_item(id.as_str(), "task", "with effort").build();
     item.custom_fields
         .insert("effort".to_owned(), FieldValue::Integer(3));
     write_item(&task_path(&project, id.as_str()), &item);
@@ -370,8 +372,10 @@ fn a_missing_required_custom_field_and_a_type_mismatch_are_reported_as_well() {
     .unwrap()
     .with_clock(fixtures::shared_clock())
     .with_id_source(Box::new(waymark_core::testing::SequentialIds::new()));
-    let id = create_item(&project, "no effort");
-    let mut item = read_item(&task_path(&project, id.as_str()));
+    // Written by hand: an external editor can produce any shape, and doctor
+    // must report it even though creation would have refused it.
+    let id = WorkItemId::parse("wm-000000000000").unwrap();
+    let mut item = fixtures::work_item(id.as_str(), "task", "no effort").build();
     item.custom_fields
         .insert("effort".to_owned(), FieldValue::String("lots".to_owned()));
     write_item(&task_path(&project, id.as_str()), &item);

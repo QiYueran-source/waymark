@@ -197,7 +197,15 @@ fn describe_missing_parent(project: &Project, parent: &WorkItemId) -> WaymarkErr
 /// The walk follows parent edges from the proposed parent upward. A dangling
 /// parent ends the walk: it cannot complete a cycle, and inventing a finding for
 /// it would report a cycle that is not there.
-fn parent_cycle(graph: &Graph, child: &WorkItemId, parent: &WorkItemId) -> Option<Vec<WorkItemId>> {
+///
+/// The child need not be a graph node yet: composite creation passes the ID it
+/// is about to mint, which is exactly how a dangling parent reference to that ID
+/// is caught before anything is written.
+pub(crate) fn parent_cycle(
+    graph: &Graph,
+    child: &WorkItemId,
+    parent: &WorkItemId,
+) -> Option<Vec<WorkItemId>> {
     let mut cycle = vec![child.clone()];
     let mut cursor = parent.clone();
     // Bounded by the number of active items: a walk that exceeds it entered a

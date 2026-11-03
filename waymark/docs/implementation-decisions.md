@@ -1967,3 +1967,71 @@ document/configuration rewrites (a category-key migration's value rewrites can r
 - **No `waymark-core`, `waymark-cli`, or `waymark-web` source was changed.** The
   one genuine gap found (creation's richer inputs) is recorded above rather than
   patched around in the adapter.
+
+# Composite creation
+
+- **Creation is one operation, not a sequence of writes.** `CreateRequest` carries
+  `title`, `category`, `owner`, `creator`, `body`, `fields`, `parent`,
+  `dependencies`, and `soft_links`; the catalog row is fully implemented in
+  `waymark_core::ops::create` and both adapters only translate arguments. There is
+  no "create then patch" path.
+- **Validation order is fixed: request checks, then planned-edge checks, then the
+  lock, then the same edge checks again.** Title, category, owner, creator, and
+  every custom field are validated together before the lock. Referenced IDs are
+  normalized (`INVALID_ID`) before any target lookup. A create with relations then
+  loads a complete, fresh projection and validates self-reference, duplicates,
+  existence/active state, and cycles against the *planned* ID before the lock, and
+  again under the lock with the ID actually minted. A plain create (no relations)
+  never requires a projection, so an unrelated broken sibling does not block it.
+- **The planned ID is allocated before the lock only when the request has a
+  relation.** Cycle detection needs the future ID: an existing document may hold a
+  dangling reference to it, and that is the only way a fresh node can close a
+  parent or dependency cycle. The ID is reused under the lock when still free; if
+  a concurrent create consumed it, a fresh ID is minted and the same checks run
+  again. A refused relation create therefore consumes an ID candidate but writes
+  nothing.
+- **`Graph::path` and `parent::parent_cycle` are shared with the standalone
+  operations.** Composite creation does not get a second cycle walker; the
+  helpers were made crate-visible for exactly this reuse.
+- **`creator` defaults to the effective operator**, the same identity
+  `OWNER_MISMATCH` compares against (operation override, else configured
+  operator). It is never inferred from the owner. A supplied creator is trimmed
+  and validated with the owner rule, under the issue path `creator`.
+- **Custom fields are declaration-checked, not default-filled.** Undeclared keys,
+  wrong types, duplicate keys, and missing required fields are `VALIDATION_ERROR`
+  issues under `custom_fields.<key>`; a declared default is applied only by the
+  migration that adds a required field, not by ordinary creation. `FieldValue` has
+  no null, so an explicit JSON `null` is refused adapter-side in the shared
+  `VALIDATION_ERROR` shape.
+- **Relations keep the standalone rules and codes.** A missing target is
+  `ITEM_NOT_FOUND` with `relation` set to `parent`, `dependencies`, or
+  `soft_links`; an archived target is `ITEM_ARCHIVED` with `operation: "create"`.
+  Self-reference and duplicate references are `INVALID_RELATIONSHIP`, a parent
+  cycle is `CYCLE_DETECTED {kind: "parent"}`, and a dependency cycle is
+  `CYCLE_DETECTED {kind: "dependency"}`. No new registry code was added.
+- **The batch writer grew a create target instead of composing existing writes.**
+  `waymark_core::write::BatchCreate` + `replace_batch_with_creates` extend the
+  all-or-nothing engine: a create target must be absent (otherwise
+  `WRITE_CONFLICT` with expected `absent`), it is staged and renamed with the same
+  discipline, and rollback removes a created document instead of restoring bytes.
+  `BatchTarget`'s public shape did not change, so archive and migration callers are
+  untouched.
+- **Parent and dependency edges write only the new document.** A soft link is
+  symmetric, so every link partner is loaded for writing under the lock (archived
+  or changed partners refuse the whole create), gains the new ID in sorted
+  position, and is stamped with the same operation instant. The new document and
+  all partners go through one `replace_batch_with_creates` call.
+- **The result reports partners and fingerprints.** `Created` carries the item,
+  path, `partners` (the rewritten items with their own paths), `fingerprint` for
+  the new document, and `fingerprints` in `[new, partners…]` order. A dry run
+  returns the same shape with no fingerprints and `written: false`, and takes no
+  lock.
+- **CLI surface:** `--creator NAME`, `--body`/`--body-file` (mutually exclusive,
+  `-` means stdin), repeatable `--field KEY=VALUE` using the same text grammar as
+  `field update --set` (the parser is shared), `--parent ID`, repeatable
+  `--dependency ID`, repeatable `--link ID`, plus `--json` and `--dry-run`.
+- **MCP surface:** `waymark_create_work_item` adds `creator`, `custom_fields`
+  (a flat key→value map), `parent`, `dependencies`, and `soft_links`, and returns
+  `partners` and `fingerprints` in `data`, matching the CLI envelope. Null and
+  non-scalar values are refused adapter-side. The earlier "recorded core gap"
+  section above is now closed by this work.
