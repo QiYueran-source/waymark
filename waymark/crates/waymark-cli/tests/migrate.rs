@@ -283,3 +283,126 @@ fn a_migration_outside_git_carries_the_warning_in_meta() {
             .contains("Git"));
     }
 }
+
+// -- storage migration ------------------------------------------------------
+
+#[test]
+fn a_storage_migration_previews_then_moves_the_root() {
+    let (_dir, root) = project();
+    let id = create_one(&root);
+    let old = item_path(&root, &id);
+
+    let preview = migrate(
+        &root,
+        &["storage", "--root", "items", "--dry-run", "--json"],
+    );
+    assert_eq!(preview.status(), 0, "stderr: {}", preview.stderr());
+    let envelope = preview.json();
+    assert_eq!(envelope["ok"], serde_json::json!(true));
+    assert_eq!(envelope["data"]["migration"], serde_json::json!("storage"));
+    assert_eq!(envelope["data"]["dry_run"], serde_json::json!(true));
+    assert_eq!(envelope["data"]["written"], serde_json::json!(false));
+    assert_eq!(envelope["data"]["revision"], serde_json::json!(1));
+    assert_eq!(
+        envelope["data"]["moves"][0]["outcome"],
+        serde_json::json!("skipped")
+    );
+    assert!(envelope["data"]["moves"][0]["to"]
+        .as_str()
+        .expect("a target")
+        .ends_with("items/task"));
+    assert_eq!(envelope["data"]["rewritten"], serde_json::json!([]));
+    assert!(old.exists(), "the dry run moved nothing");
+    assert!(std::fs::read_to_string(root.join(".waymark/config.toml"))
+        .expect("the configuration")
+        .contains("storage_root = \"work\""));
+
+    let real = migrate(&root, &["storage", "--root", "items", "--json"]);
+    assert_eq!(real.status(), 0, "stderr: {}", real.stderr());
+    let envelope = real.json();
+    assert_eq!(envelope["data"]["written"], serde_json::json!(true));
+    assert_eq!(
+        envelope["data"]["moves"][0]["outcome"],
+        serde_json::json!("applied")
+    );
+    assert!(!old.exists());
+    assert!(root.join("items/task").join(format!("{id}.md")).exists());
+    let config =
+        std::fs::read_to_string(root.join(".waymark/config.toml")).expect("the configuration");
+    assert!(config.contains("storage_root = \"items\""), "{config}");
+    assert!(config.contains("version = \"1.1\""), "{config}");
+}
+
+#[test]
+fn a_storage_key_migration_rewrites_the_category_value() {
+    let (_dir, root) = project();
+    let id = create_one(&root);
+
+    let result = migrate(
+        &root,
+        &["storage", "--category-key", "task", "chore", "--json"],
+    );
+    assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
+    let envelope = result.json();
+    assert_eq!(envelope["data"]["migration"], serde_json::json!("storage"));
+    assert_eq!(envelope["data"]["count"], serde_json::json!(1));
+    assert_eq!(
+        envelope["data"]["rewritten"][0]["from"],
+        serde_json::json!("task")
+    );
+    assert_eq!(
+        envelope["data"]["rewritten"][0]["to"],
+        serde_json::json!("chore")
+    );
+    assert!(!root.join("work/task").exists());
+    let moved = root.join("work/chore").join(format!("{id}.md"));
+    let document = std::fs::read_to_string(&moved).expect("the moved document");
+    assert!(document.contains("category: chore"), "{document}");
+}
+
+#[test]
+fn storage_actions_are_mutually_exclusive() {
+    let (_dir, root) = project();
+    let result = migrate(
+        &root,
+        &[
+            "storage",
+            "--root",
+            "items",
+            "--category-path",
+            "task",
+            "work/other",
+            "--json",
+        ],
+    );
+    assert_eq!(result.status(), 1);
+    assert_eq!(
+        result.json()["error"]["code"],
+        serde_json::json!("USAGE_ERROR")
+    );
+}
+
+#[test]
+fn a_storage_migration_outside_git_carries_the_warning_in_meta() {
+    let (_dir, root) = project();
+    create_one(&root);
+
+    let preview = migrate(
+        &root,
+        &["storage", "--root", "items", "--dry-run", "--json"],
+    );
+    assert_eq!(preview.status(), 0, "stderr: {}", preview.stderr());
+    let envelope = preview.json();
+    let warnings = envelope["_meta"]["warnings"]
+        .as_array()
+        .expect("the warnings array is present");
+    if let Some(warning) = warnings
+        .iter()
+        .find(|warning| warning["code"] == serde_json::json!("NOT_A_GIT_REPOSITORY"))
+    {
+        assert!(warning["message"]
+            .as_str()
+            .expect("a message")
+            .contains("Git"));
+    }
+}
