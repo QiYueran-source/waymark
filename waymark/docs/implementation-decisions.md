@@ -1197,3 +1197,113 @@ is unchanged. No existing public signature or behaviour changed.
 - Fetch without an `Origin` header (same-origin requests do this automatically) or with the service's
   exact `http://localhost:<port>` origin. A page opened at `127.0.0.1` gets an origin for `127.0.0.1`,
   which is accepted; do not proxy through another origin or port.
+
+# T13 — version and schema migration
+
+## Readable generations
+
+- `FORMAT_GENERATION = 1` is the generation this release writes; `PREVIOUS_FORMAT_GENERATION =
+  0` is the oldest it reads. `model::is_readable_generation` is the one window check, and both
+  [`parse::parse_document`] and [`Config::load`] reject anything outside it with
+  `UNSUPPORTED_VERSION` (not `PARSE_ERROR`/`CONFIG_INVALID`). A project at generation `0.REV` still
+  opens, which is what makes an explicit version migration possible.
+- A document's staleness is release-relative: `WorkItem::needs_migration` is `schema <
+  FORMAT_GENERATION`; `WorkItem::needs_migration_from(generation)` is the planner's target-relative
+  form. `ItemNeedsMigration` details carry the project generation from the configuration (usually
+  the same value).
+- Ordinary mediated writes preserve a document's persisted generation, so even a generation-0
+  project never gets a lazy upgrade. `ITEM_NEEDS_MIGRATION` is raised by
+  `mediated::require_current_generation`, used by `load_entry` and by `archive`.
+- Read models mark rather than hide: `ListedItem::needs_migration`, the derived
+  `FieldName::NeedsMigration` column (`needs_migration` in list/query JSON), and the `show` payload
+  (`data.needs_migration` and `data.item.needs_migration`, plus a human `migration needed` line).
+
+## Plan/execute scaffold (version and schema, reused by phase B)
+
+- Public shape: `MigrationPlan { kind, description, targets: Vec<PlannedTarget>, config:
+  Option<PlannedConfig>, warnings }`, `MigrationReport { kind, description, dry_run, affected,
+  targets: Vec<error::TargetOutcome>, count, written, config_changed, previous_revision, revision,
+  meta }`, and `preflight(project) -> Preflight`. `PlannedTarget` owns the exact canonical bytes, so
+  execution never re-serializes a plan.
+- There is no persisted plan file, plan id, or plan/apply handshake. `plan_version`/`plan_schema`
+  are read-only and public; `execute(project, plan, options)` repeats every check (configuration
+  readable, complete and fresh projection, one fingerprint comparison per planned target, every
+  planned document parsed again, planned configuration parsed again) and only then writes.
+  `migrate_version`/`migrate_schema` rebuild the plan inside the project write lock immediately
+  before `execute`, so a preview followed by a hand edit re-derives and succeeds correctly; a plan
+  object passed straight to `execute` after an edit fails `MIGRATION_PRECONDITION_FAILED`.
+- All execution failures other than an unrestorable rollback become `MIGRATION_FAILED` with
+  `per_target` outcomes (`applied`/`skipped`/`failed`). The failing path is taken from the error
+  location, then `details.path`; when no path can be identified every target is marked `failed`.
+  `ROLLBACK_FAILED` from the batch engine is passed through unchanged.
+- Configuration and documents are one batch: `write::replace_batch_with_file(&[BatchTarget],
+  Option<FileTarget>)` is the writer. A conflict on the configuration carries a null `id` because it
+  has no work-item ID; migration translates batch failures before an adapter sees them.
+- Dry runs report the same affected set, counts, configuration delta, and revisions, and mark every
+  target `skipped`; they never write. (The lock file already exists in an initialised project.)
+
+## Version migration choices
+
+- `--to` accepts only `FORMAT_GENERATION`; every other value is
+  `MIGRATION_UNSUPPORTED_GENERATION {requested, supported}`. The user chooses *when* to migrate, not
+  which generation to declare.
+- The configuration revision increments by exactly one only when the configuration generation
+  changes (one configuration content write). A project already at the target generation but holding
+  older documents rewrites exactly those documents and leaves the revision alone.
+- `updated_at` is preserved. A generation rewrite is not a content change, and the same rule is
+  applied to schema migrations so a plan is deterministic and independent of the clock; the
+  configuration revision is the record of the migration. Bodies, custom fields, relationships, and
+  archive markers (`archived_at`, `archive_reason`) are preserved by construction (only `schema`
+  changes).
+
+## Schema migration choices
+
+- Exactly one action per run. `RemoveField(key)` deletes the declaration and the key from every
+  projected document, archived ones included. `AddRequiredField { key, ty, default }` adds (or
+  promotes from optional, matching the `ACTION_REQUIRES_MIGRATION` recovery command
+  `waymark migrate schema --add-required-field`) the declaration and fills the default only where a
+  document has no value.
+- An existing value is never converted or dropped. A value the declared type cannot hold is
+  `VALIDATION_ERROR`; a missing value with no default (request or existing declaration) is
+  `VALIDATION_ERROR` naming the items, so no item is left invalid.
+- Type changes (including list element type changes) are refused by the migration verbs with
+  `ACTION_REQUIRES_MIGRATION` and exactly the `waymark migrate schema` command the configuration
+  surface names. Renames have no migration verb; optional→required *is* the
+  `--add-required-field` action.
+- The configuration revision increments by one exactly when the declaration content changes; an
+  idempotent add with an identical declaration changes no configuration content and does not move
+  it.
+- This release has no whole-project item-vs-configuration validator yet (`validate` covers the
+  configuration only), so the "removing a declared field leaves an undeclared key" drift cannot be
+  asserted here. The migration removes the key everywhere it can see, including archived documents,
+  which is the guarantee this ticket can make; when the whole-project validation lands, a key that
+  survives by a hand edit is the `undeclared key` drift the specification describes.
+
+## Outside Git and preconditions
+
+- A migration outside a Git repository proceeds. `preflight` adds
+  `Warning::from_error(WaymarkError::not_a_git_repository())` to `_meta.warnings` saying Git-based
+  recovery is unavailable. The envelope's warning field is `Warning` (shared registry code), not
+  `Finding`.
+- `MIGRATION_PRECONDITION_FAILED` carries every diagnostic it has: incomplete/freshness findings
+  plus the broken paths, per-file fingerprint disagreements, and configuration issues. Configuration
+  load failures (including an unreadable/unsupported generation) are translated here rather than
+  surfacing as `CONFIG_INVALID`/`UNSUPPORTED_VERSION`, and every collected `ConfigIssue` is included.
+
+## Phase B (storage migration) contract
+
+Phase B must use `ops::migrate::preflight(project)` for the shared read-only gates (configuration
+readability, complete and fresh projection, per-file fingerprint agreement, Git warning) and add its
+own path/destination checks on top, returning `MIGRATION_PRECONDITION_FAILED` with every diagnostic
+before any write. It must reuse `MigrationPlan`/`MigrationReport`/`TargetOutcome` and the
+`written`/`count`/`config_changed`/`_meta` shape, rebuild its plan inside the project lock, repeat
+`preflight` immediately before executing, and report per-target outcomes on failure. Its directory
+applier runs between those two steps; the generic `replace_batch_with_file` is only for
+document/configuration rewrites (a category-key migration's value rewrites can reuse it).
+
+## Test updates that follow from the above
+
+- `tests/document.rs`: an unreadable generation was "a parse error for now"; it is now
+  `UNSUPPORTED_VERSION`.
+- `tests/config.rs`: a generation outside the readable window is `UNSUPPORTED_VERSION`, the previous
+  generation parses, and older generations report the readable window in details.

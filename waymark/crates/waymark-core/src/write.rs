@@ -99,12 +99,59 @@ pub struct BatchTarget<'a> {
 /// One document a batch replaced.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BatchApplied {
-    /// The item the document belongs to.
-    pub id: crate::id::WorkItemId,
+    /// The item the document belongs to, when it is a work-item document.
+    pub id: Option<crate::id::WorkItemId>,
     /// The document that changed.
     pub path: camino::Utf8PathBuf,
     /// The fingerprint of the bytes now on disk.
     pub fingerprint: Fingerprint,
+}
+
+/// One non-item document in an all-or-nothing batch.
+///
+/// The configuration document is the only current use: it is replaced with the
+/// work-item documents in the same batch, but it has no stable work-item ID, so
+/// it cannot be a [`BatchTarget`].
+#[derive(Debug, Clone, Copy)]
+pub struct FileTarget<'a> {
+    /// The document to replace.
+    pub path: &'a Utf8Path,
+    /// The bytes that must currently be on disk.
+    pub expected: &'a Fingerprint,
+    /// The complete new document.
+    pub bytes: &'a [u8],
+}
+
+/// One internal batch target: a work-item document or, when `id` is `None`, a
+/// non-item document such as the configuration.
+#[derive(Debug, Clone, Copy)]
+struct RawTarget<'a> {
+    id: Option<&'a crate::id::WorkItemId>,
+    path: &'a Utf8Path,
+    expected: &'a Fingerprint,
+    bytes: &'a [u8],
+}
+
+impl<'a> From<&'a BatchTarget<'a>> for RawTarget<'a> {
+    fn from(target: &'a BatchTarget<'a>) -> Self {
+        Self {
+            id: Some(target.id),
+            path: target.path,
+            expected: target.expected,
+            bytes: target.bytes,
+        }
+    }
+}
+
+impl<'a> From<&'a FileTarget<'a>> for RawTarget<'a> {
+    fn from(target: &'a FileTarget<'a>) -> Self {
+        Self {
+            id: None,
+            path: target.path,
+            expected: target.expected,
+            bytes: target.bytes,
+        }
+    }
 }
 
 /// Replace several documents as one application-level all-or-nothing batch.
@@ -135,6 +182,29 @@ pub struct BatchApplied {
 /// can still leave the new bytes of the earlier documents in place. The contract
 /// is about *reported* failure, which is what the spec pins.
 pub fn replace_batch(targets: &[BatchTarget<'_>]) -> Result<Vec<BatchApplied>, WaymarkError> {
+    let raw: Vec<RawTarget<'_>> = targets.iter().map(RawTarget::from).collect();
+    run_batch(&raw)
+}
+
+/// Replace work-item documents and one non-item document as one batch.
+///
+/// This is the migration scaffold's writer: a schema or version migration
+/// changes the configuration and the documents together, so a failure on either
+/// side writes neither. A conflict on the non-item document is reported as a
+/// `WRITE_CONFLICT` with a null `id`; migration callers translate any execution
+/// failure into `MIGRATION_FAILED` with per-target outcomes.
+pub fn replace_batch_with_file(
+    targets: &[BatchTarget<'_>],
+    file: Option<FileTarget<'_>>,
+) -> Result<Vec<BatchApplied>, WaymarkError> {
+    let mut raw: Vec<RawTarget<'_>> = targets.iter().map(RawTarget::from).collect();
+    if let Some(file) = &file {
+        raw.push(RawTarget::from(file));
+    }
+    run_batch(&raw)
+}
+
+fn run_batch(targets: &[RawTarget<'_>]) -> Result<Vec<BatchApplied>, WaymarkError> {
     if targets.is_empty() {
         return Ok(Vec::new());
     }
@@ -154,12 +224,7 @@ pub fn replace_batch(targets: &[BatchTarget<'_>]) -> Result<Vec<BatchApplied>, W
             .map_err(|source| WaymarkError::io(target.path.to_string(), "read", &source))?;
         let actual = Fingerprint::of(&original);
         if actual != *target.expected {
-            return Err(WaymarkError::write_conflict(
-                target.id,
-                target.path.to_string(),
-                target.expected.as_str(),
-                actual.as_str(),
-            ));
+            return Err(conflict(target, actual.as_str()));
         }
         originals.push((target.path.to_path_buf(), original));
     }
@@ -184,7 +249,7 @@ pub fn replace_batch(targets: &[BatchTarget<'_>]) -> Result<Vec<BatchApplied>, W
     for (index, (target, temp)) in targets.iter().zip(temps).enumerate() {
         match persist(temp, target.path) {
             Ok(()) => applied.push(BatchApplied {
-                id: target.id.clone(),
+                id: target.id.cloned(),
                 path: target.path.to_path_buf(),
                 fingerprint: Fingerprint::of(target.bytes),
             }),
@@ -213,6 +278,35 @@ pub fn replace_batch(targets: &[BatchTarget<'_>]) -> Result<Vec<BatchApplied>, W
     ))
 }
 
+/// The conflict for a target whose bytes moved on since they were read.
+///
+/// A work-item document names its item. A non-item target (the configuration)
+/// has no stable ID, so its conflict carries a null `id`; migration callers
+/// translate it into `MIGRATION_FAILED` before it reaches an adapter.
+fn conflict(target: &RawTarget<'_>, actual: &str) -> WaymarkError {
+    match target.id {
+        Some(id) => WaymarkError::write_conflict(
+            id,
+            target.path.to_string(),
+            target.expected.as_str(),
+            actual,
+        ),
+        None => WaymarkError::new(
+            crate::error::Code::WriteConflict,
+            format!(
+                "{} changed on disk since it was read; reread and retry",
+                target.path
+            ),
+        )
+        .with_details(serde_json::json!({
+            "id": serde_json::Value::Null,
+            "path": target.path.to_string(),
+            "expected_fingerprint": target.expected.as_str(),
+            "actual_fingerprint": actual,
+        })),
+    }
+}
+
 /// Put the first `replaced` captured documents back, and report the ones that
 /// could not be restored.
 ///
@@ -236,7 +330,7 @@ struct StagedTemp {
 }
 
 /// Refuse targets that cannot be replaced safely.
-fn validate_batch_target(target: &BatchTarget<'_>) -> Result<(), WaymarkError> {
+fn validate_batch_target(target: &RawTarget<'_>) -> Result<(), WaymarkError> {
     match fs::symlink_metadata(target.path) {
         Ok(metadata) if metadata.file_type().is_symlink() => Err(WaymarkError::io(
             target.path.to_string(),
@@ -256,12 +350,7 @@ fn validate_batch_target(target: &BatchTarget<'_>) -> Result<(), WaymarkError> {
         )),
         Ok(_) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            Err(WaymarkError::write_conflict(
-                target.id,
-                target.path.to_string(),
-                target.expected.as_str(),
-                "missing",
-            ))
+            Err(conflict(target, "missing"))
         }
         Err(source) => Err(WaymarkError::io(target.path.to_string(), "read", &source)),
     }

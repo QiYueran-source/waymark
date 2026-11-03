@@ -203,7 +203,7 @@ updated_at: 2026-11-03T05:43:10Z
 }
 
 #[test]
-fn an_unreadable_schema_generation_is_reported_as_a_parse_error_for_now() {
+fn an_unreadable_schema_generation_is_unsupported_version() {
     let document = r#"---
 schema: 2
 id: wm-3f7k9q2m4x8c
@@ -216,7 +216,7 @@ updated_at: 2026-11-03T05:43:10Z
 ---
 "#;
     let err = parse_document(document.as_bytes(), Utf8Path::new("x.md")).unwrap_err();
-    assert_eq!(err.code(), Code::ParseError);
+    assert_eq!(err.code(), Code::UnsupportedVersion);
     assert!(err.message().contains("generation"), "{err}");
 }
 

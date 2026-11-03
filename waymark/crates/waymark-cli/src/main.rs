@@ -34,6 +34,7 @@ use cmd::git::GitArgs;
 use cmd::init::InitArgs;
 use cmd::link::LinkArgs;
 use cmd::list::ListArgs;
+use cmd::migrate::MigrateArgs;
 use cmd::parent::ParentArgs;
 use cmd::project::ProjectArgs;
 use cmd::relationship::DependencyArgs;
@@ -121,6 +122,8 @@ enum Command {
     AgentDoc(AgentDocArgs),
     /// Read, validate, and change the project configuration.
     Config(ConfigArgs),
+    /// Migrate the format generation or a declared custom field.
+    Migrate(MigrateArgs),
     /// Validate the whole project.
     Validate,
 }
@@ -267,6 +270,7 @@ fn run(cli: Cli) -> Result<(), waymark_core::WaymarkError> {
         Command::Git(args) => cmd::git::run(args, cli.project.as_deref(), json),
         Command::AgentDoc(args) => cmd::agent_doc::run(Cli::command(), &args, json),
         Command::Config(args) => cmd::config::run(args, cli.project.as_deref(), &options, json),
+        Command::Migrate(args) => cmd::migrate::run(args, cli.project.as_deref(), &options, json),
         Command::Validate => cmd::project::run_validate(cli.project.as_deref(), json),
     }
 }

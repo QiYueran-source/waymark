@@ -459,6 +459,9 @@ pub fn render(listing: &Listing, args: &ListArgs, json: bool) -> Result<(), Waym
             },
             row.item.title
         ));
+        if row.needs_migration {
+            err_line("    needs migration");
+        }
         if !row.readiness.blocked_by.is_empty() {
             let ids: Vec<&str> = row
                 .readiness

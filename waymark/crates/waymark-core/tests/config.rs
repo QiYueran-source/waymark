@@ -264,11 +264,30 @@ fn an_empty_operator_is_rejected() {
 }
 
 #[test]
-fn a_version_this_release_cannot_read_is_rejected() {
+fn a_version_this_release_cannot_read_is_rejected_as_unsupported() {
     let document = FRESH.replace("version = \"1.0\"", "version = \"2.0\"");
     let error = Config::parse(&document).unwrap_err();
-    assert_eq!(error.code(), Code::ConfigInvalid);
-    assert!(error.message().contains("version"), "{error}");
+    assert_eq!(error.code(), Code::UnsupportedVersion);
+    assert!(error.message().contains("generation"), "{error}");
+}
+
+#[test]
+fn the_previous_generation_is_still_readable() {
+    let document = FRESH.replace("version = \"1.0\"", "version = \"0.4\"");
+    let config = Config::parse(&document).expect("the previous generation is readable");
+    assert_eq!(config.version.generation, 0);
+    assert_eq!(config.version.revision, 4);
+}
+
+#[test]
+fn a_generation_older_than_the_previous_is_unsupported() {
+    let document = FRESH.replace("version = \"1.0\"", "version = \"9.0\"");
+    let error = Config::parse(&document).unwrap_err();
+    assert_eq!(error.code(), Code::UnsupportedVersion);
+    assert!(
+        error.details().get("supported").is_some(),
+        "the readable window is reported: {error}"
+    );
 }
 
 #[test]
