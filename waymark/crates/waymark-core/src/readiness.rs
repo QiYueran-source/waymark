@@ -96,20 +96,25 @@ impl Graph {
         graph
     }
 
-    /// Build the graph by scanning the whole project.
+    /// Build the graph from a complete, fresh projection.
     ///
-    /// This is a complete scan: a document that cannot be parsed fails the whole
-    /// build with that document's error rather than silently shrinking the
-    /// graph. The projection ticket owns the "scope local reads around a broken
-    /// sibling" rule; until then, a global answer says it covered the whole
-    /// project because it did.
-    pub fn from_project(project: &Project) -> Result<Self, WaymarkError> {
-        let inventory = project.inventory()?;
-        let mut items = Vec::with_capacity(inventory.entries.len());
-        for entry in &inventory.entries {
-            items.push(crate::parse::parse_item_file(&entry.path)?);
-        }
+    /// A graph is a *global* read: a document that cannot be parsed would leave
+    /// a hole in the relationship world, so this fails with
+    /// `INCOMPLETE_PROJECTION` rather than silently shrinking the graph. Use
+    /// [`crate::projection::Projection::scoped_read`] for the local reads that
+    /// may proceed while a sibling is broken.
+    pub fn from_projection(
+        projection: &crate::projection::Projection,
+    ) -> Result<Self, WaymarkError> {
+        projection.require_complete()?;
+        let items: Vec<WorkItem> = projection.items().cloned().collect();
         Ok(Self::from_items(&items))
+    }
+
+    /// Build the graph by scanning the whole project.
+    pub fn from_project(project: &Project) -> Result<Self, WaymarkError> {
+        let projection = crate::projection::Projection::load(project)?;
+        Self::from_projection(&projection)
     }
 
     /// Recompute both adjacency maps from the nodes.

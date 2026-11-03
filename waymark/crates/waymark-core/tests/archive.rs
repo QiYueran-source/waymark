@@ -529,8 +529,8 @@ fn a_broken_sibling_document_stops_the_archive_before_anything_is_written() {
 
     assert_eq!(
         error.code(),
-        Code::ValidationError,
-        "an unreadable document fails the complete scan: {error:?}"
+        Code::IncompleteProjection,
+        "an unreadable document leaves no complete projection: {error:?}"
     );
     assert_eq!(
         document(&project, &target),
