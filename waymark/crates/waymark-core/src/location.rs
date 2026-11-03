@@ -96,6 +96,61 @@ impl Location {
     }
 }
 
+/// The five place kinds a [`Location`] can be, as registry metadata.
+///
+/// This is the *kind*, not a value: the registry declares which kinds a code may
+/// carry, and a golden snapshot pins that declaration. It serializes as the same
+/// `snake_case` discriminator the [`Location`] union uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocationKind {
+    /// A work item, addressed by stable ID.
+    WorkItem,
+    /// A file.
+    File,
+    /// A field of a document.
+    Field,
+    /// A key of the project configuration.
+    ConfigKey,
+    /// A directed relation between two work items.
+    Relationship,
+}
+
+impl LocationKind {
+    /// Every kind, in the order the registry table lists them.
+    pub const ALL: &'static [LocationKind] = &[
+        LocationKind::WorkItem,
+        LocationKind::File,
+        LocationKind::Field,
+        LocationKind::ConfigKey,
+        LocationKind::Relationship,
+    ];
+
+    /// The `snake_case` literal, identical to the [`Location`] discriminator.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::WorkItem => "work_item",
+            Self::File => "file",
+            Self::Field => "field",
+            Self::ConfigKey => "config_key",
+            Self::Relationship => "relationship",
+        }
+    }
+}
+
+impl Location {
+    /// Which kind this location is.
+    pub fn kind(&self) -> LocationKind {
+        match self {
+            Self::WorkItem { .. } => LocationKind::WorkItem,
+            Self::File { .. } => LocationKind::File,
+            Self::Field { .. } => LocationKind::Field,
+            Self::ConfigKey { .. } => LocationKind::ConfigKey,
+            Self::Relationship { .. } => LocationKind::Relationship,
+        }
+    }
+}
+
 impl std::fmt::Display for Location {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

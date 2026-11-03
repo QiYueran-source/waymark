@@ -32,9 +32,9 @@ pub mod time;
 pub mod write;
 
 pub use config::Config;
-pub use error::{Code, ValidationIssue, WaymarkError};
+pub use error::{Code, ExitClass, Severity, ValidationIssue, WaymarkError};
 pub use id::WorkItemId;
-pub use location::Location;
+pub use location::{Location, LocationKind};
 pub use model::{CategoryKey, CustomFields, FieldValue, Status, WorkItem};
 pub use store::{InitOptions, Project};
 pub use time::{Clock, FixedClock, SystemClock, Timestamp};

@@ -505,20 +505,12 @@ impl Project {
         let inventory = self.inventory()?;
         let duplicates = inventory.duplicate_of(id);
         if !duplicates.is_empty() {
-            return Err(WaymarkError::validation(
-                format!("work item {id}"),
-                vec![crate::error::ValidationIssue::new(
-                    "id",
-                    format!(
-                        "the ID is claimed by {} files: {}",
-                        duplicates.len(),
-                        duplicates
-                            .iter()
-                            .map(|path| path.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ),
-                )],
+            return Err(WaymarkError::duplicate_id(
+                id,
+                duplicates
+                    .iter()
+                    .map(|path| path.to_string())
+                    .collect::<Vec<_>>(),
             ));
         }
         inventory

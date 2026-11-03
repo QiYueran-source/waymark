@@ -184,16 +184,7 @@ pub fn parse_item_file(path: &Utf8Path) -> Result<WorkItem, WaymarkError> {
     let item = parse_document(&bytes, path)?;
     let stem = path.file_stem().unwrap_or_default();
     if item.id.as_str() != stem {
-        return Err(WaymarkError::validation(
-            format!("work item document {path}"),
-            vec![ValidationIssue::new(
-                "id",
-                format!(
-                    "the persisted id {} does not match the file name {stem}",
-                    item.id
-                ),
-            )],
-        ));
+        return Err(WaymarkError::id_path_mismatch(&item.id, path, stem));
     }
     Ok(item)
 }
