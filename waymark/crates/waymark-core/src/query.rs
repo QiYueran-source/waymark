@@ -939,6 +939,10 @@ pub struct ListedItem {
     pub children: Vec<WorkItemId>,
     /// The active items that depend on it, sorted by stable ID.
     pub dependents: Vec<WorkItemId>,
+    /// Whether the document's generation is older than this release writes, so
+    /// mediated writes refuse it until a version migration runs. Reads still
+    /// include it, marked rather than hidden.
+    pub needs_migration: bool,
 }
 
 /// The result of a list-family read.
@@ -1063,6 +1067,7 @@ impl Snapshot {
             readiness,
             children,
             dependents,
+            needs_migration: item.needs_migration(),
             item: item.clone(),
         }
     }
@@ -1388,6 +1393,8 @@ pub enum FieldName {
     ArchivedAt,
     /// Archive reason.
     ArchiveReason,
+    /// Whether the document's generation needs a version migration.
+    NeedsMigration,
     /// Derived readiness.
     Ready,
     /// Derived blockage.
@@ -1419,6 +1426,7 @@ impl FieldName {
         Self::CustomFields,
         Self::ArchivedAt,
         Self::ArchiveReason,
+        Self::NeedsMigration,
         Self::Ready,
         Self::Blocked,
         Self::BlockedBy,
@@ -1454,6 +1462,7 @@ impl FieldName {
             Self::CustomFields => "custom_fields",
             Self::ArchivedAt => "archived_at",
             Self::ArchiveReason => "archive_reason",
+            Self::NeedsMigration => "needs_migration",
             Self::Ready => "ready",
             Self::Blocked => "blocked",
             Self::BlockedBy => "blocked_by",
@@ -1475,7 +1484,12 @@ impl FieldName {
     pub fn is_frontmatter(self) -> bool {
         !matches!(
             self,
-            Self::Ready | Self::Blocked | Self::BlockedBy | Self::Children | Self::Dependents
+            Self::NeedsMigration
+                | Self::Ready
+                | Self::Blocked
+                | Self::BlockedBy
+                | Self::Children
+                | Self::Dependents
         )
     }
 }
@@ -1613,7 +1627,8 @@ fn frontmatter_value(item: &WorkItem, field: FieldName) -> Value {
         }
         FieldName::ArchivedAt => json!(item.archived_at.map(|value| value.to_string())),
         FieldName::ArchiveReason => json!(item.archive_reason),
-        FieldName::Ready
+        FieldName::NeedsMigration
+        | FieldName::Ready
         | FieldName::Blocked
         | FieldName::BlockedBy
         | FieldName::Children
@@ -1631,6 +1646,7 @@ fn optional_ids(ids: &[WorkItemId]) -> Value {
 
 fn derived_value(row: &ListedItem, field: FieldName) -> Value {
     match field {
+        FieldName::NeedsMigration => json!(row.needs_migration),
         FieldName::Ready => json!(row.readiness.ready),
         FieldName::Blocked => json!(row.readiness.blocked),
         FieldName::BlockedBy => json!(row

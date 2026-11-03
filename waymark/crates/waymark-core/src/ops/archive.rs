@@ -186,6 +186,9 @@ fn apply(
         .iter()
         .find(|document| document.id == id)
         .ok_or_else(|| WaymarkError::item_not_found(&id))?;
+    // Archive is a mediated write, so a stale document is refused until the
+    // version migration rewrites it; only reads may inspect it.
+    mediated::require_current_generation(project, &target.item)?;
     if target.item.is_archived() {
         return Err(WaymarkError::already_archived(&target.item.id));
     }

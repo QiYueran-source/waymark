@@ -28,9 +28,7 @@ use serde_norway::Value;
 use crate::error::{ValidationIssue, WaymarkError};
 use crate::id::WorkItemId;
 use crate::location::Location;
-use crate::model::{
-    CategoryKey, CustomFields, FieldKey, FieldValue, Status, WorkItem, FORMAT_GENERATION,
-};
+use crate::model::{CategoryKey, CustomFields, FieldKey, FieldValue, Status, WorkItem};
 use crate::serialize::canonical_body;
 use crate::time::{parse_utc, Timestamp};
 
@@ -132,11 +130,11 @@ fn mapping_pairs(value: Value, path: &Utf8Path) -> Result<Vec<(String, Value)>, 
 
 /// Refuse a document that declares a format generation this release cannot read.
 ///
-/// This is checked before any other validation and reported as `PARSE_ERROR`
-/// naming the generation: the registry's dedicated `UNSUPPORTED_VERSION` code
-/// arrives with the migration ticket, and reporting a readable-but-unsupported
-/// document as a field-level validation failure would send the caller looking
-/// for a typo that is not there.
+/// The reader is retained for the current and the immediately previous
+/// generation ([`crate::model::is_readable_generation`]). Anything outside that
+/// window is `UNSUPPORTED_VERSION`, checked before any other validation:
+/// reporting a readable-but-unsupported document as a field-level validation
+/// failure would send the caller looking for a typo that is not there.
 fn reject_unreadable_generation(
     pairs: &[(String, Value)],
     path: &Utf8Path,
@@ -147,15 +145,17 @@ fn reject_unreadable_generation(
     let Some(generation) = value.as_u64() else {
         return Ok(()); // the field validator reports a non-integer generation
     };
-    if generation == u64::from(FORMAT_GENERATION) {
+    let readable = u32::try_from(generation)
+        .ok()
+        .is_some_and(crate::model::is_readable_generation);
+    if readable {
         return Ok(());
     }
-    Err(WaymarkError::parse(
-        path.to_string(),
-        format!(
-            "the document declares format generation {generation}, which this release cannot read (generation {FORMAT_GENERATION})"
-        ),
-    ))
+    let error = WaymarkError::unsupported_version(
+        generation.to_string(),
+        crate::model::readable_generations(),
+    );
+    Err(error.with_location(Location::file(path.to_string())))
 }
 
 /// Parse a document and additionally require its bytes to already be the
@@ -347,8 +347,8 @@ impl<'a> Frontmatter<'a> {
             self.issue("schema", "must fit in 32 bits");
             return None;
         };
-        // The generation itself was already checked by
-        // `reject_unreadable_generation`, so it matches here.
+        // The generation was already checked by
+        // `reject_unreadable_generation`, so it is one this release reads.
         Some(generation)
     }
 

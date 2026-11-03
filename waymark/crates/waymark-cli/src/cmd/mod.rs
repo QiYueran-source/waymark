@@ -13,6 +13,7 @@ pub mod git;
 pub mod init;
 pub mod link;
 pub mod list;
+pub mod migrate;
 pub mod parent;
 pub mod project;
 pub mod query;
@@ -142,6 +143,7 @@ pub fn item_json(item: &WorkItem, path: &camino::Utf8Path) -> Value {
 pub fn item_fields(item: &WorkItem) -> Value {
     serde_json::json!({
         "schema": item.schema,
+        "needs_migration": item.needs_migration(),
         "id": item.id.as_str(),
         "title": item.title,
         "category": item.category.as_str(),

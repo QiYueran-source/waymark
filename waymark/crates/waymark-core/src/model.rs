@@ -12,6 +12,26 @@ use serde::{Deserialize, Serialize};
 /// The on-disk format generation this release writes and reads.
 pub const FORMAT_GENERATION: u32 = 1;
 
+/// The oldest format generation this release can still read.
+///
+/// The reader is retained for the current and the immediately previous
+/// generation; anything older is `UNSUPPORTED_VERSION`.
+pub const PREVIOUS_FORMAT_GENERATION: u32 = FORMAT_GENERATION.saturating_sub(1);
+
+/// Whether `generation` is one this release can read (and therefore rewrite).
+pub fn is_readable_generation(generation: u32) -> bool {
+    (PREVIOUS_FORMAT_GENERATION..=FORMAT_GENERATION).contains(&generation)
+}
+
+/// The readable generations, as one phrase for `UNSUPPORTED_VERSION` details.
+pub fn readable_generations() -> String {
+    if PREVIOUS_FORMAT_GENERATION == FORMAT_GENERATION {
+        FORMAT_GENERATION.to_string()
+    } else {
+        format!("{PREVIOUS_FORMAT_GENERATION}..={FORMAT_GENERATION}")
+    }
+}
+
 /// Frontmatter keys a custom field may not shadow: the persisted v1 fields plus
 /// the values computed from the projection.
 pub const RESERVED_FIELD_NAMES: &[&str] = &[
@@ -141,9 +161,24 @@ impl WorkItem {
         self.archived_at.is_some()
     }
 
-    /// Whether this document's generation matches the release's generation.
+    /// Whether this document's generation is older than the one this release
+    /// writes, so it needs an explicit version migration before a mediated
+    /// write may touch it.
     pub fn needs_migration(&self) -> bool {
         self.schema < FORMAT_GENERATION
+    }
+
+    /// Whether this document's generation is older than `generation`.
+    ///
+    /// Mediated writes compare against the project generation; the migration
+    /// planner compares against the target generation.
+    pub fn needs_migration_from(&self, generation: u32) -> bool {
+        self.schema < generation
+    }
+
+    /// Whether this document's generation is newer than this release reads.
+    pub fn is_from_the_future(&self) -> bool {
+        self.schema > FORMAT_GENERATION
     }
 }
 
