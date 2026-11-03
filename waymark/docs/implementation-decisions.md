@@ -1742,3 +1742,64 @@ document/configuration rewrites (a category-key migration's value rewrites can r
   documentation; and the CLI/MCP parity test. The diagnostics tools here already
   call `ops::doctor::diagnose`; the write tools must likewise return the shared
   envelope and the shared codes.
+# Owner transfer and item move
+
+- **Owner identity validation is shared with create, not restated.** The
+  non-empty / single-line / trimmed rule lives in one helper
+  (`ops::create::owner_issue`) that both creation and `owner transfer` call, so
+  the two surfaces cannot drift. A transfer refuses an invalid identity before
+  taking the lock or reading an item. The refusal target is `owner`.
+- **The `OWNER_MISMATCH` warning is computed against the owner the item had
+  before the transfer.** The operator is the identity initiating the handover, so
+  comparing it with the *new* owner would warn the outgoing owner merely for
+  transferring an item they legitimately own. A transfer by the current owner
+  therefore produces no warning even though the persisted owner changes.
+- **An unknown category in `move` reuses creation's `VALIDATION_ERROR` issue**
+  (`"<key> is not a category declared in the project configuration"`) through the
+  same shared helper (`ops::create::category_issue`). It is not
+  `CATEGORY_NOT_FOUND`: creation never used that code for an undeclared category,
+  and the brief requires parity with creation.
+- **The destination-conflict code is `WRITE_CONFLICT`, not
+  `MIGRATION_PATH_CONFLICT`.** `WRITE_CONFLICT` is the registry's conflict class
+  (exit 4) for "a target must not be overwritten", its frozen details shape
+  (`{id, path, expected_fingerprint, actual_fingerprint}`) fits exactly
+  (`expected: "absent"`, `actual: "present"`), and `create` already uses the same
+  shape for a path that unexpectedly exists. `MIGRATION_PATH_CONFLICT` is exit
+  class 6 with a migration-specific `{target, conflict}` shape and belongs to the
+  migration vocabulary; it is not used by an ordinary move.
+- **A regular work-item file already sitting at the destination surfaces as
+  `DUPLICATE_ID`, not `WRITE_CONFLICT`.** The target path is always
+  `<category-dir>/<id>.md`, so such a file necessarily claims the same stable ID
+  and the inventory diagnoses the duplicate before any move rule runs. The
+  `WRITE_CONFLICT` destination check covers a non-document occupant (for example a
+  directory) and a file that appears after the inventory scan; both are still
+  refused without overwriting. Tests cover both shapes.
+- **A document that already sits at the destination path is rewritten in place.**
+  If the computed destination equals the loaded document's path but the persisted
+  category differs (a hand-placed file), the move skips relocation and rewrites
+  the category through `mediated::commit` (fingerprint-checked, atomic). It is a
+  real change (`changed: true`) because the persisted value moves.
+- **The fingerprint check for the cross-path write is done immediately before the
+  destination write, under the same lock.** The write engine's
+  `replace_checked` compares the fingerprint of the path it writes; a move reads
+  the old path and writes the new one, so the check is re-expressed there with the
+  engine's exact `WRITE_CONFLICT` shape. The destination itself is written with
+  the engine's atomic writer, and the old path is removed only after that write
+  succeeds. If removal fails, the newly written destination is removed first, so
+  the operation never leaves two documents claiming one ID.
+- **A move moves `updated_at`.** The persisted `category` value changes, which is
+  a content change, consistent with archive's relationship cleanup and ordinary
+  editing; it is not a pure relocation (unlike a storage migration). A
+  same-category move is a true no-op: no write and no timestamp move.
+- **The persisted category is authoritative for the same-category no-op.** A
+  document whose bytes declare the requested category is not relocated merely
+  because it was hand-placed elsewhere; the same-category request returns
+  `changed: false` and writes nothing.
+- **Outcome fingerprints are singular (`Option<Fingerprint>`).** Each operation
+  writes exactly one document; the fingerprint is the written bytes, `None` on a
+  dry run or a no-op. This mirrors `EditOutcome`/`StatusOutcome` rather than
+  archive's multi-document `Vec`.
+- **`move` is registered as `ops::r#move`.** `move` is a Rust keyword; the module
+  file is `ops/move.rs` as requested, exposed as `pub mod r#move;`. Callers use
+  `waymark_core::ops::r#move::move_item`.
+

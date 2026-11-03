@@ -15,6 +15,8 @@ pub mod init;
 pub mod link;
 pub mod list;
 pub mod migrate;
+pub mod r#move;
+pub mod owner;
 pub mod parent;
 pub mod project;
 pub mod query;
