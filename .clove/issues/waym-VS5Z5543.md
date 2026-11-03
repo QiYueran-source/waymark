@@ -209,7 +209,9 @@ Codes with no exit class, used as warnings and findings: `OWNER_MISMATCH` (warni
 
 The following decisions extend the accepted specification; the specification and implementation tickets have not yet been synchronized with them.
 
-- Use existing frameworks for the Web HTTP service and for MCP, rather than implementing HTTP or the MCP protocol by hand. Clove is technical prior art, not a requirement to copy its product scope or response contracts. The MCP framework and version remain open pending investigation.
+- Use existing frameworks for the Web HTTP service and for MCP, rather than implementing HTTP or the MCP protocol by hand. Clove is technical prior art, not a requirement to copy its product scope or response contracts.
+- MCP prefers rmcp with Tokio; select its version and features only after verifying the complete dependency graph against the supported Rust version. First investigate compatible rmcp versions or feature combinations under Rust 1.85. If no suitable option exists, assess raising the minimum supported Rust version and report the trade-off for a decision; do not silently raise it or assume Rust 1.88 is sufficient for the complete dependency graph.
+- MCP initially uses stdio: a local MCP client starts the Waymark server process and communicates over standard input/output. An HTTP MCP transport is not part of the initial choice. Web HTTP remains a separate interface. MCP must preserve Waymark's shared business rules, versioned envelopes, and typed errors rather than copying Clove's different MCP result format.
 - The Web backend uses Axum and Tokio; the Web frontend uses SvelteKit, Svelte, TypeScript, and Vite. Select compatible versions after validating the complete dependency graph against the project's declared Rust version; report incompatibilities rather than silently raising that version. Web remains strictly read-only and does not acquire Clove's other product features by virtue of this stack choice.
 - The basic distribution includes CLI, the shared core, and MCP; Web is optional. A build-time feature selects Web: the default build is the basic version, while a Web-enabled build includes Web. Adding Web to an installed basic executable requires rebuilding or installing a Web-enabled replacement, not dynamically attaching a module. The exact prebuilt release artifacts remain open.
 - A Web-enabled build must obtain complete frontend assets. Missing assets or a frontend build failure must produce a clear build failure, rather than silently shipping a placeholder or stale frontend as a successful Web build.
@@ -219,7 +221,7 @@ The following decisions extend the accepted specification; the specification and
 
 ### Web, MCP, and distribution follow-up
 
-- The MCP framework, transport and version, and the exact compatible versions of the selected Web stack; verify the resolved Rust dependency graph against the supported Rust version.
+- The exact compatible rmcp and Web-stack versions and feature combinations; verify the resolved Rust dependency graph against the supported Rust version. If no suitable rmcp combination supports Rust 1.85, determine whether and how far to raise that minimum.
 - The exact feature and prebuilt-artifact layout, frontend asset verification and provenance, and the ownership of integration work across the Web and MCP tickets.
 
 Before the Web, MCP, and distribution follow-up above, every original decision ticket had been closed and indexed under Decisions so far. The replacement `waym-WMSPEC01` was accepted with 130 user stories, the absorbed command and tool catalog, and the frozen error registry; the interface working document was retired to `.inbox/superpower/`. The map remains the decision record and implementation tickets are cut from the specification, not from this map. The new follow-up decisions above are not yet reflected in that specification.
@@ -228,7 +230,7 @@ The following earlier details also remain unspecified:
 
 - the frontmatter field name and value shape that carries the format generation;
 - whether `sync` stays a public command, folds into `doctor`, or is implied by per-operation inventory checks;
-- MCP transport specifics (stdio versus HTTP, tool-name convention, whether resources or subscriptions are exposed);
+- MCP details other than the selected initial stdio transport: tool-name convention and whether resources or subscriptions are exposed;
 - the concrete shape of human-readable CLI output, and whether CLI and Web share work-state colours and markers;
 - the exact MCP schema and return values for title, body, and custom-field operations;
 - whether a composite `edit` operation exists at all, and whether cross-domain edits are atomic;
