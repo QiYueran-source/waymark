@@ -9,14 +9,31 @@ before changing behaviour — the specification is normative.
 - `crates/waymark-core` — every domain rule. The CLI, MCP server, and Web view are adapters and must
   not hold rules of their own.
 - `crates/waymark-cli` — the `waymark` binary (transport and rendering only).
+- `crates/waymark-mcp` — the `waymark-mcp` MCP server over stdio (transport and rendering only). Its
+  tools map one-to-one onto core operations; it adds no rules and no second error taxonomy.
+- `crates/waymark-web` — the read-only Web service (`waymark-web-dev` launcher, Axum + Tokio) and
+  `crates/waymark-web/ui`, the SvelteKit/Svelte/TypeScript frontend it serves. There is no write path.
+- `waymark_core::view` — the shared JSON renderers every adapter calls. Do not copy a renderer into an
+  adapter; add it here and let the CLI, MCP, and Web share it.
+- `docs/implementation-decisions.md` — the record of choices the specification leaves open.
 
 ## Quality gate
 
 ```sh
-cargo fmt --check
+cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
+
+Frontend (only when changing `crates/waymark-web/ui`); `cargo` never needs npm:
+
+```sh
+cd crates/waymark-web/ui
+npm ci && npm run build && npm test && npm run check
+```
+
+Set `CARGO_HOME` and `npm_config_cache` to writable paths in this environment; the defaults are not
+writable.
 
 ## Conventions
 
