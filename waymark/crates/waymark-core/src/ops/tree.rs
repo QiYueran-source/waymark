@@ -163,7 +163,7 @@ pub fn hierarchy_tree(
     if let Some(root) = root {
         let root = crate::ops::read::normalize(root)?;
         if graph.get(&root).is_none() {
-            return Err(describe_unusable_root(project, &root));
+            return Err(describe_unusable_root(project, &root, "tree"));
         }
         return Ok(HierarchyTree {
             roots: vec![build_hierarchy(&graph, &root, depth)],
@@ -235,7 +235,7 @@ pub fn dependency_tree(
     let graph = Graph::from_project(project)?;
     let start = crate::ops::read::normalize(id)?;
     if graph.get(&start).is_none() {
-        return Err(describe_unusable_root(project, &start));
+        return Err(describe_unusable_root(project, &start, "dep tree"));
     }
     let meta = complete_meta(graph.diagnostics());
 
@@ -388,9 +388,12 @@ fn rows(records: &[Record]) -> Vec<DependencyRow> {
 }
 
 /// Why the requested starting item cannot be read: missing, or archived.
-fn describe_unusable_root(project: &Project, id: &WorkItemId) -> WaymarkError {
+///
+/// `operation` names the command, so `ITEM_ARCHIVED` tells the caller which
+/// command refused rather than a generic "tree".
+fn describe_unusable_root(project: &Project, id: &WorkItemId, operation: &str) -> WaymarkError {
     match project.locate(id) {
-        Ok(_) => WaymarkError::item_archived(id, "tree"),
+        Ok(_) => WaymarkError::item_archived(id, operation),
         Err(error) if error.code() == crate::error::Code::ItemNotFound => {
             WaymarkError::item_not_found(id)
         }
