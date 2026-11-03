@@ -534,6 +534,41 @@ fn schema_migration_refuses_a_field_type_change_with_the_same_command_as_config(
 }
 
 #[test]
+fn add_required_field_cannot_promote_an_existing_optional_field() {
+    let (_dir, project) = project_with_fields(&[("effort", FieldType::Integer, false)]);
+    let before = config_text(&project);
+
+    // The same refusal `config set field effort required true` already gives:
+    // promotion is a manual schema change, never a migration action.
+    let from_config = config::set_field(
+        &project,
+        &field_key("effort"),
+        FieldAttribute::Required,
+        "true",
+        &options(),
+    )
+    .expect_err("a requiredness change is migration territory");
+    let from_migration = migrate::migrate_schema(
+        &project,
+        SchemaAction::AddRequiredField {
+            key: field_key("effort"),
+            ty: FieldType::Integer,
+            default: Some(FieldValue::Integer(1)),
+        },
+        &options(),
+    )
+    .expect_err("the existing declaration cannot be promoted");
+
+    assert_eq!(from_migration.code(), Code::ActionRequiresMigration);
+    assert_eq!(from_migration.message(), from_config.message());
+    assert_eq!(
+        from_migration.details().get("required_command"),
+        from_config.details().get("required_command")
+    );
+    assert_eq!(config_text(&project), before, "nothing is declared");
+}
+
+#[test]
 fn removing_an_undeclared_field_is_a_validation_error() {
     let (_dir, project) = project_with_fields(&[]);
     let error = migrate::migrate_schema(

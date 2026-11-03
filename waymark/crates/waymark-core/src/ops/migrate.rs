@@ -614,10 +614,6 @@ pub fn plan_schema(
             }
         }
         SchemaAction::AddRequiredField { key, ty, default } => {
-            let existing_default = current
-                .fields
-                .get(key)
-                .and_then(|decl| decl.default.clone());
             if let Some(existing) = current.fields.get(key) {
                 if existing.ty != *ty {
                     return Err(WaymarkError::action_requires_migration(
@@ -625,32 +621,40 @@ pub fn plan_schema(
                         "waymark migrate schema",
                     ));
                 }
-                let mut declaration: FieldDecl = existing.clone();
-                declaration.required = true;
-                if default.is_some() {
-                    declaration.default = default.clone();
+                // A declaration that already exists can never be promoted to
+                // required here: that makes every existing item invalid, which
+                // the spec puts outside migration. The same refusal as
+                // `config set field <key> required true` keeps them in step.
+                if existing.required {
+                    return Err(WaymarkError::action_requires_migration(
+                        format!("changing the declared custom field `{key}`"),
+                        "waymark migrate schema",
+                    ));
                 }
-                next.fields.insert(key.clone(), declaration);
-            } else {
-                if let Some(value) = default {
-                    if !ty.accepts(value) {
-                        return Err(schema_invalid(
-                            format!("fields.{key}.default"),
-                            format!("the default is not a {}", ty.as_str()),
-                        ));
-                    }
-                }
-                next.fields.insert(
-                    key.clone(),
-                    FieldDecl {
-                        ty: ty.clone(),
-                        required: true,
-                        default: default.clone(),
-                    },
-                );
+                return Err(WaymarkError::action_requires_migration(
+                    format!("making `{key}` required"),
+                    "waymark migrate schema --add-required-field",
+                ));
             }
+            // Only a genuinely new required field is a migration action.
+            if let Some(value) = default {
+                if !ty.accepts(value) {
+                    return Err(schema_invalid(
+                        format!("fields.{key}.default"),
+                        format!("the default is not a {}", ty.as_str()),
+                    ));
+                }
+            }
+            next.fields.insert(
+                key.clone(),
+                FieldDecl {
+                    ty: ty.clone(),
+                    required: true,
+                    default: default.clone(),
+                },
+            );
             description = format!("add required custom field `{key}` and its default");
-            let fill = default.clone().or(existing_default);
+            let fill = default.clone();
             let mut missing: Vec<String> = Vec::new();
             for item in &state.items {
                 match current_value(&item.item, key) {
