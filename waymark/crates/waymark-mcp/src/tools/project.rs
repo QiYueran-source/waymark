@@ -6,12 +6,10 @@ use rmcp::tool_router;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use waymark_core::config::{self, Category};
 use waymark_core::envelope::Meta;
 use waymark_core::error::WaymarkError;
-use waymark_core::store::InitOptions;
-use waymark_core::time::parse_timezone;
-use waymark_core::{CategoryKey, Config, Project};
+use waymark_core::ops::config::InitRequest;
+use waymark_core::Project;
 
 use crate::envelope::{self, ToolResult};
 use crate::server::WaymarkServer;
@@ -43,38 +41,21 @@ pub struct ProjectInitArgs {
 }
 
 impl ProjectInitArgs {
-    fn to_config(&self) -> Result<Config, WaymarkError> {
-        let key = CategoryKey::parse(
-            self.category
-                .as_deref()
-                .unwrap_or(config::DEFAULT_CATEGORY_KEY),
-        )
-        .map_err(|error| {
-            WaymarkError::config_invalid("init", vec![format!("category: {error}")])
-        })?;
-
-        let mut config = Config::fresh();
-        config.storage_root = self
-            .storage_root
-            .clone()
-            .unwrap_or_else(|| config::DEFAULT_STORAGE_ROOT.to_owned());
-        config.categories.clear();
-        config.categories.insert(
-            key.clone(),
-            Category {
-                path: format!("{}/{}", config.storage_root, key.as_str()),
-                name: config::default_category_name(&key),
-            },
-        );
+    fn request(&self) -> InitRequest {
+        let mut request = InitRequest::new();
+        if let Some(category) = &self.category {
+            request = request.with_category(category.clone());
+        }
+        if let Some(storage_root) = &self.storage_root {
+            request = request.with_storage_root(storage_root.clone());
+        }
         if let Some(operator) = &self.operator {
-            config.operator = Some(operator.clone());
+            request = request.with_operator(operator.clone());
         }
         if let Some(timezone) = &self.timezone {
-            config.timezone = parse_timezone(timezone).map_err(|error| {
-                WaymarkError::config_invalid("init", vec![format!("timezone: {error}")])
-            })?;
+            request = request.with_timezone(timezone.clone());
         }
-        Ok(config)
+        request
     }
 }
 
@@ -93,15 +74,8 @@ impl WaymarkServer {
         Parameters(args): Parameters<ProjectInitArgs>,
     ) -> ToolResult {
         envelope::respond(|| {
-            let config = args.to_config()?;
-            let project = Project::init(
-                self.start(),
-                InitOptions {
-                    force: args.force,
-                    config: Some(config),
-                    operator: None,
-                },
-            )?;
+            let project =
+                waymark_core::ops::config::init(self.start(), args.request(), args.force)?;
             Ok(envelope::success(
                 project_data(&project)?,
                 Meta::direct_file_scoped(),

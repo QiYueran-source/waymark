@@ -2,11 +2,9 @@
 
 use camino::Utf8Path;
 use clap::Args;
-use waymark_core::config::Config;
 use waymark_core::envelope::{success_envelope, Meta};
 use waymark_core::error::WaymarkError;
-use waymark_core::store::InitOptions;
-use waymark_core::Project;
+use waymark_core::ops::config::InitRequest;
 
 use super::{emit, err_line, invocation_dir};
 
@@ -41,36 +39,16 @@ pub fn run(args: InitArgs, explicit: Option<&Utf8Path>, json: bool) -> Result<()
         None => invocation_dir()?,
     };
 
-    let key = waymark_core::CategoryKey::parse(&args.category).map_err(|error| {
-        WaymarkError::config_invalid("init", vec![format!("category: {error}")])
-    })?;
-
-    let mut config = Config::fresh();
-    config.storage_root = args.storage_root.clone();
-    config.categories.clear();
-    config.categories.insert(
-        key.clone(),
-        waymark_core::config::Category {
-            path: format!("{}/{}", args.storage_root, key.as_str()),
-            name: waymark_core::config::default_category_name(&key),
-        },
-    );
-    if let Some(operator) = &args.operator {
-        config.operator = Some(operator.clone());
+    let mut request = InitRequest::new()
+        .with_storage_root(args.storage_root)
+        .with_category(args.category);
+    if let Some(operator) = args.operator {
+        request = request.with_operator(operator);
     }
-    if let Some(timezone) = &args.timezone {
-        config.timezone = waymark_core::time::parse_timezone(timezone)
-            .map_err(|error| WaymarkError::config_invalid("init", vec![error.to_string()]))?;
+    if let Some(timezone) = args.timezone {
+        request = request.with_timezone(timezone);
     }
-
-    let project = Project::init(
-        &root,
-        InitOptions {
-            force: args.force,
-            config: Some(config),
-            operator: None,
-        },
-    )?;
+    let project = waymark_core::ops::config::init(&root, request, args.force)?;
 
     if json {
         let categories: Vec<serde_json::Value> = project
