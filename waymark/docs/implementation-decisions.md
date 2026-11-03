@@ -1635,3 +1635,106 @@ document/configuration rewrites (a category-key migration's value rewrites can r
 - `Finding` has no details map, so structured cycle paths and inventory deltas
   live in the message; exposing typed details would be an envelope contract
   change (not made here).
+
+# T10 — MCP adapter (phase A)
+
+## Transport and framework
+
+- `rmcp 0.8.5` with its default features plus `transport-io` (`base64`,
+  `macros`, `server`, `transport-io`); the client feature is a dev-dependency
+  only, for the in-process test harness. `rmcp` is edition 2024 and declares no
+  `rust-version`; `cargo metadata --locked` reports no package in the resolved
+  220-package graph above `rust-version = 1.85` (the highest declared is
+  `tokio 1.54.1` at 1.85, then `schemars 1.2.3` at 1.74, `axum 0.8.9` at 1.80).
+  The workspace `rust-version = "1.85"` was not raised.
+- The binary is `waymark-mcp`. Transport is stdio only, via `stdio()` and
+  `ServerExt::serve`, then `waiting()`. There is no HTTP transport, no listener,
+  and no resources/prompts surface — tools only.
+- The Tokio runtime is `rt-multi-thread` with `macros`; the server is a
+  `#[tool_handler]` implementation whose `tool_router` is assembled from the
+  per-family `#[tool_router]` blocks (project, config, read).
+
+## Project context
+
+- The start directory is `--project DIR` when given, otherwise the process
+  working directory. A non-existent explicit directory is a startup failure
+  with the registry's `PROJECT_NOT_FOUND` exit class (5), printed to stderr.
+- The project is resolved *per tool call* with `Project::discover`, not cached
+  at startup: the server is long-lived, and a configuration or file change must
+  be visible to the next call exactly as it is to the next CLI invocation.
+- A missing or invalid project does **not** abort startup. `waymark_project_init`
+  must be able to create a project where none exists, and
+  `waymark_config_validate` must be able to report a broken configuration.
+  Startup writes one narrative line to stderr; each tool that needs a project
+  returns the registry failure (`PROJECT_NOT_FOUND`, `CONFIG_INVALID`, …) in a
+  business envelope. stdout is the protocol channel and is never used for
+  narrative.
+- `waymark_project_init` uses the start directory as the project root (like
+  `waymark init`) and reuses an existing configuration unless `force` is true.
+
+## Envelope and failure representation
+
+- Success: `CallToolResult::structured(success_envelope(data, meta))`; the
+  envelope is both the text content and the structured content. `_meta` comes
+  from the operation that produced the data (`direct_file` for config/project
+  reads, `memory_projection` for collection, tree, search, stats, and
+  diagnostics).
+- Business failure: `CallToolResult::structured_error(failure_envelope(error))`
+  — a tool result with `isError: true`, never a JSON-RPC error. The error object
+  is exactly the shared `{v, code, message, details, location?, retryable}`;
+  the adapter adds no field and no second classification. `invariants` and the
+  registry comparison test pin this.
+- JSON-RPC errors are left to `rmcp`: unknown tool and parameter
+  deserialization failures are `-32602 invalid params`, and transport failures
+  are transport errors. No tool handler constructs one.
+- Diagnostic reads (`waymark_config_validate`, `waymark_validate`,
+  `waymark_doctor`) return a success envelope containing the findings, `valid`
+  (and `healthy`), counts, and scope, even when findings are errors. The CLI
+  fails `config validate` with `CONFIG_INVALID` and exits 3; MCP has no exit
+  code and the report is the requested capability, so the presentation differs
+  while the registry codes, locations, and severities do not. A report that
+  cannot be produced at all is still a business failure.
+
+## Arguments and defaults
+
+- Collection tools take a structured filter document (`filter`) parsed by
+  `Filters::from_json`, exactly like `waymark query --filter`; the adapter does
+  not re-declare the filter vocabulary. The generated schema therefore types
+  the document as an arbitrary JSON object and the tool description lists the
+  keys — typing it in the adapter would duplicate validation and turn domain
+  errors into protocol errors.
+- `archive` is a top-level argument on list/ready/blocked/stats and overrides
+  `filter.archive` when both are present, so one request always has one range.
+- MCP collection default is `limit = 50` (`waymark_core::query::MCP_DEFAULT_LIMIT`)
+  for list, ready, blocked, and search; the CLI default stays 100
+  (`DEFAULT_LIMIT`). `limit = 0` means unlimited in both adapters, and
+  `offset` defaults to 0. The description is the agent-facing documentation of
+  the default because JSON Schema cannot express it here.
+- `fields` (projection) and `compact` are mutually exclusive. An empty
+  `fields` list is a `VALIDATION_ERROR` rather than "everything".
+- `waymark_search_work_items` rejects a blank `text` with `VALIDATION_ERROR`
+  (the adapter-level check the CLI performs as a usage error); `waymark_core`
+  documents an empty needle as matching everything for callers that have
+  already validated.
+- `waymark_get_stats` uses `top` + `top_field`; `top` without `top_field` is a
+  `VALIDATION_ERROR`, and the archive range defaults to `active`.
+
+## Shared-surface invariants and follow-ups
+
+- `waymark_mcp::invariants::batch_parameters` is the public, phase-independent
+  check that a tool schema accepts no `items`/`ids`/`targets`/`batch`/`changes`
+  parameter and no array of objects. The catalog test applies it to every
+  advertised tool; phase B must keep it passing for every write tool.
+- `waymark_mcp::PHASE_A_TOOLS` is the phase-A catalog; the catalog test compares
+  it with the served tools, so phase B must extend it or the test fails.
+- The project-init configuration assembly and the machine JSON renderers
+  (item, config, list page, tree node) are adapter-local copies of the CLI's
+  representation because `waymark-core` exposes no shared renderer. Only
+  representation is duplicated; no rule is. Moving those renderers into core is
+  a phase-B follow-up, not a phase-A edit to core.
+- Phase B must add: config writes and category/field management; create, edit
+  (title/body/custom fields), status, owner, move, parent, dependency, and
+  soft-link tools; archive and migration; Git history/diff; generated agent
+  documentation; and the CLI/MCP parity test. The diagnostics tools here already
+  call `ops::doctor::diagnose`; the write tools must likewise return the shared
+  envelope and the shared codes.
