@@ -82,7 +82,7 @@ work_item_update_custom_fields
 - `id`、`creator`、`created_at`、`updated_at`、`closed_at`、`archived_at` 等系统/身份字段不能由普通编辑修改；
 - `ready`、`blocked`、`blocked_by` 等计算结果永远不可写。
 
-三个编辑函数当前已确定为：title 完整替换；body 完整替换并允许用空字符串清空；custom fields 使用显式 set/clear 并允许一次修改多个字段。每个函数只修改自己的数据区域，只有实际值变化时才更新 `updated_at`；失败时不产生部分写入。CLI 值解析、MCP schema、编辑器行为、返回值和批量范围仍待细化。它们不是任意 frontmatter patch 函数。
+三个编辑函数当前已确定为：title 完整替换；body 完整替换并允许用空字符串清空；custom fields 使用显式 set/clear 并允许一次修改多个字段。每个函数只修改自己的数据区域，只有实际值变化时才更新 `updated_at`；失败时不产生部分写入。CLI custom-field 值按 schema 解析：复杂值使用 canonical JSON literal，简单 string/integer/boolean 值可使用无歧义简写；同一次 `field update` 可混合重复 `--set` 与 `--clear`，但重复或冲突 key 被拒绝。CLI body 只接受 `--body` 或 `--body-file` 直接替换，不提供交互式 editor；MCP 使用结构化 `changes` map 和显式 set/clear。三个编辑 tool 返回完整 work item 与 `changed`，字段 tool 额外返回 `changed_fields`。它们不是任意 frontmatter patch 函数。
 
 ### 2.4 生命周期、责任与关系能力
 
