@@ -1653,6 +1653,10 @@ document/configuration rewrites (a category-key migration's value rewrites can r
 - The Tokio runtime is `rt-multi-thread` with `macros`; the server is a
   `#[tool_handler]` implementation whose `tool_router` is assembled from the
   per-family `#[tool_router]` blocks (project, config, read).
+- `serverInfo` identifies the server as `waymark-mcp` (title `Waymark`, the crate
+  version), not rmcp's build-environment default. One test drives the real
+  binary over a piped stdio pair (initialize, tools/list, tools/call, EOF) so
+  the process boundary and framing are covered, not only the in-process client.
 
 ## Project context
 

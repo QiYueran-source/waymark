@@ -56,6 +56,12 @@ impl WaymarkServer {
 impl rmcp::ServerHandler for WaymarkServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
+            server_info: rmcp::model::Implementation {
+                name: "waymark-mcp".to_owned(),
+                title: Some("Waymark".to_owned()),
+                version: env!("CARGO_PKG_VERSION").to_owned(),
+                ..Default::default()
+            },
             instructions: Some(
                 "Waymark work-item tracker. Every successful tool returns the shared versioned \
                  envelope {v, ok: true, data, _meta}; every business failure returns \
