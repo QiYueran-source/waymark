@@ -326,7 +326,7 @@ fn config_validate_is_clean_on_a_fresh_project() {
 }
 
 #[test]
-fn validate_reports_the_configuration_scope_and_exits_three_on_errors() {
+fn validate_reports_configuration_scope_and_strict_exits_three_on_errors() {
     let (_dir, root) = project();
     let clean = run(waymark()
         .arg("--json")
@@ -342,7 +342,8 @@ fn validate_reports_the_configuration_scope_and_exits_three_on_errors() {
         .arg("--json")
         .arg("validate")
         .arg("--project")
-        .arg(&root));
+        .arg(&root)
+        .arg("--strict"));
     assert_eq!(dirty.status(), 3, "stderr: {}", dirty.stderr());
 }
 

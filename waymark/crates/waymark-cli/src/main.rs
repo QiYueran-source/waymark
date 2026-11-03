@@ -29,6 +29,7 @@ use cmd::agent_doc::AgentDocArgs;
 use cmd::archive::ArchiveArgs;
 use cmd::config::ConfigArgs;
 use cmd::create::CreateArgs;
+use cmd::doctor::{DoctorArgs, ValidateArgs};
 use cmd::edit::{BodyArgs, FieldArgs, TitleArgs};
 use cmd::git::GitArgs;
 use cmd::init::InitArgs;
@@ -124,8 +125,10 @@ enum Command {
     Config(ConfigArgs),
     /// Migrate the format generation or a declared custom field.
     Migrate(MigrateArgs),
-    /// Validate the whole project.
-    Validate,
+    /// Report project-wide diagnostics without repairing business data.
+    Doctor(DoctorArgs),
+    /// Validate the whole project against the current configuration.
+    Validate(ValidateArgs),
 }
 
 fn main() -> ExitCode {
@@ -150,8 +153,48 @@ fn main() -> ExitCode {
     };
 
     let json = cli.json;
+    // Diagnostics choose their exit from the report they emit, so they do not
+    // travel through the generic failure mapping: a strict run still answers
+    // with the success envelope and then exits with the registry's class.
+    match &cli.command {
+        Command::Doctor(args) => {
+            return finish(
+                cmd::doctor::run_doctor(
+                    DoctorArgs {
+                        strict: args.strict,
+                    },
+                    cli.project.as_deref(),
+                    json,
+                ),
+                json,
+            );
+        }
+        Command::Validate(args) => {
+            return finish(
+                cmd::doctor::run_validate(
+                    ValidateArgs {
+                        strict: args.strict,
+                    },
+                    cli.project.as_deref(),
+                    json,
+                ),
+                json,
+            );
+        }
+        _ => {}
+    }
     match run(cli) {
         Ok(()) => ExitCode::from(EXIT_OK),
+        Err(error) => finish(Err(error), json),
+    }
+}
+
+/// Finish a diagnostic-looking result: a chosen exit, or the registry's mapping
+/// for a real failure. `finish(Err(..))` reuses the same failure path `main` has
+/// always used.
+fn finish(result: Result<u8, waymark_core::WaymarkError>, json: bool) -> ExitCode {
+    match result {
+        Ok(code) => ExitCode::from(code),
         Err(error) => {
             // One exit mapping, from the registry. Warnings and findings never
             // reach here: they are attached to `_meta` and change nothing.
@@ -271,6 +314,6 @@ fn run(cli: Cli) -> Result<(), waymark_core::WaymarkError> {
         Command::AgentDoc(args) => cmd::agent_doc::run(Cli::command(), &args, json),
         Command::Config(args) => cmd::config::run(args, cli.project.as_deref(), &options, json),
         Command::Migrate(args) => cmd::migrate::run(args, cli.project.as_deref(), &options, json),
-        Command::Validate => cmd::project::run_validate(cli.project.as_deref(), json),
+        Command::Doctor(_) | Command::Validate(_) => Ok(()),
     }
 }

@@ -16,6 +16,7 @@
 pub mod archive;
 pub mod config;
 pub mod create;
+pub mod doctor;
 pub mod edit;
 pub mod git;
 pub mod link;

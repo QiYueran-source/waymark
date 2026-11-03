@@ -600,7 +600,7 @@ fn yaml_error(path: &Utf8Path, source: &serde_norway::Error) -> WaymarkError {
 /// Split a document into (frontmatter bytes, body bytes) by locating the opening
 /// and closing `---` fence lines. The frontmatter slice excludes the fences; the
 /// body slice is everything after the closing fence's line terminator.
-fn split_frontmatter<'a>(
+pub(crate) fn split_frontmatter<'a>(
     bytes: &'a [u8],
     path: &Utf8Path,
 ) -> Result<(&'a [u8], &'a [u8]), WaymarkError> {

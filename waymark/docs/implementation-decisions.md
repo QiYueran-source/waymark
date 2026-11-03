@@ -1517,3 +1517,121 @@ document/configuration rewrites (a category-key migration's value rewrites can r
   `applied`, `failed`, and `rollback_failed`.
 - Report JSON adds `moves` (`{from, to, outcome, error?}`) and `rewritten`
   (`{id, path, from, to}`). `affected`, `targets`, and `count` keep their version/schema meanings.
+
+# T14 — diagnostics and health
+
+## One read-only run, two commands
+
+- `doctor` and `validate` call the same core run: `ops::doctor::{diagnose,
+  diagnose_with, diagnose_against}`. `validate` adds no second review; it is the
+  compatibility review the specification requires, phrased as project
+  validation.
+- A full report carries `findings: Vec<Finding>`, counts by severity (`errors`,
+  `warnings`, `info`), `strict`, the reviewed `scope`, the permitted `repairs`,
+  and `_meta`. The machine data also carries `healthy` and `valid` (true when no
+  error findings remain), keeping the previous `validate` JSON shape usable.
+  `Finding` is the existing envelope type: there is no second diagnostic
+  taxonomy and no new registry code or details key.
+- The full scope is `["configuration", "work_items", "graph", "projection",
+  "inventory", "lock"]`. A report made without an openable project is honestly
+  configuration-scoped (`["configuration"]`) rather than claiming a work-item
+  review it could not perform.
+- Reported findings never change the exit code by default. `--strict` returns
+  the registry's invalid-data class (exit 3) while error-severity findings
+  remain. A warning-only report exits 0 in both modes. This deliberately changes
+  the previous `validate` behaviour, which failed on configuration findings
+  without a flag; the CLI test was updated.
+- Strict mode still emits the success envelope: the report is the answer, and
+  the exit class is attached to it rather than replacing it with a failure
+  envelope. This supersedes the earlier
+  `### config validate and validate exit 3 when findings are errors` and
+  `### validate covers configuration only, and says so` entries: `config
+  validate` still fails on errors, while the project-wide `validate` follows the
+  strict contract.
+
+## What is diagnosed, and under which existing code
+
+- Malformed, unreadable, and oversized frontmatter: `PARSE_ERROR` from the
+  projection's failures, plus an explicit size check. The size limit is
+  provisional: `MAX_FRONTMATTER_BYTES = 64 KiB` — above every real document and
+  well below a size that turns YAML parsing into a denial-of-service surface.
+- Duplicate IDs and multiple files for one ID: `DUPLICATE_ID` from the
+  projection's duplicate rejection. A case variant of a live ID (a filename that
+  normalizes to an existing ID) is also `DUPLICATE_ID`; a non-lowercase filename
+  with no live counterpart is `PARSE_ERROR`, because the inventory correctly
+  refuses to treat it as a document. The old inventory skip was silent.
+- ID/path mismatch: `ID_PATH_MISMATCH` from the projection.
+- Invalid fields: `VALIDATION_ERROR` split into one finding per issue from the
+  projection failure, each with a `field` location. Undeclared custom fields,
+  wrong declared types, and missing required fields after a configuration change
+  are `VALIDATION_ERROR` with a `custom_fields.<key>` field location. This is
+  how schema-removal drift surfaces without touching the document.
+- Missing relationship targets: the graph's `DANGLING_REFERENCE` findings.
+  Archived targets are also `DANGLING_REFERENCE`: the graph deliberately treats
+  archived items as known, so the diagnostic run adds the distinct archived
+  case itself. Neither case is repaired.
+- Dependency and parent cycles: `CYCLE_DETECTED` from `Graph::diagnostics`. The
+  closed path is in the message (`a -> b -> a`); `Finding` has no details field
+  and the registry details shape stays frozen.
+- Unsupported future file generations: `UNSUPPORTED_VERSION` from the parse
+  failure. A future configuration generation cannot produce a `Project` at all,
+  so `diagnose_config` reports it (with a `config_key` location) on a
+  configuration-scoped report.
+- Projection state: an incomplete projection is `INCOMPLETE_PROJECTION` and its
+  failures are reported individually. Graph diagnostics (dangling references and
+  cycles) are skipped unless the projection is complete and the inventory has no
+  uncertain paths: a partial graph is never published as a complete review.
+- Uncertain inventory paths (symlinks, non-document names, unreadable entries):
+  `INCOMPLETE_PROJECTION`, because a skipped file can hide a node or an edge.
+- Fingerprint changes after the projection read the bytes:
+  `INCOMPLETE_PROJECTION` naming the path. The run re-reads each parsed document
+  once more rather than trusting the earlier scan.
+- New, deleted, moved, and changed files: `INCOMPLETE_PROJECTION`, but only
+  through `diagnose_against(project, &retained_projection, options)`. A CLI
+  invocation builds a fresh projection and has no "before" state; the MCP
+  server, which retains a projection, is the intended caller. This is why the
+  delta seam is public.
+- Path conflicts between category directories: the existing configuration
+  validator's `CONFIG_INVALID` findings (equal paths and ancestor/descendant
+  overlaps) are part of every report. No second conflict walker was added.
+- Timestamp incoherence: `TIMESTAMP_INCOHERENT` (warning). Provisional rules:
+  `updated_at < created_at`; `closed_at < created_at`; `archived_at <
+  created_at`; `closed_at` present while the status is not `closed`; and status
+  `closed` with no `closed_at`. Future timestamps are not diagnosed because the
+  specification does not define "future" against a clock for a diagnostic run.
+- Items needing migration: `MIGRATION_AVAILABLE` (info), one finding per item
+  with a `work_item` location. A configuration generation older than the current
+  format generation adds one finding without a location (the registry allows
+  only `work_item` for that code).
+- The lock probe is `is_store_locked` (one non-blocking `try_write`). When the
+  lock file does not exist the probe returns "not held" without creating it, so
+  a read-only diagnostic run adds no file. When held it reports one info-level,
+  non-fixable `LOCK_HELD` finding naming the lock path and nothing about the
+  holder; it never waits.
+
+## Repair boundary
+
+- All findings are `fixable: false`. A diagnostic run may rebuild only the
+  disposable in-memory projection and reset the in-process cache; it never writes
+  a work-item document, relationship, body, custom field, or configuration
+  value. `Report::repairs` reports those two rebuilds with what changed and which
+  error findings remain. No repair command or `--fix` flag was added.
+- A test snapshots every file before and after a deliberately defect-filled run
+  and asserts byte identity; a second test proves a probe on a project without a
+  lock file does not create one.
+
+## Registry gaps recorded, not filled
+
+- There is no code for "inventory changed" or "file moved"; the existing
+  `INCOMPLETE_PROJECTION` is the only suitable finding code, and its frozen
+  details are not used by `Finding` at all. A dedicated code would be a registry
+  change and is deliberately not made.
+- There is no finding code for a self-dependency or a duplicate relationship
+  edge (`INVALID_RELATIONSHIP` is not a finding code). A self-dependency already
+  surfaces as a `CYCLE_DETECTED` path; duplicate edges are not separately
+  reported.
+- `MIGRATION_AVAILABLE` has no `config_key` location kind, so a configuration
+  generation drift finding carries no location.
+- `Finding` has no details map, so structured cycle paths and inventory deltas
+  live in the message; exposing typed details would be an envelope contract
+  change (not made here).
