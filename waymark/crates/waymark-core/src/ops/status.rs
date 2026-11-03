@@ -108,9 +108,10 @@ fn apply(
         });
     }
 
-    let now = Timestamp::new(options.clock.now());
+    // One clock read feeds both stamps, so `closed_at` and `updated_at` agree on
+    // the transition that created them.
+    let now = mediated::touch(&mut item, options);
     item.status = status;
-    item.updated_at = now;
     if status.is_closed() {
         item.closed_at = Some(now);
     } else {

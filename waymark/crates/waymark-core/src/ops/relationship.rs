@@ -34,7 +34,6 @@ use crate::ops::mediated::{self, Loaded};
 use crate::ops::OpOptions;
 use crate::readiness::Graph;
 use crate::store::{Fingerprint, Project};
-use crate::time::Timestamp;
 use crate::WorkItemId;
 
 /// The one relation name this operation edits.
@@ -156,8 +155,7 @@ fn apply_add(
     item.dependencies.push(target.clone());
     item.dependencies.sort();
     item.dependencies.dedup();
-    let now = Timestamp::new(options.clock.now());
-    item.updated_at = now;
+    mediated::touch(&mut item, options);
     let fingerprint = mediated::commit(loaded, &item, options)?;
     Ok(RelationshipOutcome {
         meta: mediated::write_meta(mediated::owner_warnings(project, &item, options)),
@@ -196,8 +194,7 @@ fn apply_remove(
 
     let mut item = loaded.item.clone();
     item.dependencies.retain(|known| known != target);
-    let now = Timestamp::new(options.clock.now());
-    item.updated_at = now;
+    mediated::touch(&mut item, options);
     let fingerprint = mediated::commit(loaded, &item, options)?;
     Ok(RelationshipOutcome {
         meta: mediated::write_meta(mediated::owner_warnings(project, &item, options)),
