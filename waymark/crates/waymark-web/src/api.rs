@@ -65,17 +65,38 @@ impl TreeView {
     }
 }
 
-/// `GET /api/health`: liveness plus the fact that this surface is read-only.
-pub(crate) async fn health() -> Response {
+/// `GET /api/health`: liveness, the read-only fact, and the project root.
+///
+/// `project.root` exists so the browser can namespace its local preferences by
+/// the normalized project path without a second endpoint. It is a canonical
+/// absolute path when the filesystem can provide one; preferences are never
+/// written into the project or sent anywhere but this read.
+pub(crate) async fn health(State(state): State<AppState>) -> Response {
     respond::success(
         json!({
             "status": "ok",
             "service": "waymark-web",
             "version": env!("CARGO_PKG_VERSION"),
             "read_only": true,
+            "project": {
+                "root": project_root(&state.project),
+            },
         }),
         Meta::direct_file_scoped(),
     )
+}
+
+/// The project root as the browser should key its local preferences.
+///
+/// Canonicalizing resolves symlinks and `.`/`..` on a path that must already
+/// exist (the project was opened), which keeps two spellings of one project
+/// together. If canonicalization fails the opened root is still a usable
+/// absolute path, so the answer is never missing.
+fn project_root(project: &Project) -> String {
+    std::fs::canonicalize(project.root())
+        .ok()
+        .and_then(|path| path.to_str().map(str::to_owned))
+        .unwrap_or_else(|| project.root().to_string())
 }
 
 /// `GET /api/tree?view=combined|grouped`.

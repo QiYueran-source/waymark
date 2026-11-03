@@ -1,7 +1,9 @@
 //! The frontend asset seam.
 //!
 //! `GET /` serves `<assets>/index.html`; `GET /assets/<path>` serves
-//! `<assets>/<path>`. The directory is chosen by the launcher (`--assets`), so a
+//! `<assets>/<path>`, and `GET /_app/<path>` serves `<assets>/_app/<path>`
+//! because that is where SvelteKit writes its hashed build output. The directory
+//! is chosen by the launcher (`--assets`), so a
 //! production build can reuse the same server. Nothing is embedded and no
 //! placeholder is generated: when `index.html` is missing the page route explains
 //! how to build the frontend.
@@ -53,6 +55,21 @@ pub(crate) async fn asset(
     State(state): State<AppState>,
     UrlPath(relative): UrlPath<String>,
 ) -> Response {
+    serve_relative(state, relative).await
+}
+
+/// One hashed SvelteKit build file: `/_app/<path>` maps to `<assets>/_app/<path>`.
+///
+/// The generated `index.html` references `/_app/...`; the prefix is part of the
+/// on-disk layout, so it is restored here rather than stripped.
+pub(crate) async fn app_asset(
+    State(state): State<AppState>,
+    UrlPath(relative): UrlPath<String>,
+) -> Response {
+    serve_relative(state, format!("_app/{relative}")).await
+}
+
+async fn serve_relative(state: AppState, relative: String) -> Response {
     let Some(relative) = safe_relative(&relative) else {
         return respond::bad_request(
             "INVALID_ASSET_PATH",
