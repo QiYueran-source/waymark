@@ -23,7 +23,7 @@ Produce a handoff-ready functional specification for Waymark, a general-purpose,
 - Treat Clove as a behavioral reference, not a required feature checklist.
 - Keep categories and project workflow conventions configurable; do not build Wayfinder-specific semantics into Waymark's core.
 - Consult the grilling and domain-modeling skills for decision tickets.
-- The earlier functional specification and its implementation tickets are retired: the specification is archived at `.inbox/WAYMARK-FUNCTIONAL-SPEC.md` and the tickets were closed with a supersession comment. This map plus the CLI/MCP interface design document are the current design record; a new specification and new implementation tickets will be produced from them once the remaining design is settled. Do not implement Waymark from the retired documents.
+- The earlier functional specification and its implementation tickets are retired: the specification is archived at `.inbox/WAYMARK-FUNCTIONAL-SPEC.md` and the tickets were closed with a supersession comment. This map plus the CLI/MCP interface design document are the current design record. The settled contract has been extracted into [Waymark functional specification: settled contract](waym-WMSPEC01), which deliberately excludes everything still listed under Not yet specified below; that issue is the buildable artifact, this map remains the decision record. Do not implement Waymark from the retired documents.
 
 ## Decisions so far
 
