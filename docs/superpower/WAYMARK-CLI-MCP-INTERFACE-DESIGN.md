@@ -118,18 +118,26 @@ waymark init
 waymark project info
 waymark config show
 waymark config validate
-waymark config update ...
+waymark config set <scalar> <value>
+waymark config add category <key> --path <path> --display-name <name>
+waymark config set category <key> display-name <name>
+waymark config remove category <key>
+waymark config add field <key> --type <type>
+waymark config set field <key> <attribute> <value>
 waymark validate
 waymark doctor
 waymark sync
 waymark migrate version --to <generation> [--dry-run]
 waymark migrate schema --remove-field <key> [--dry-run]
+waymark migrate schema --add-required-field <key> --default <value> [--dry-run]
 waymark migrate storage --root <path> | --category-path <key>=<path> | --category-key <old>=<new> [--dry-run]
 waymark git history ...
 waymark git diff ...
 ```
 
-CLI 负责把人类参数转换成共享函数请求，并将结构化业务错误映射为稳定退出码。迁移没有 plan 文件、没有 plan/apply 握手：`--dry-run` 做完整只读检查并输出受影响清单，正式执行重新做同样的检查后写入。加字段属于配置操作（`config field add`），删字段只通过 `migrate schema --remove-field`，不存在 `config field remove`。
+CLI 负责把人类参数转换成共享函数请求，并将结构化业务错误映射为稳定退出码。迁移没有 plan 文件、没有 plan/apply 握手：`--dry-run` 做完整只读检查并输出受影响清单，正式执行重新做同样的检查后写入。
+
+配置与迁移的分界只有一条规则：**配置命令永不读取或改写工作项文件，任何必须动到工作项文件的操作都是迁移。** 因此 `config` 负责 operator、时区、`cache.*`、类别显示名、新增可选字段和放宽型字段元数据；storage root、类别 path、类别 key、删除字段、新增必填字段全部归 `migrate`。两个命名空间共用 `category` / `field` 词汇，但动词体现安全等级。类别 path 与 key 的变更是目录级重定位：同文件系统内是一次目录 rename，纯重定位不改内容、不改指纹、不动 `updated_at`。
 
 ### 3.2 工作项读取与查询
 
@@ -194,7 +202,12 @@ waymark_project_init
 waymark_project_info
 waymark_config_read
 waymark_config_validate
-waymark_config_update
+waymark_config_set
+waymark_config_add_category
+waymark_config_update_category
+waymark_config_remove_category
+waymark_config_add_field
+waymark_config_update_field
 waymark_validate
 waymark_doctor
 waymark_sync_projection
