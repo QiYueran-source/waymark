@@ -364,27 +364,24 @@ struct Document {
     item: WorkItem,
 }
 
-/// Parse every document in the project, failing on the first broken one.
+/// Build the complete projection the archive plans against.
 ///
 /// A full scan is the operation's completeness story: archive is allowed to
-/// rewrite files it did not name, so it has to know about all of them.
+/// rewrite files it did not name, so it has to know about all of them. An
+/// unparseable document could be hiding an inbound edge, so the projection is
+/// required to be complete and fresh (`INCOMPLETE_PROJECTION` otherwise).
 fn scan(project: &Project) -> Result<Vec<Document>, WaymarkError> {
-    let inventory = project.inventory()?;
-    let mut documents = Vec::with_capacity(inventory.entries.len());
-    for entry in &inventory.entries {
-        let bytes = project.read_bytes(&entry.path)?;
-        let item = crate::parse::parse_item_file(&entry.path)?;
-        if item.id != entry.id {
-            let stem = entry.path.file_stem().unwrap_or_default();
-            return Err(WaymarkError::id_path_mismatch(&item.id, &entry.path, stem));
-        }
-        documents.push(Document {
+    let projection = crate::projection::Projection::load(project)?;
+    projection.require_complete()?;
+    let mut documents: Vec<Document> = projection
+        .entries()
+        .map(|entry| Document {
             id: entry.id.clone(),
             path: entry.path.clone(),
-            fingerprint: Fingerprint::of(&bytes),
-            item,
-        });
-    }
+            fingerprint: entry.fingerprint.clone(),
+            item: entry.item.clone(),
+        })
+        .collect();
     // Stable-ID order, not directory order: the batch, the planned removals and
     // the affected list then read the same way on every machine regardless of
     // which category directory a document happens to live in.

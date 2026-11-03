@@ -16,6 +16,7 @@ use crate::envelope::Meta;
 use crate::error::WaymarkError;
 use crate::id::WorkItemId;
 use crate::model::WorkItem;
+use crate::projection::{Projection, ScopedRead};
 use crate::store::{Fingerprint, InventoryEntry, Project};
 
 /// One work item read from disk, with the facts a caller needs to describe where
@@ -43,6 +44,18 @@ pub fn read(project: &Project, id: &str) -> Result<ReadItem, WaymarkError> {
     let id = normalize(id)?;
     let entry = project.locate(&id)?;
     read_entry(project, &entry, &id)
+}
+
+/// Read one item plus its direct relationships from a disposable projection.
+///
+/// This is the scoped local read: it works while another document is broken, and
+/// its `_meta` says so (`completeness: scoped` plus the projection diagnostics).
+/// Derived readiness is omitted when the projection is incomplete, because a
+/// broken sibling could hide the dependency that decides it.
+pub fn read_scoped(project: &Project, id: &str) -> Result<ScopedRead, WaymarkError> {
+    let id = normalize(id)?;
+    let projection = Projection::load(project)?;
+    projection.scoped_read(&id)
 }
 
 /// Read the item at `path`, without consulting the inventory.

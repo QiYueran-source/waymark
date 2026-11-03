@@ -1,11 +1,10 @@
 //! `waymark show`: read one work item by stable ID.
 
 use clap::Args;
-use waymark_core::envelope::{success_envelope, Meta};
+use waymark_core::envelope::success_envelope;
 use waymark_core::error::WaymarkError;
 use waymark_core::ops::read;
-use waymark_core::readiness::Graph;
-use waymark_core::{Project, Readiness};
+use waymark_core::Project;
 
 use super::{emit, err_line, item_json, render_field_value};
 
@@ -21,56 +20,11 @@ pub struct ShowArgs {
     pub raw: bool,
 }
 
-/// The derived columns `show` adds on top of the document itself.
-///
-/// They come from a whole-project graph, because readiness is a fact about the
-/// project and not about one file. A project that cannot be scanned completely
-/// (a sibling document that does not parse, a duplicate ID) must not turn `show`
-/// — a direct-file read — into a failure: the item is still readable, so the
-/// derived columns are reported as unknown and the scan failure becomes a
-/// diagnostic on the result.
-struct Derived {
-    readiness: Option<Readiness>,
-    children: Vec<waymark_core::WorkItemId>,
-    dependents: Vec<waymark_core::WorkItemId>,
-    diagnostics: Vec<waymark_core::envelope::Finding>,
-}
-
-fn derive(project: &Project, id: &waymark_core::WorkItemId, meta: &mut Meta) -> Derived {
-    match Graph::from_project(project) {
-        Ok(graph) => {
-            let diagnostics = graph.diagnostics();
-            meta.diagnostics = diagnostics.clone();
-            Derived {
-                readiness: graph.readiness_any(id),
-                children: graph.children(id),
-                dependents: graph.dependents(id),
-                diagnostics,
-            }
-        }
-        Err(error) => {
-            let finding = waymark_core::envelope::Finding::new(
-                waymark_core::error::Code::IncompleteProjection,
-                format!(
-                    "readiness is unknown because the project could not be scanned: {}",
-                    error.message()
-                ),
-            );
-            meta.diagnostics = vec![finding.clone()];
-            Derived {
-                readiness: None,
-                children: Vec::new(),
-                dependents: Vec::new(),
-                diagnostics: vec![finding],
-            }
-        }
-    }
-}
-
 /// Run `waymark show`.
 pub fn run(project: &Project, args: &ShowArgs, json: bool) -> Result<(), WaymarkError> {
-    let mut read = read::read(project, &args.id)?;
-    let derived = derive(project, &read.item.id, &mut read.meta);
+    // A scoped local read: one item plus its direct relationships. A broken
+    // sibling does not make `show` fail; the answer says it is scoped and why.
+    let read = read::read_scoped(project, &args.id)?;
 
     if json {
         emit(&success_envelope(
@@ -89,12 +43,12 @@ pub fn run(project: &Project, args: &ShowArgs, json: bool) -> Result<(), Waymark
                     "parent": read.item.parent.as_ref().map(|id| id.as_str().to_owned()),
                     "dependencies": read.item.dependencies.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
                     "soft_links": read.item.soft_links.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-                    "children": derived.children.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-                    "dependents": derived.dependents.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
+                    "children": read.children.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
+                    "dependents": read.dependents.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
                 },
-                "ready": derived.readiness.as_ref().map(|readiness| readiness.ready),
-                "blocked": derived.readiness.as_ref().map(|readiness| readiness.blocked),
-                "blocked_by": derived
+                "ready": read.readiness.as_ref().map(|readiness| readiness.ready),
+                "blocked": read.readiness.as_ref().map(|readiness| readiness.blocked),
+                "blocked_by": read
                     .readiness
                     .as_ref()
                     .map(|readiness| {
@@ -145,7 +99,7 @@ pub fn run(project: &Project, args: &ShowArgs, json: bool) -> Result<(), Waymark
             let ids: Vec<&str> = read.item.soft_links.iter().map(|id| id.as_str()).collect();
             err_line(&format!("  soft links  {}{historical}", ids.join(", ")));
         }
-        if let Some(readiness) = &derived.readiness {
+        if let Some(readiness) = &read.readiness {
             err_line(&format!(
                 "  state       {}",
                 if readiness.blocked {
@@ -165,12 +119,12 @@ pub fn run(project: &Project, args: &ShowArgs, json: bool) -> Result<(), Waymark
         } else {
             err_line("  state       unknown (the project could not be scanned)");
         }
-        if !derived.children.is_empty() {
-            let ids: Vec<&str> = derived.children.iter().map(|id| id.as_str()).collect();
+        if !read.children.is_empty() {
+            let ids: Vec<&str> = read.children.iter().map(|id| id.as_str()).collect();
             err_line(&format!("  children    {}", ids.join(", ")));
         }
-        if !derived.dependents.is_empty() {
-            let ids: Vec<&str> = derived.dependents.iter().map(|id| id.as_str()).collect();
+        if !read.dependents.is_empty() {
+            let ids: Vec<&str> = read.dependents.iter().map(|id| id.as_str()).collect();
             err_line(&format!("  dependents  {}", ids.join(", ")));
         }
         for (key, value) in &read.item.custom_fields {
@@ -179,7 +133,7 @@ pub fn run(project: &Project, args: &ShowArgs, json: bool) -> Result<(), Waymark
         if let Some(archived_at) = read.item.archived_at {
             err_line(&format!("  archived    {archived_at}"));
         }
-        for finding in &derived.diagnostics {
+        for finding in &read.meta.diagnostics {
             err_line(&format!("  {}: {}", finding.code, finding.message));
         }
         err_line(&format!("  file        {}", read.path));

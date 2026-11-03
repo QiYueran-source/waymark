@@ -990,25 +990,36 @@ pub fn listing_from_sorted(rows: Vec<ListedItem>, window: &Window, meta: Meta) -
 
 /// The whole-project scan a collection read answers from.
 ///
-/// Reading is a complete snapshot: every document is parsed once, archived items
-/// are kept aside, and the graph is built from the active ones. See
-/// [`crate::readiness::Graph::from_project`] for the deliberate decision to fail
-/// the whole read on an unparseable sibling rather than return a partial page.
+/// Reading is a complete snapshot: a fresh [`crate::projection::Projection`] is
+/// built from the files, its completeness is required, and the graph and
+/// archived population are derived from its parsed entries. An unparseable
+/// sibling fails the read with `INCOMPLETE_PROJECTION` rather than returning a
+/// partial page.
 #[derive(Debug, Clone)]
 pub struct Snapshot {
     graph: Graph,
     archived: Vec<WorkItem>,
     ranks: BTreeMap<WorkItemId, usize>,
+    meta: Meta,
 }
 
 impl Snapshot {
     /// Scan the project.
     pub fn load(project: &crate::store::Project) -> Result<Self, WaymarkError> {
-        let inventory = project.inventory()?;
-        let mut all = Vec::with_capacity(inventory.entries.len());
-        for entry in &inventory.entries {
-            all.push(crate::parse::parse_item_file(&entry.path)?);
-        }
+        let projection = crate::projection::Projection::load(project)?;
+        Self::from_projection(&projection)
+    }
+
+    /// Build from an already loaded, complete projection.
+    ///
+    /// The projection's completeness and freshness are required; a partial
+    /// projection is rejected rather than rendered.
+    pub fn from_projection(
+        projection: &crate::projection::Projection,
+    ) -> Result<Self, WaymarkError> {
+        projection.require_complete()?;
+        let mut all: Vec<WorkItem> = projection.items().cloned().collect();
+        all.sort_by(|left, right| left.id.cmp(&right.id));
         let graph = Graph::from_items(&all);
         let mut archived: Vec<WorkItem> = all
             .iter()
@@ -1021,6 +1032,7 @@ impl Snapshot {
             graph,
             archived,
             ranks,
+            meta: projection.meta(),
         })
     }
 
@@ -1056,8 +1068,11 @@ impl Snapshot {
     }
 
     /// The `_meta` a whole-project read justifies.
+    ///
+    /// The projection already established source, completeness, and freshness;
+    /// the graph adds its dangling-reference and cycle diagnostics.
     pub fn meta(&self) -> Meta {
-        Meta::memory_projection_complete().with_diagnostics(self.graph.diagnostics())
+        self.meta.clone().with_diagnostics(self.graph.diagnostics())
     }
 }
 

@@ -974,3 +974,91 @@ semantics of its own". Deriving it from the parser is the only construction wher
 forget to update it, and where documentation cannot drift from what the binary accepts. A boolean
 switch is rendered without a value placeholder because `clap` otherwise reports `true`/`false` as
 possible values, which is parser plumbing rather than a capability.
+
+# T9 — projection, completeness, and cache
+
+### The projection is a second type named `Projection`
+
+**Choice:** `crate::projection::Projection` is the disposable in-memory view of the files. It is not
+re-exported at the crate root, where `Projection` remains the pre-existing field projection from
+`query`. Callers that need both refer to the new one as `waymark_core::projection::Projection`.
+
+**Why:** `query::Projection` already has that name, is re-exported by `ops::list`, and is part of the
+CLI's `projected_row` pipeline. Renaming either would churn a public seam the Web/MCP tickets will
+also use; the module path disambiguates without moving anything.
+
+### Freshness is a verification result, not a timestamp
+
+**Choice:** a build walks the inventory twice: the first pass parses (or retains) documents, the second
+compares every path, size, and modification time against what the first pass observed. A verified build
+is `fresh`; a mismatch retries `LoadOptions::max_attempts` times (default 3) and then returns retryable
+`SNAPSHOT_UNSTABLE`. There is no time-based staleness and no background refresh: a held projection is
+fresh at the instant it was verified, and `refresh` re-verifies it.
+
+**Why:** the spec names path inventory, size, and modification time as the cheap signals, with the
+content fingerprint when needed. Re-reading every document just to prove freshness would double the
+read cost for no additional guarantee, so the second pass stays on metadata. The test seam
+(`LoadOptions::with_inventory_hook`) lets a controlled writer prove the retry path without racing a
+thread.
+
+### Content fingerprints decide re-parsing; metadata only records change
+
+**Choice:** when a refresh sees new size or modification time it reads the bytes. An equal content
+fingerprint retains the parsed entry and updates the recorded metadata without parsing; only a changed
+fingerprint re-parses and bumps `ProjectionStats::parse_count`.
+
+**Why:** the spec says a metadata-only change with an equal content fingerprint may retain the parsed
+entry, and a cache must never be keyed on timestamps. `parse_count` makes that rule assertable without
+timing.
+
+### Only unreadable, unparseable, or duplicate *work-item* documents make a projection incomplete
+
+**Choice:** inventory problems for files that are not work items (`.txt`, non-ID `.md` names, symlinks,
+uppercase stems) remain inventory problems and do not by themselves mark the projection scoped. An
+item-shaped document that cannot be opened, parsed, or whose persisted ID disagrees with its file name
+becomes a `ProjectionFailure`, and two documents claiming one ID make both failures.
+
+**Why:** a category directory that contains a stray note is not a partial world, and treating it as one
+would make every global read fail for a file Waymark never reads anyway. A duplicate ID, by contrast,
+is a real ambiguity: the projection refuses to prefer one file silently, which matches the store's
+existing `DUPLICATE_ID` rule.
+
+### A scoped local read stays `direct_file` + `scoped`
+
+**Choice:** `Projection::scoped_read` and `ops::read::read_scoped` return `source: direct_file`,
+`completeness: scoped`, `freshness: fresh`, even when the projection behind them is complete.
+`readiness` is `None` whenever the projection is incomplete; `children` and `dependents` still come
+from the parseable entries, because they are direct observations. Diagnostics carry an
+`INCOMPLETE_PROJECTION` finding first, followed by the per-document failures. The CLI `show` command
+now uses this path instead of building a second whole-project graph.
+
+**Why:** the item itself was read from its file, and the spec requires every scoped local read to say
+so. Withholding readiness is the honest answer when a broken sibling could hide a dependency; the
+relationships that are visible in the parsed documents are still useful and are reported.
+
+### The bounded cache holds derived data only and accepts opaque strings
+
+**Choice:** `CacheKey` has exactly three classes — `Body`, `Detail`, `Query` — and no item or graph
+variant. Values are `String`s, so an adapter serializes its payload before storing it. `Body`/`Detail`
+keys are bound to the item's content fingerprint; `Query` keys are bound to `Projection::stamp()`, a
+digest over every entry fingerprint and failure, which a metadata-only change leaves untouched. A stale
+key is a miss; `cache_put` ignores a stale key instead of storing it. `reconfigure_cache` clears
+evictable data only when the settings actually change, and a disabled cache stores nothing. Parsed
+entries and adjacency live outside the LRU, so eviction can never remove a relationship node.
+
+**Why:** the spec permits caching body, detail, or query-result data "for performance only" and
+forbids weakening freshness, completeness, ownership, or archive safety. Keeping the cache opaque and
+separate from the projection makes that separation structural rather than a rule each caller must
+remember.
+
+### Which reads demand completeness
+
+**Choice:** `list`, `ready`, `blocked`, `query`, `search`, `stats`, `tree`, readiness, and `archive` all
+go through `Projection::require_complete` (via `Snapshot::load` / `Graph::from_project`) and fail with
+`INCOMPLETE_PROJECTION`. Cross-file relationship writes (`dependency add`, `parent set`, link) build
+the same graph and therefore fail the same way. Migration does not exist yet; when it lands it should
+use the same gate. Single-document reads (`show`, `read::read`) remain scoped.
+
+**Why:** every one of those operations either publishes a whole-project answer or rewrites files it did
+not name; a hole in the graph would make the answer or the rewrite untrustworthy. `show` is the only
+read in the current command set that is genuinely about one document.
