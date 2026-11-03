@@ -2,11 +2,12 @@
 schema: 1
 id: waym-3HSJH4RT
 title: Establish Rust core and native work-item file loop
-status: in_progress
+status: closed
 type: feature
 priority: 2
 created: 2026-11-02T12:09:28.145Z
-updated: 2026-11-02T12:17:02.651Z
+updated: 2026-11-03T03:15:30.972Z
+closed: 2026-11-03T03:15:30.972Z
 parent: waym-DZ3Q9D11
 labels: [ready-for-agent]
 deps: []

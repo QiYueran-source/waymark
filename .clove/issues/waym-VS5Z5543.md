@@ -23,6 +23,7 @@ Produce a handoff-ready functional specification for Waymark, a general-purpose,
 - Treat Clove as a behavioral reference, not a required feature checklist.
 - Keep categories and project workflow conventions configurable; do not build Wayfinder-specific semantics into Waymark's core.
 - Consult the grilling and domain-modeling skills for decision tickets.
+- The earlier functional specification and its implementation tickets are retired: the specification is archived at `.inbox/WAYMARK-FUNCTIONAL-SPEC.md` and the tickets were closed with a supersession comment. This map plus the CLI/MCP interface design document are the current design record; a new specification and new implementation tickets will be produced from them once the remaining design is settled. Do not implement Waymark from the retired documents.
 
 ## Decisions so far
 
@@ -42,7 +43,7 @@ Produce a handoff-ready functional specification for Waymark, a general-purpose,
 - Creator is provenance; owner is required human accountability. Only the current owner may initiate an owner transfer, and owners must be human.
 - The configured operator/owner check is a process guardrail, not authentication. Executor metadata does not grant write authorization.
 - Clove's strict, predictable frontmatter is a format reference, but Clove itself has no custom-field schema/query support. Clove's unified edit path is the reference for full-body replacement, empty-body clearing, non-interactive `--body`/`--body-file` CLI modes, and structured MCP edits; Waymark v1 intentionally omits interactive editor support.
-- Core-field decisions are resolved in `docs/superpower/WAYMARK-FUNCTIONAL-SPEC.md`: the complete persisted v1 field set, `closed_at`, ID/category-key formats, identity/time normalization, frontmatter archive metadata, and computed `blocked`/`ready`/`blocked_by` fields with dangling-dependency diagnostics. `blocked` is not a lifecycle status; `blocked_by` is a read-only computed field and is never persisted.
+- Core-field decisions are resolved: the complete persisted v1 field set, `closed_at`, ID/category-key formats, identity/time normalization, frontmatter archive metadata, and computed `blocked`/`ready`/`blocked_by` fields with dangling-dependency diagnostics. `blocked` is not a lifecycle status; `blocked_by` is a read-only computed field and is never persisted.
 - Index/cache decisions are resolved: documents are the sole authority; a complete in-process static frontmatter projection is derived from them; derived readiness and graph results are computed dynamically; local operations may use incomplete projections only when explicitly marked, while global queries and archive require completeness. A bounded LRU may cache body/details only, never evict relation nodes.
 - `touch` is an internal term for a Waymark-controlled frontmatter query, frontmatter mutation, or archive; it is not a timestamp update and does not mean arbitrary body access. Public interfaces use explicit read/write/archive/sync names.
 ### Resolved archive semantics

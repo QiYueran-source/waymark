@@ -2,7 +2,7 @@
 
 > 状态：核心能力边界已确认；具体参数、完整 schema 和迁移接口仍待细化。
 >
-> 本文是 CLI/MCP 外部接口设计的工作文档。它记录已经确认的能力边界，不替代 [Waymark Functional Specification](./WAYMARK-FUNCTIONAL-SPEC.md)；在接口细节完成后，再同步主功能规格。
+> 本文是 CLI/MCP 外部接口设计的工作文档。它记录已经确认的能力边界。此前的功能规格已退役（归档在 `.inbox/WAYMARK-FUNCTIONAL-SPEC.md`），当前设计以 Waymark 设计地图和本文为准；等接口细节完成后再产出新的功能规格。
 
 ## 1. 目标与原则
 

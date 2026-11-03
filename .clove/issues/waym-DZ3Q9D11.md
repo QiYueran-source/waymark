@@ -2,11 +2,12 @@
 schema: 1
 id: waym-DZ3Q9D11
 title: Waymark general-purpose tracker functional specification
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-11-02T11:04:37.321Z
-updated: 2026-11-02T11:04:37.321Z
+updated: 2026-11-03T03:15:33.422Z
+closed: 2026-11-03T03:15:33.422Z
 labels: [ready-for-agent]
 deps: []
 relates: []

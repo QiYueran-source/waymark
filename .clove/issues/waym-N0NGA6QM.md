@@ -2,11 +2,12 @@
 schema: 1
 id: waym-N0NGA6QM
 title: Implement configuration and frontmatter migration
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-11-02T12:09:28.206Z
-updated: 2026-11-02T12:10:13.402Z
+updated: 2026-11-03T03:15:31.235Z
+closed: 2026-11-03T03:15:31.235Z
 parent: waym-DZ3Q9D11
 labels: [ready-for-agent]
 deps: [waym-3HSJH4RT, waym-419ZAWN7]

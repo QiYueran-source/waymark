@@ -2,11 +2,12 @@
 schema: 1
 id: waym-7SFVF8K1
 title: Complete CLI and MCP adapters
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-11-02T12:09:28.253Z
-updated: 2026-11-02T12:10:13.578Z
+updated: 2026-11-03T03:15:31.064Z
+closed: 2026-11-03T03:15:31.064Z
 parent: waym-DZ3Q9D11
 labels: [ready-for-agent]
 deps: [waym-419ZAWN7, waym-AN5P37XV, waym-M1A7HXC2, waym-N0NGA6QM, waym-S93FPPE8, waym-TKF37ESV]
