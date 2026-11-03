@@ -71,6 +71,53 @@ pub struct MoveOutcome {
     pub meta: Meta,
 }
 
+impl MoveOutcome {
+    /// The item already declared the requested category: a true no-op.
+    ///
+    /// The document stays where it is, no bytes are written, and there is no
+    /// fingerprint because there was no new content.
+    fn unchanged(
+        item: WorkItem,
+        path: Utf8PathBuf,
+        previous_category: CategoryKey,
+        meta: Meta,
+    ) -> Self {
+        Self {
+            item,
+            previous_path: path.clone(),
+            path,
+            previous_category,
+            changed: false,
+            written: false,
+            fingerprint: None,
+            meta,
+        }
+    }
+
+    /// The persisted document changed: `fingerprint` is `Some` exactly when the
+    /// new bytes were written, and the constructor derives `written` from it so
+    /// the two fields cannot drift.
+    fn changed(
+        item: WorkItem,
+        previous_path: Utf8PathBuf,
+        path: Utf8PathBuf,
+        previous_category: CategoryKey,
+        fingerprint: Option<Fingerprint>,
+        meta: Meta,
+    ) -> Self {
+        Self {
+            item,
+            previous_path,
+            path,
+            previous_category,
+            changed: true,
+            written: fingerprint.is_some(),
+            fingerprint,
+            meta,
+        }
+    }
+}
+
 /// Move one item to `category`.
 ///
 /// The category must already be declared in the project configuration; an
@@ -110,16 +157,12 @@ fn apply(
         // The persisted category is the authority: asking for the category the
         // document already declares is not a relocation, even if the file were
         // hand-placed in a different directory.
-        return Ok(MoveOutcome {
+        return Ok(MoveOutcome::unchanged(
             item,
-            previous_path: previous_path.clone(),
-            path: previous_path,
+            previous_path,
             previous_category,
-            changed: false,
-            written: false,
-            fingerprint: None,
             meta,
-        });
+        ));
     }
 
     let path = project.path_for(&item.id, category)?;
@@ -133,16 +176,14 @@ fn apply(
         item.category = category.clone();
         mediated::touch(&mut item, options);
         let fingerprint = mediated::commit(loaded, &item, options)?;
-        return Ok(MoveOutcome {
+        return Ok(MoveOutcome::changed(
             item,
-            previous_path: loaded.path.clone(),
-            path: loaded.path.clone(),
+            loaded.path.clone(),
+            loaded.path.clone(),
             previous_category,
-            changed: true,
-            written: fingerprint.is_some(),
             fingerprint,
             meta,
-        });
+        ));
     }
 
     // Refuse to overwrite whatever already claims the destination. The check
@@ -175,16 +216,14 @@ fn apply(
     mediated::touch(&mut item, options);
 
     if options.dry_run {
-        return Ok(MoveOutcome {
+        return Ok(MoveOutcome::changed(
             item,
             previous_path,
             path,
             previous_category,
-            changed: true,
-            written: false,
-            fingerprint: None,
+            None,
             meta,
-        });
+        ));
     }
 
     let fingerprint = crate::serialize::write_item_file(&item, &path)?;
@@ -198,14 +237,12 @@ fn apply(
         return Err(WaymarkError::io(loaded.path.to_string(), "remove", &source));
     }
 
-    Ok(MoveOutcome {
+    Ok(MoveOutcome::changed(
         item,
         previous_path,
         path,
         previous_category,
-        changed: true,
-        written: true,
-        fingerprint: Some(fingerprint),
+        Some(fingerprint),
         meta,
-    })
+    ))
 }

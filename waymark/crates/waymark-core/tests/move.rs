@@ -352,3 +352,45 @@ fn a_document_already_at_the_destination_path_rewrites_the_category_in_place() {
     let reparsed = waymark_core::parse::parse_item_file(&target).expect("the document parses");
     assert_eq!(reparsed.category, key("bug"));
 }
+
+#[test]
+fn the_written_flag_is_exactly_the_presence_of_a_fingerprint() {
+    fn pin(outcome: &r#move::MoveOutcome) {
+        assert_eq!(
+            outcome.written,
+            outcome.fingerprint.is_some(),
+            "written and the fingerprint must agree: {outcome:?}"
+        );
+    }
+
+    let (_dir, project) = project();
+    let item = make(&project, "Fix the thing");
+
+    // No-op: same category.
+    let no_op = r#move::move_item(&project, &item, &key("task"), &options_at(60))
+        .expect("the current category is a no-op");
+    assert!(!no_op.changed);
+    pin(&no_op);
+
+    // Dry-run relocation: changed, but nothing written.
+    let dry = r#move::move_item(&project, &item, &key("bug"), &options_at(60).dry_run())
+        .expect("a dry run validates");
+    assert!(dry.changed);
+    pin(&dry);
+
+    // Committed relocation: written, with a fingerprint.
+    let moved = r#move::move_item(&project, &item, &key("bug"), &options_at(60))
+        .expect("the move succeeds");
+    assert!(moved.changed);
+    pin(&moved);
+
+    // In-place rewrite: the document already sits at the destination path.
+    let in_place = make(&project, "Rewrite in place");
+    let source = old_path(&project, &in_place);
+    let target = destination(&project, &in_place);
+    std::fs::rename(&source, &target).expect("the document is movable");
+    let rewritten = r#move::move_item(&project, &in_place, &key("bug"), &options_at(60))
+        .expect("the category is rewritten in place");
+    assert!(rewritten.changed);
+    pin(&rewritten);
+}
