@@ -23,7 +23,7 @@ Produce a handoff-ready functional specification for Waymark, a general-purpose,
 - Treat Clove as a behavioral reference, not a required feature checklist.
 - Keep categories and project workflow conventions configurable; do not build Wayfinder-specific semantics into Waymark's core.
 - Consult the grilling and domain-modeling skills for decision tickets.
-- The earlier functional specification and its implementation tickets are retired: the specification is archived at `.inbox/WAYMARK-FUNCTIONAL-SPEC.md` and the tickets were closed with a supersession comment. This map plus the CLI/MCP interface design document are the current design record. The settled contract has been extracted into [Waymark functional specification: settled contract](waym-WMSPEC01), which deliberately excludes everything still listed under Not yet specified below; that issue is the buildable artifact, this map remains the decision record. Do not implement Waymark from the retired documents.
+- The earlier functional specification and its implementation tickets are retired: the specification is archived at `.inbox/WAYMARK-FUNCTIONAL-SPEC.md` and the tickets were closed with a supersession comment. The CLI/MCP interface working document moved to `.inbox/superpower/` once its settled content was absorbed. The consolidated record is [Waymark functional specification](waym-WMSPEC01), which carries the full settled contract plus a Not yet specified section; that issue is the buildable artifact, this map remains the decision record. Do not implement Waymark from the retired documents.
 
 ## Decisions so far
 
@@ -205,7 +205,7 @@ Codes with no exit class, used as warnings and findings: `OWNER_MISMATCH` (warni
 
 ## Not yet specified
 
-The design tree is exhausted: every decision ticket is closed, indexed under Decisions so far, with the lock lifecycle under "Resolved write-lock lifecycle" and the taxonomy under "Resolved error taxonomy structure" and "Resolved error registry". What is left is mechanical, not exploratory — rewriting `waym-WMSPEC01` to the shape settled in "Resolved replacement-specification shape", absorbing the command and tool catalog, and retiring the interface working document. This map closes once that rewrite is accepted.
+The design tree is exhausted: every decision ticket is closed, indexed under Decisions so far, with the lock lifecycle under "Resolved write-lock lifecycle" and the taxonomy under "Resolved error taxonomy structure" and "Resolved error registry". The rewrite is done: `waym-WMSPEC01` now follows the shape settled in "Resolved replacement-specification shape", with 130 user stories, the absorbed command and tool catalog, the frozen error registry, and the interface working document retired to `.inbox/superpower/`. This map closes once that specification is accepted; implementation tickets are cut from it afterwards, not from this map.
 
 What remains here is detail too fine to spend a decision ticket on, and which the replacement specification can settle directly:
 
