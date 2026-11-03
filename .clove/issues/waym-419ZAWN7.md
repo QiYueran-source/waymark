@@ -29,6 +29,8 @@ As a CLI or MCP caller, I receive stable, machine-readable success and failure r
 - [ ] CLI exit-code mapping and MCP business-error representation are defined without a second MCP business taxonomy.
 - [ ] Success and failure envelopes are contract-tested.
 - [ ] Health diagnostics report severity, code, location, message, and fixability; cycle detection reports structured paths.
+- [ ] Diagnostics and serialized read results distinguish derived `blocked_by` IDs from dangling hard-dependency references; `blocked_by` is never accepted as persisted input.
+- [ ] Archive and projection failures have stable codes for `ALREADY_ARCHIVED`, `HAS_ACTIVE_CHILDREN`, incomplete projection, and rollback/recovery failure; body-edit conflicts reuse `WRITE_CONFLICT`.
 - [ ] Batch failure details can represent per-target outcomes and rollback failure.
 
 ## Blocked by

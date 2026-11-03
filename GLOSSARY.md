@@ -37,12 +37,24 @@ A directed hard-blocking relation expressing that one work item waits for anothe
 _Avoid_: Parent, prerequisite (unless direction is made explicit).
 
 **Archive**:
-A reversible retirement marker that removes a work item from ordinary active views while preserving its identity, status, and relationships.
-_Avoid_: Close, delete.
+An irreversible-through-Waymark logical deletion marker that removes a work item from ordinary active views while retaining its file, identity, and Git history; it is distinct from closing.
+_Avoid_: Close, restore (as a Waymark operation).
 
 **Closed**:
 A core lifecycle state meaning the work item is completed and no longer blocks its dependents.
 _Avoid_: Archived, deleted.
+
+**Blocked**:
+A derived condition in which a non-closed work item has one or more unfinished hard dependencies; it is not a lifecycle state.
+_Avoid_: Status (when referring to this derived condition).
+
+**Blocked by**:
+The read-only list of hard-dependency references currently preventing a work item from being ready, including unresolved targets; unresolved targets are also identified as dangling dependencies.
+_Avoid_: Persisted field (when describing the computed result).
+
+**Ready**:
+A derived condition indicating an open or in-progress work item has no unfinished or dangling hard dependencies.
+_Avoid_: Status (when referring to this derived condition).
 
 **Soft link**:
 A non-blocking association between work items that does not affect readiness or lifecycle.

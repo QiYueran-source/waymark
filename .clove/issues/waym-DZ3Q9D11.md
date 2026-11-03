@@ -68,8 +68,8 @@ The spec defines product capabilities and behavior, not delivery phases or a rel
 39. As a maintainer, I want configuration and work-item formats to evolve under a single command-managed compatibility version, so that migrations are explicit and files are never guessed at or silently downgraded.
 40. As a maintainer, I want migration dry-runs, complete prevalidation, diagnostics, backups, and rollback/recovery behavior, so that format changes do not silently lose project data.
 41. As a contributor, I want deterministic serialization and stable ordering, so that repeated operations do not create meaningless Git diffs.
-42. As a contributor, I want authoritative item files to remain correct even when the derived index is unavailable, so that a cache cannot become a second source of truth.
-43. As a contributor, I want the Git-tracked JSON index validated for freshness and rebuilt from authoritative files when needed, so that indexed queries do not silently return stale data.
+42. As a contributor, I want authoritative item files to remain correct even when the in-process projection is unavailable, so that a cache cannot become a second source of truth.
+43. As a contributor, I want the in-process static projection synchronized from authoritative files when needed, so that indexed relationship queries do not silently return stale data.
 44. As a contributor, I want write conflicts detected rather than silently overwritten, so that concurrent edits preserve each contributor's changes.
 45. As a contributor, I want batch writes prevalidated and staged with application-level rollback, so that partial results are reported honestly and avoidable partial changes are prevented.
 46. As a reviewer, I want Git history and diffs to show changes to work items, so that change inspection uses the repository's existing history.
@@ -93,18 +93,19 @@ The spec defines product capabilities and behavior, not delivery phases or a rel
 ### Domain model and persistence
 
 - A work item is the core tracked unit. Its stable ID is immutable and project-unique, independent of category, title, and storage path.
-- Work-item files are the sole authoritative data. Use readable Markdown bodies and YAML frontmatter with strict, deterministic serialization.
+- Work-item files are the sole authoritative data. Use readable Markdown bodies and YAML frontmatter with strict, deterministic serialization. Unified edit supports full body replacement: absent body leaves it unchanged, empty body clears it, and non-empty body is canonicalized to one trailing newline; CLI supports editor/`--body`/`--body-file`, while MCP accepts structured body input.
 - Project configuration lives at the fixed Waymark configuration location; it defines configurable storage root, category set/path/display metadata, operator, custom-field schema, and format version. Do not assume a fixed tickets directory layout.
 - Categories are project-defined groupings. They are not hierarchy, lifecycle, or workflow semantics; the initial model has no category-specific custom-field schemas.
 - Use one command-managed `config_version` to identify configuration and frontmatter compatibility. It advances for incompatible format/semantic changes, not routine writes. Do not use an independent `frontmatter_version`.
 - Current and supported older versions may be read according to explicit compatibility rules; older data may be lazily upgraded on normal write. Reject future-version, invalid, or unparseable data with locatable diagnostics; do not silently default, recreate, discard, repair, or downgrade it.
-- Explicit migrations support dry-run, affected-file summaries/warnings, full target-set validation before writes, backups under `.waymark/`, deterministic output, staged replacement, atomic per-file replacement, and rollback/recovery reporting. Backups must not be silently overwritten, and backup failure prevents migration writes. Archive data is stored separately under `.waymark/`.
+- Explicit migrations support dry-run, affected-file summaries/warnings, full target-set validation before writes, backups under `.waymark/`, deterministic output, staged replacement, atomic per-file replacement, and rollback/recovery reporting. Backups must not be silently overwritten, and backup failure prevents migration writes. Archive metadata is stored in the original work-item frontmatter; migration backups remain under `.waymark/`.
 
 ### Work-item lifecycle and relationships
 
 - Core lifecycle states are `open`, `in_progress`, and `closed`. Closed means completed and no longer blocking dependents. `blocked` is a derived condition, not a writable state.
 - A non-closed item is blocked when it has unfinished hard dependencies. A closed item cannot simultaneously be considered blocked.
-- Archive is a reversible retirement/hidden marker distinct from closed. It preserves status and all relationships and does not change dependency satisfaction. Archived items can be explicitly queried/restored, but are excluded from ordinary active views and the Web overview. No separate Web archive browser is in scope.
+- Archive is an irreversible-through-Waymark logical deletion distinct from closed. It adds `archived_at` and optional `archive_reason` to the original frontmatter without updating `updated_at`; it preserves the file and ordinary metadata, is owner-only, blocks when unarchived children exist, and provides no Waymark restore. Archived items are excluded from ordinary active views but are readable by ID and through explicit archive-aware queries.
+- Archive requires a complete fresh in-process projection and batch-cleans inbound core dependencies, parent, and soft links; it does not inspect body or custom-field references. It updates affected active files' `updated_at`, rejects new relationships to archived items, and reports conflicts/rollback failures structurally.
 - Physical deletion is not an ordinary initial operation. If introduced later, it must be explicit and refuse to break references unless a deliberate repair/migration is performed.
 - Each item has at most one parent. Parent-child hierarchy is independent of hard dependencies; parent does not block, imply dependency, or cascade lifecycle. Parent can cross categories.
 - Hard dependencies are directed and block readiness until the prerequisite is closed. Soft links do not block. Relationship targets remain resolvable after archive. Invalid, cyclic, missing, or otherwise damaged relationships produce actionable diagnostics and must not be silently reinterpreted.
@@ -135,7 +136,7 @@ The spec defines product capabilities and behavior, not delivery phases or a rel
 - All machine responses use a versioned envelope: success is `{v, ok: true, data, _meta}` and failure is `{v, ok: false, error}`. Errors are structurally identical across adapters at the domain level, while human output remains adapter-specific.
 - CLI maps Waymark error codes to a small stable exit-code set: `0` success, `1` usage error, `2` not found, `3` invalid input/data, `4` conflict or owner/operator guardrail rejection, `5` filesystem/Git/environment failure, `6` unsupported version or migration failure, and `7` internal failure. Do not allocate one numeric exit code per fine-grained error code.
 - MCP reuses Waymark's business error codes and structured error details; it does not invent a second MCP-specific business taxonomy or CLI-style exit codes. MCP/JSON-RPC protocol errors remain separate and are used only for malformed protocol requests, unknown tools, or transport/protocol failures.
-- CLI provides project initialization/configuration/diagnostics, work-item creation/read/edit/move, lifecycle and relationship operations, list/tree/leaf/search/query/readiness/blocked views, validation and migration, Git history/diff access where available, stats, index maintenance, and generated agent documentation. Exact command spelling is an implementation detail unless a command is needed to fulfill a user-visible capability.
+- CLI provides project initialization/configuration/diagnostics, work-item creation/read/edit/move/archive, lifecycle and relationship operations, list/tree/leaf/search/query/readiness/blocked views with explicit archive selection, validation and migration, Git history/diff access where available, stats, projection synchronization diagnostics, and generated agent documentation. Exact command spelling is an implementation detail unless a command is needed to fulfill a user-visible capability.
 - MCP is in scope for agent-facing read/search and mediated writes. MCP writes use the same owner/operator, schema, relationship, batch, and concurrency checks as CLI.
 - Wayfinder-specific map, decision-ticket, claim-prompt, and frontier semantics do not belong in Waymark. Generic tree and leaf queries do; a leaf means an item with no child items.
 - No import or export capability is included.
@@ -151,10 +152,10 @@ The spec defines product capabilities and behavior, not delivery phases or a rel
 
 ### Index and concurrency
 
-- Work-item files remain authoritative. A deterministic Git-tracked JSON index at `.waymark/index.json` is derived, rebuildable, versioned independently from `config_version`, and never used to repair or overwrite source files.
-- Index inventory/fingerprints detect missing, changed, or uncertain source inputs. Validate freshness before indexed queries; scan and rebuild when stale or uncertain. Missing, corrupt, or unsupported indexes are rebuilt from valid source files. Provide explicit rebuild/diagnostic operations and atomic index replacement.
-- If index maintenance fails after authoritative writes, report the index as needing rebuild; do not roll back successful work-item writes. Queries may scan authoritative files if the index is unavailable.
-- Do not manually merge index conflicts. Rebuild it after merging authoritative files.
+- Work-item Markdown files are the sole authority. Waymark v1 persists no JSON index; a complete in-process static frontmatter projection is disposable and rebuilt or incrementally synchronized from files.
+- Projection entries retain source paths, fingerprints, parse diagnostics, and forward/reverse core relationships. Derived readiness and graph values are computed dynamically and never persisted.
+- Local reads may use scoped temporary parses; global queries, archive, and cross-file writes require a complete fresh projection. Long-lived contexts perform lightweight freshness checks, invalidating changed/added/deleted/moved or uncertain entries; incomplete projections cannot be presented as complete results.
+- Writes occur under the project lock with fingerprint conflict checks, then synchronize and publish a new projection. A bounded LRU may cache body/details/query data only; it cannot evict relationship nodes or weaken freshness/completeness rules.
 
 ### Read-only Web
 

@@ -24,11 +24,12 @@ As a contributor, I can list and query a growing project consistently whether th
 
 ## Acceptance criteria
 
-- [ ] A deterministic Git-tracked JSON index is derived from work-item files and never overwrites them.
-- [ ] Freshness checks detect changed, missing, or uncertain source files.
-- [ ] Stale, corrupt, or unsupported indexes rebuild from authoritative files with structured diagnostics.
-- [ ] File-scan fallback returns correct results when the index is unavailable.
-- [ ] List, query, tree, leaf, ready, blocked, and search share one read contract with parity tests.
+- [ ] Work-item Markdown files are the sole authority; v1 persists no JSON index. A complete in-process static frontmatter projection is rebuilt or safely incrementally synchronized from files.
+- [ ] Projection entries track source path, fingerprints, parse diagnostics, and forward/reverse core relationships; derived `ready`, `blocked`, `blocked_by`, and graph diagnostics are computed dynamically.
+- [ ] Completeness/freshness checks detect changed, missing, added, deleted, moved, or uncertain files; local show may use scoped temporary reads, while global queries and cross-file writes require a complete fresh projection.
+- [ ] Long-lived contexts reuse the projection after lightweight checks; parse failures permit valid local reads but block complete graph operations. No stale projection result is returned as current.
+- [ ] Body/detail/query data may use a bounded fingerprint-bound LRU; relation nodes cannot be partially evicted and cache settings cannot change semantics.
+- [ ] List, query, tree, leaf, ready, blocked, stats, and search share one read contract with parity tests; relationship queries prefer the validated in-process projection to avoid repeated frontmatter I/O.
 
 ## Blocked by
 

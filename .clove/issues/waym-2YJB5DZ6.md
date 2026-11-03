@@ -1,7 +1,7 @@
 ---
 schema: 1
 id: waym-2YJB5DZ6
-title: Define file concurrency and optional SQLite index behavior
+title: Define file concurrency and in-process projection behavior
 status: closed
 type: feature
 priority: 2
@@ -17,14 +17,14 @@ supersedes: []
 ---
 ## Resolution
 
-### Authoritative files and derived JSON index
+### Authoritative files and in-process static projection
 
-- Work-item files remain the sole authoritative data. The Git-tracked index is a deterministic JSON artifact at `.waymark/index.json`; it is derived and never used to repair or overwrite work-item files.
-- The index has its own format version, independent of `config_version`, and includes enough source-file inventory/fingerprint information to detect missing, changed, or uncertain inputs. Stable ordering and deterministic serialization ensure identical source state produces identical index bytes.
-- Missing, corrupt, or unsupported-version indexes are rebuilt from authoritative files. Provide an explicit rebuild operation; build and validate a replacement before atomically switching it in. Diagnostics can compare the index against a full file scan and locate discrepancies.
-- Before an indexed query, validate freshness. If any source is missing, changed, or freshness is uncertain, scan authoritative files and rebuild; never silently return known-stale results. Queries and writes remain possible by scanning files if index use is unavailable.
-- After authoritative writes succeed, update and atomically replace the index under the project write lock. If index update fails, keep the successful authoritative write, report that the index needs rebuilding, and allow later query/rebuild to recover it.
-- Do not manually merge conflicting index JSON. After Git merges the authoritative files, rebuild the index from those files and commit the regenerated artifact.
+- Work-item Markdown files remain the sole authoritative data. Waymark v1 does not persist a JSON index. The shared domain library may retain a complete in-process projection of parsed frontmatter, source paths, fingerprints, diagnostics, and forward/reverse core relationships; it is disposable and rebuilt from files.
+- Derived values are computed from the current projection and are never persisted. Local reads may use scoped temporary frontmatter parses without loading entries into the long-lived projection; global queries and cross-file writes require a complete fresh projection.
+- Long-lived contexts perform lightweight inventory/freshness checks before reuse. New, deleted, moved, changed, or uncertain files invalidate the relevant projection or whole projection; parse errors allow valid local reads but block complete graph operations.
+- Projection updates occur after authoritative writes. Incremental synchronization is allowed only when its affected scope is known; otherwise rebuild the complete projection. A bounded LRU may cache body/details/query data but cannot evict relation nodes or bypass freshness.
+
+### Concurrency and batch writes
 
 ### Concurrency and batch writes
 
