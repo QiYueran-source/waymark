@@ -17,3 +17,6 @@ serde_json.workspace = true
 clap.workspace = true
 chrono.workspace = true
 camino.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
