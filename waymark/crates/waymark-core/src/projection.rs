@@ -449,6 +449,15 @@ impl Projection {
         self.failures.values()
     }
 
+    /// Files the inventory walk skipped, and why.
+    ///
+    /// A skipped path is not a parse failure: it never entered the projection at
+    /// all. A diagnostic run reports it so an uncertain inventory is never
+    /// mistaken for a complete one.
+    pub fn problems(&self) -> &[InventoryProblem] {
+        &self.problems
+    }
+
     /// The paths that could not be parsed or read.
     pub fn incomplete_paths(&self) -> Vec<&Utf8Path> {
         self.failures.keys().map(Utf8PathBuf::as_path).collect()
