@@ -25,8 +25,8 @@ The declared identity that created a work item, retained as provenance when owne
 _Avoid_: Owner, operator.
 
 **Operator**:
-The human identity declared by the local project configuration for Waymark-mediated operations. It is a workflow guardrail identity, not authenticated identity.
-_Avoid_: Authenticated user, actor (unless explicitly qualified as declared operator).
+The human identity a local project configuration declares as the one currently running Waymark-mediated operations. It is advisory only: it identifies the caller for reminders and warnings, never authorizes or blocks a write, and is neither authenticated identity nor a work item field.
+_Avoid_: Authenticated user, actor (unless explicitly qualified as declared operator), owner.
 
 **Parent**:
 The single optional hierarchical relation from a work item to its containing work item. Parentage is independent of category and does not itself imply blocking or lifecycle inheritance.
