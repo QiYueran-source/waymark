@@ -54,6 +54,9 @@ pub const TOOLS: &[&str] = &[
     "waymark_migrate_version",
     "waymark_migrate_schema",
     "waymark_migrate_storage",
+    // Phase B: Git inspection.
+    "waymark_git_history",
+    "waymark_git_diff",
 ];
 
 /// The phase-A slice of [`TOOLS`], kept as the decisions record's reference.
