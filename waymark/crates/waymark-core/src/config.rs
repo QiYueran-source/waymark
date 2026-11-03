@@ -303,7 +303,10 @@ impl Config {
                     Err(invalid(issues.iter().map(ConfigIssue::render).collect()))
                 }
             }
-            Err(error) => Err(invalid(vec![error.message().to_owned()])),
+            // `build` already reports its hard failures with the right code
+            // (malformed TOML is `CONFIG_INVALID`; an unreadable generation is
+            // `UNSUPPORTED_VERSION`), so it is not wrapped again here.
+            Err(error) => Err(error),
         }
     }
 
@@ -345,16 +348,15 @@ impl Config {
             .map_err(|error: toml::de::Error| malformed(error.message().to_owned()))?;
 
         let version = match Version::parse(&raw.version.0) {
-            Ok(version) if version.generation == FORMAT_GENERATION => version,
+            Ok(version) if crate::model::is_readable_generation(version.generation) => version,
             Ok(version) => {
-                issues.push(ConfigIssue::key(
-                    "version",
-                    format!(
-                        "format generation {} is not readable by this release (generation {FORMAT_GENERATION})",
-                        version.generation
-                    ),
-                ));
-                version
+                // The generation is a compatibility boundary, not a value
+                // typo: `UNSUPPORTED_VERSION` names the recovery action.
+                return Err(WaymarkError::unsupported_version(
+                    version.generation.to_string(),
+                    crate::model::readable_generations(),
+                )
+                .with_location(Location::config_key("version")));
             }
             Err(reason) => {
                 issues.push(ConfigIssue::key("version", reason));
