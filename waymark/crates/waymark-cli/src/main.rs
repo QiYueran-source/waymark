@@ -36,8 +36,10 @@ use cmd::init::InitArgs;
 use cmd::link::LinkArgs;
 use cmd::list::ListArgs;
 use cmd::migrate::MigrateArgs;
+use cmd::owner::OwnerArgs;
 use cmd::parent::ParentArgs;
 use cmd::project::ProjectArgs;
+use cmd::r#move::MoveArgs;
 use cmd::relationship::DependencyArgs;
 use cmd::show::ShowArgs;
 use cmd::status::{StatusArgs, TransitionArgs};
@@ -84,6 +86,10 @@ enum Command {
     Body(BodyArgs),
     /// Set and clear custom fields of one item.
     Field(FieldArgs),
+    /// Transfer one item to another accountable owner.
+    Owner(OwnerArgs),
+    /// Move one item to another category.
+    Move(MoveArgs),
     /// Move one item to `in_progress`.
     Start(TransitionArgs),
     /// Move one item to `closed`.
@@ -236,6 +242,14 @@ fn run(cli: Cli) -> Result<(), waymark_core::WaymarkError> {
         Command::Field(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
             cmd::edit::run_field(&project, args, &options, json)
+        }
+        Command::Owner(args) => {
+            let project = cmd::open_project(cli.project.as_deref())?;
+            cmd::owner::run(&project, args, &options, json)
+        }
+        Command::Move(args) => {
+            let project = cmd::open_project(cli.project.as_deref())?;
+            cmd::r#move::run(&project, args, &options, json)
         }
         Command::Start(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;

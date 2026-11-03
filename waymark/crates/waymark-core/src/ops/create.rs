@@ -179,6 +179,45 @@ struct Prepared {
     body: Option<String>,
 }
 
+/// The issue creation reports for a category literal that is not usable.
+///
+/// This is the one definition of "a declared category", shared with `move` so a
+/// relocation cannot accept a category that creation would refuse (or refuse one
+/// with a different message).
+pub(crate) fn category_issue(project: &Project, raw: &str) -> Option<ValidationIssue> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Some(ValidationIssue::new("category", "a category is required"));
+    }
+    match CategoryKey::parse(raw) {
+        Ok(key) if project.category(&key).is_some() => None,
+        Ok(key) => Some(ValidationIssue::new(
+            "category",
+            format!("{key} is not a category declared in the project configuration"),
+        )),
+        Err(error) => Some(ValidationIssue::new("category", error.to_string())),
+    }
+}
+
+/// The issue creation reports for an owner literal that is not usable.
+///
+/// Identities are trimmed at the edges, must be non-empty, and must be single
+/// line. `owner transfer` reuses this exact rule so creation and transfer cannot
+/// disagree about what a valid owner is.
+pub(crate) fn owner_issue(owner: &str) -> Option<ValidationIssue> {
+    let owner = owner.trim();
+    if owner.is_empty() {
+        Some(ValidationIssue::new("owner", "an owner is required"))
+    } else if owner.contains('\n') || owner.contains('\r') {
+        Some(ValidationIssue::new(
+            "owner",
+            "an owner must be a single line",
+        ))
+    } else {
+        None
+    }
+}
+
 fn prepare(project: &Project, request: CreateRequest) -> Result<Prepared, WaymarkError> {
     let mut issues = Vec::new();
 
@@ -194,35 +233,17 @@ fn prepare(project: &Project, request: CreateRequest) -> Result<Prepared, Waymar
 
     let category = {
         let raw = request.category.trim();
-        if raw.is_empty() {
-            issues.push(ValidationIssue::new("category", "a category is required"));
+        if let Some(issue) = category_issue(project, raw) {
+            issues.push(issue);
             None
         } else {
-            match CategoryKey::parse(raw) {
-                Ok(key) if project.category(&key).is_some() => Some(key),
-                Ok(key) => {
-                    issues.push(ValidationIssue::new(
-                        "category",
-                        format!("{key} is not a category declared in the project configuration"),
-                    ));
-                    None
-                }
-                Err(error) => {
-                    issues.push(ValidationIssue::new("category", error.to_string()));
-                    None
-                }
-            }
+            Some(CategoryKey::parse(raw).expect("the category issue check proved it parses"))
         }
     };
 
     let owner = request.owner.trim();
-    if owner.is_empty() {
-        issues.push(ValidationIssue::new("owner", "an owner is required"));
-    } else if owner.contains('\n') || owner.contains('\r') {
-        issues.push(ValidationIssue::new(
-            "owner",
-            "an owner must be a single line",
-        ));
+    if let Some(issue) = owner_issue(owner) {
+        issues.push(issue);
     }
 
     if !issues.is_empty() {
