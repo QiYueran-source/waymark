@@ -679,6 +679,53 @@ fn a_full_run_leaves_every_project_file_byte_identical() {
     assert!(!projection_repair.remaining.is_empty());
 }
 
+#[test]
+fn malformed_titles_are_validation_findings_but_reads_keep_working() {
+    let (_dir, project) = project();
+    let empty = create_item(&project, "empty");
+    let multi = create_item(&project, "multi");
+
+    let empty_path = task_path(&project, empty.as_str());
+    let text = std::fs::read_to_string(&empty_path).unwrap();
+    std::fs::write(&empty_path, text.replace("title: empty\n", "title: \"\"\n")).unwrap();
+
+    let multi_path = task_path(&project, multi.as_str());
+    let text = std::fs::read_to_string(&multi_path).unwrap();
+    let folded = text.replace("title: multi\n", "title: >\n  first\n  second\n");
+    assert_ne!(text, folded);
+    std::fs::write(&multi_path, folded).unwrap();
+
+    // A malformed title is not a parse failure: both documents stay readable.
+    let empty_item = waymark_core::parse::parse_item_file(&empty_path).unwrap();
+    assert_eq!(empty_item.title, "");
+    let multi_item = waymark_core::parse::parse_item_file(&multi_path).unwrap();
+    assert!(multi_item.title.contains('\n'), "{:?}", multi_item.title);
+
+    let report = doctor::diagnose(&project).unwrap();
+    let title_findings: Vec<_> = report
+        .findings
+        .iter()
+        .filter(|finding| {
+            finding.code == Code::ValidationError
+                && finding.location == Some(Location::field("title"))
+        })
+        .collect();
+    assert_eq!(title_findings.len(), 2, "{:?}", report.findings);
+    assert!(
+        title_findings
+            .iter()
+            .any(|finding| finding.message.contains("a title is required")),
+        "{title_findings:?}"
+    );
+    assert!(
+        title_findings
+            .iter()
+            .any(|finding| finding.message.contains("a title must be a single line")),
+        "{title_findings:?}"
+    );
+    assert_eq!(report.counts.errors, 2);
+}
+
 /// Every regular file under `root`, with its bytes.
 fn snapshot(root: &Utf8Path) -> BTreeMap<Utf8PathBuf, Vec<u8>> {
     let mut files = BTreeMap::new();

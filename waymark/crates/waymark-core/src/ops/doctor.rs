@@ -21,6 +21,8 @@
 //!   case variants, ID/path disagreements, and unsupported generations, all from
 //!   the projection's failures (`PARSE_ERROR`, `VALIDATION_ERROR`,
 //!   `DUPLICATE_ID`, `ID_PATH_MISMATCH`, `UNSUPPORTED_VERSION`);
+//! - malformed titles — empty or multi-line — which parse fine but violate the
+//!   title rule (`VALIDATION_ERROR`);
 //! - undeclared or mistyped custom fields and missing required fields after a
 //!   configuration change (`VALIDATION_ERROR`);
 //! - missing and archived relationship targets (`DANGLING_REFERENCE`) and both
@@ -315,6 +317,7 @@ fn run(
     findings.extend(oversized_and_drift_findings(project, &projection));
 
     for entry in projection.entries() {
+        findings.extend(title_findings(&entry.item));
         findings.extend(field_findings(project.config(), &entry.item));
         findings.extend(timestamp_findings(&entry.item));
         if entry.item.needs_migration() {
@@ -459,6 +462,30 @@ fn archived_target(from: &WorkItemId, relation: &str, target: &WorkItemId) -> Fi
         format!("{from} {relation} the archived item {target}"),
     )
     .with_location(Location::work_item(from))
+}
+
+/// The spec's title rule: non-empty and single-line.
+///
+/// A malformed title is not a read failure — the document still parses and must
+/// stay readable — so a diagnostic run reports it at the `title` field instead
+/// of rejecting the document. `title set` and `create` refuse the same values
+/// before they ever reach a file.
+fn title_findings(item: &WorkItem) -> Vec<Finding> {
+    if item.title.trim().is_empty() {
+        vec![validation_finding(
+            &item.id,
+            "title",
+            "a title is required".to_owned(),
+        )]
+    } else if item.title.contains(['\n', '\r']) {
+        vec![validation_finding(
+            &item.id,
+            "title",
+            "a title must be a single line".to_owned(),
+        )]
+    } else {
+        Vec::new()
+    }
 }
 
 /// Undeclared, mistyped, and missing custom fields: configuration drift.

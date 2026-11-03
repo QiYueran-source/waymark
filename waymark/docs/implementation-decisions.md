@@ -2053,3 +2053,37 @@ document/configuration rewrites (a category-key migration's value rewrites can r
   details mirror the work-item shape (`path`, `expected_fingerprint`,
   `actual_fingerprint`); a configuration document has no stable item ID, so the
   `id` key is absent. The location is `config_key` at the configuration file.
+
+## Lock-free previews
+
+- **Dry runs perform the same checks without the write lock.** Archive and the
+  three migration commands branch on `dry_run` before acquiring
+  `.waymark/write.lock`, then run the identical planning and validation path. A
+  real run keeps the lock for the whole read-modify-write cycle; a preview can
+  run while another writer holds it and still reports every planned change. The
+  tests hold the lock and run each preview with an immediate lock wait, so a
+  regression surfaces as `LOCK_TIMEOUT` rather than a hang.
+
+## Schema migration cannot tighten requiredness
+
+- **`migrate schema --add-required-field` only adds a new declaration.** If the
+  key is already declared, the run is refused with `ACTION_REQUIRES_MIGRATION`;
+  an optional-to-required promotion uses the exact message and
+  `required_command` that `config set field <key> required true` already
+  produces. A type change keeps its existing type-change refusal. A genuinely
+  new required field with a default is the only accepted shape.
+
+## Category directories and the config critical section
+
+- **`config add category` creates the directory inside the config lock, before
+  replacing the configuration.** If the replacement fails, every directory this
+  call created is removed again (deepest first, `remove_dir` only, so a
+  concurrent writer's files are never deleted). A directory that already exists
+  is not touched and does not need rollback.
+
+## Malformed titles are findings, not parse failures
+
+- **The parser still accepts an empty or multi-line `title`.** Rejecting it at
+  parse time would make the document unreadable, which the spec does not allow;
+  instead the diagnostic run reports `VALIDATION_ERROR` at `title`. `create` and
+  `title set` continue to refuse such values before writing.
