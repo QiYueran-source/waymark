@@ -143,18 +143,24 @@ CLI 负责把人类参数转换成共享函数请求，并将结构化业务错�
 
 ```text
 waymark show <id>
-waymark list
-waymark search <query>
-waymark query ...
-waymark tree [<id>]
-waymark children <id>
-waymark leaves
-waymark ready
-waymark blocked
-waymark stats
+waymark list        [--status S]... [--category C]... [--owner W] [--field k=v]...
+                    [--q TEXT] [--parent ID] [--leaves] [--archived]
+                    [--sort FIELD] [--desc] [--limit N] [--offset N]
+                    [--fields LIST] [--compact]
+waymark ready       <同上过滤器>
+waymark blocked     <同上过滤器>
+waymark query       --filter <JSON> [--fields] [--compact] [--sort] [--desc] [--limit] [--offset]
+waymark search <text> [--sort] [--desc] [--limit] [--offset] [--fields] [--compact]
+waymark tree [<root-id>] [--depth N]
+waymark dep tree <id> [--depth N] [--flat]
+waymark stats [--top N] [--archived]
 ```
 
-查询需要显式表达活动/归档范围、排序、分页和投影字段；具体参数尚未定稿。
+`list`、`ready`、`blocked` 共享同一套过滤器、排序、分页与投影参数。默认排序是 `rank`：状态分组（open → in_progress → closed）→ 依赖拓扑序 → 稳定 ID。`--limit` 默认 100（MCP 为 50），`0` 表示不限；`--offset` 跳过若干条。分页基于单次调用的快照，不是跨调用游标。
+
+`query` 是 `list` 的结构化形式，只在 CLI 暴露——MCP 的 `list` 参数本身已是结构化的。`search` 对 title 与 body 做大小写不敏感子串匹配，title 命中优先，不返回片段。`--q` 是廉价的 id/title 过滤，永不读正文。`stats` 只报计数（总数、按状态、按类别、ready、blocked）与可选 `--top N` 字符串字段分布，不报吞吐或历史快照。
+
+所有全局查询都要求完整且新鲜的投影，否则返回 `INCOMPLETE_PROJECTION`；只有 `show` 允许局部读取。`children` 与 `leaves` 不设独立命令，分别由 `tree --depth 1` 与 `list --leaves` 覆盖。
 
 ### 3.3 工作项和编辑
 
@@ -228,16 +234,14 @@ CLI 与 MCP 对这些能力不做产品级区别；`dry_run`、锁、冲突和�
 waymark_get_work_item
 waymark_list_work_items
 waymark_search_work_items
-waymark_query_work_items
 waymark_get_tree
-waymark_get_children
-waymark_get_leaves
+waymark_get_dependency_tree
 waymark_get_ready_items
 waymark_get_blocked_items
 waymark_get_stats
 ```
 
-所有 tool 使用结构化请求和版本化响应 envelope。集合查询的 active/archived 范围、分页、排序和投影参数待细化。
+所有 tool 使用结构化请求和版本化响应 envelope。`waymark_list_work_items` 的参数与 CLI 的 `list` 等价（含 `--archived`、过滤器、排序、`limit` 默认 50、`offset`、字段投影），因此 MCP 不再单独暴露 `query` tool；`children` 与 `leaves` 通过树深度和列表过滤器表达，不设独立 tool。
 
 ### 4.3 创建、编辑和专用写入
 
@@ -286,10 +290,9 @@ CLI 和 MCP 共享以下约束：
 
 本文不提前决定以下内容：
 
-- 每个命令和 tool 的最终名称；
 - title、body、自定义字段操作的完整 MCP schema 和返回值；
 - 是否提供复合 `edit` 命令，以及跨领域编辑是否原子；
-- 读取查询的分页、排序、投影和 archive 参数；
+- `--fields` 投影支持哪些字段名，以及 `rank` 排序在拓扑并列时的最终确定性规则；
 - 三类迁移的完整请求/响应 envelope，以及 `--dry-run` 输出的机器可读结构；
 - Git 能力是否在两个适配器中使用完全相同的参数。
 

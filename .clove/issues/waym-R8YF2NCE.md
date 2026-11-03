@@ -2,11 +2,12 @@
 schema: 1
 id: waym-R8YF2NCE
 title: Define the query and reporting surface
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-11-03T03:25:00.000Z
-updated: 2026-11-03T03:25:00.000Z
+updated: 2026-11-03T04:15:00.000Z
+closed: 2026-11-03T04:15:00.000Z
 assignee: DeepSeek Agent
 parent: waym-VS5Z5543
 labels: [wayfinder:grilling]
