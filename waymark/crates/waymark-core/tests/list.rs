@@ -1,12 +1,12 @@
 //! `list`, `ready`, and `blocked`: one population, three questions.
 //!
-//! The seam is the three core reads. They share [`Filters`], and every one of
+//! The seam is the three core reads. They share [`Query`], and every one of
 //! them answers from a complete project scan, so `_meta` says `complete`.
 
 use waymark_core::envelope::{Completeness, Source};
 use waymark_core::error::Code;
 use waymark_core::ops::create::CreateRequest;
-use waymark_core::ops::list::{self, Filters};
+use waymark_core::ops::list::{self, Query};
 use waymark_core::ops::relationship::add_dependency;
 use waymark_core::ops::{create, read, status, OpOptions};
 use waymark_core::testing::fixtures;
@@ -42,13 +42,15 @@ fn id(literal: &str) -> WorkItemId {
 }
 
 #[test]
-fn list_returns_active_items_in_stable_id_order() {
+fn list_defaults_to_rank_order_with_stable_id_as_the_final_tie_break() {
     let (_dir, project) = fixtures::deterministic_project();
     let first = make(&project, "first", "task");
     let second = make(&project, "second", "task");
 
-    let listing = list::list(&project, &Filters::new()).unwrap();
+    let listing = list::list(&project, &Query::new()).unwrap();
 
+    // Both are open with no dependencies, so the topological level and the
+    // status group tie and the stable ID decides.
     assert_eq!(titles(&listing), vec!["first", "second"]);
     assert_eq!(listing.items[0].item.id.as_str(), first);
     assert_eq!(listing.items[1].item.id.as_str(), second);
@@ -65,7 +67,7 @@ fn list_never_includes_archived_items() {
     item.archived_at = Some(fixtures::instant());
     std::fs::write(&path, waymark_core::serialize::to_document(&item)).unwrap();
 
-    let listing = list::list(&project, &Filters::new()).unwrap();
+    let listing = list::list(&project, &Query::new()).unwrap();
     assert_eq!(titles(&listing), vec!["kept"]);
     assert_eq!(listing.items[0].item.id.as_str(), kept);
 }
@@ -77,15 +79,16 @@ fn list_includes_closed_items_but_ready_and_blocked_never_do() {
     let open = make(&project, "open", "task");
     status::set_status(&project, &closed, Status::Closed, &options()).unwrap();
 
-    let all = list::list(&project, &Filters::new()).unwrap();
-    assert_eq!(titles(&all), vec!["closed", "open"]);
+    // `rank` puts the open item before the closed one, whatever the IDs are.
+    let all = list::list(&project, &Query::new()).unwrap();
+    assert_eq!(titles(&all), vec!["open", "closed"]);
 
-    let ready = list::ready(&project, &Filters::new()).unwrap();
+    let ready = list::ready(&project, &Query::new()).unwrap();
     assert_eq!(titles(&ready), vec!["open"]);
     assert_eq!(ready.items[0].item.id.as_str(), open);
-    assert_eq!(all.items[0].item.id.as_str(), closed);
+    assert_eq!(all.items[1].item.id.as_str(), closed);
 
-    let blocked = list::blocked(&project, &Filters::new()).unwrap();
+    let blocked = list::blocked(&project, &Query::new()).unwrap();
     assert!(blocked.is_empty(), "{:?}", titles(&blocked));
     assert_eq!(blocked.len(), 0);
 }
@@ -98,14 +101,17 @@ fn ready_lists_only_items_with_every_dependency_closed() {
     let free = make(&project, "free", "task");
     add_dependency(&project, &dependent, &blocker, &options()).unwrap();
 
-    let ready = list::ready(&project, &Filters::new()).unwrap();
+    let ready = list::ready(&project, &Query::new()).unwrap();
     assert_eq!(titles(&ready), vec!["blocker", "free"]);
 
     status::set_status(&project, &blocker, Status::Closed, &options()).unwrap();
-    let ready = list::ready(&project, &Filters::new()).unwrap();
-    assert_eq!(titles(&ready), vec!["dependent", "free"]);
+    // `rank` is status group, then dependency level, then stable ID. The
+    // dependency level is computed over the whole active graph, so `dependent`
+    // stays one level below its — now closed — blocker and sorts after `free`.
+    let ready = list::ready(&project, &Query::new()).unwrap();
+    assert_eq!(titles(&ready), vec!["free", "dependent"]);
     assert!(!titles(&ready).contains(&"blocker".to_owned()));
-    assert_eq!(free, ready.items[1].item.id.as_str());
+    assert_eq!(free, ready.items[0].item.id.as_str());
 }
 
 #[test]
@@ -116,7 +122,7 @@ fn blocked_lists_only_items_with_an_unfinished_dependency() {
     make(&project, "free", "task");
     add_dependency(&project, &dependent, &blocker, &options()).unwrap();
 
-    let blocked = list::blocked(&project, &Filters::new()).unwrap();
+    let blocked = list::blocked(&project, &Query::new()).unwrap();
     assert_eq!(titles(&blocked), vec!["dependent"]);
     assert_eq!(blocked.items[0].readiness.blocked_by, vec![id(&blocker)]);
     assert!(blocked.items[0].readiness.blocked);
@@ -132,14 +138,14 @@ fn a_dangling_dependency_makes_an_item_blocked_and_is_reported() {
     document.dependencies = vec![id("wm-00000000zzzz")];
     std::fs::write(&path, waymark_core::serialize::to_document(&document)).unwrap();
 
-    let blocked = list::blocked(&project, &Filters::new()).unwrap();
+    let blocked = list::blocked(&project, &Query::new()).unwrap();
     assert_eq!(titles(&blocked), vec!["item"]);
     assert_eq!(
         blocked.items[0].readiness.blocked_by,
         vec![id("wm-00000000zzzz")]
     );
 
-    let ready = list::ready(&project, &Filters::new()).unwrap();
+    let ready = list::ready(&project, &Query::new()).unwrap();
     assert!(ready.is_empty());
 
     // Both reads report the dangling reference, because both scanned the graph.
@@ -160,19 +166,19 @@ fn the_status_filter_selects_one_lifecycle_state() {
     status::set_status(&project, &closed, Status::Closed, &options()).unwrap();
 
     assert_eq!(
-        titles(&list::list(&project, &Filters::new().with_status(Status::Open)).unwrap()),
+        titles(&list::list(&project, &Query::new().with_status(Status::Open)).unwrap()),
         vec!["open"]
     );
     assert_eq!(
-        titles(&list::list(&project, &Filters::new().with_status(Status::InProgress)).unwrap()),
+        titles(&list::list(&project, &Query::new().with_status(Status::InProgress)).unwrap()),
         vec!["progress"]
     );
     assert_eq!(
-        titles(&list::list(&project, &Filters::new().with_status(Status::Closed)).unwrap()),
+        titles(&list::list(&project, &Query::new().with_status(Status::Closed)).unwrap()),
         vec!["closed"]
     );
     assert_eq!(
-        list::list(&project, &Filters::new().with_status(Status::Open))
+        list::list(&project, &Query::new().with_status(Status::Open))
             .unwrap()
             .items[0]
             .item
@@ -221,7 +227,7 @@ fn the_category_filter_selects_one_category_and_composes_with_status() {
 
     let only_tasks = list::list(
         &project,
-        &Filters::new().with_category(CategoryKey::parse("task").unwrap()),
+        &Query::new().with_category(CategoryKey::parse("task").unwrap()),
     )
     .unwrap();
     assert_eq!(titles(&only_tasks), vec!["task"]);
@@ -229,14 +235,14 @@ fn the_category_filter_selects_one_category_and_composes_with_status() {
 
     let only_bugs = list::list(
         &project,
-        &Filters::new().with_category(CategoryKey::parse("bug").unwrap()),
+        &Query::new().with_category(CategoryKey::parse("bug").unwrap()),
     )
     .unwrap();
     assert_eq!(titles(&only_bugs), vec!["bug"]);
 
     let closed_tasks = list::list(
         &project,
-        &Filters::new()
+        &Query::new()
             .with_category(CategoryKey::parse("task").unwrap())
             .with_status(Status::Closed),
     )
@@ -253,9 +259,9 @@ fn an_empty_project_lists_nothing_but_still_reports_a_complete_scan() {
     let (_dir, project) = fixtures::deterministic_project();
 
     for listing in [
-        list::list(&project, &Filters::new()).unwrap(),
-        list::ready(&project, &Filters::new()).unwrap(),
-        list::blocked(&project, &Filters::new()).unwrap(),
+        list::list(&project, &Query::new()).unwrap(),
+        list::ready(&project, &Query::new()).unwrap(),
+        list::blocked(&project, &Query::new()).unwrap(),
     ] {
         assert!(listing.is_empty());
         assert_eq!(listing.meta.source, Source::MemoryProjection);
@@ -270,9 +276,9 @@ fn every_read_projects_completeness_and_source_into_meta() {
     make(&project, "item", "task");
 
     for listing in [
-        list::list(&project, &Filters::new()).unwrap(),
-        list::ready(&project, &Filters::new()).unwrap(),
-        list::blocked(&project, &Filters::new()).unwrap(),
+        list::list(&project, &Query::new()).unwrap(),
+        list::ready(&project, &Query::new()).unwrap(),
+        list::blocked(&project, &Query::new()).unwrap(),
     ] {
         assert_eq!(listing.meta.source, Source::MemoryProjection);
         assert_eq!(listing.meta.completeness, Completeness::Complete);
@@ -298,7 +304,7 @@ fn a_listed_row_carries_children_dependents_and_readiness() {
     .unwrap();
     add_dependency(&project, &dependent, &parent, &options()).unwrap();
 
-    let listing = list::list(&project, &Filters::new()).unwrap();
+    let listing = list::list(&project, &Query::new()).unwrap();
     let row = listing
         .items
         .iter()
@@ -322,9 +328,9 @@ fn the_derived_columns_are_never_written_back() {
         .iter()
         .map(|item| std::fs::read_to_string(read::read(&project, item).unwrap().path).unwrap())
         .collect();
-    let _ = list::ready(&project, &Filters::new()).unwrap();
-    let _ = list::blocked(&project, &Filters::new()).unwrap();
-    let _ = list::list(&project, &Filters::new()).unwrap();
+    let _ = list::ready(&project, &Query::new()).unwrap();
+    let _ = list::blocked(&project, &Query::new()).unwrap();
+    let _ = list::list(&project, &Query::new()).unwrap();
     let after: Vec<String> = [&blocker, &dependent]
         .iter()
         .map(|item| std::fs::read_to_string(read::read(&project, item).unwrap().path).unwrap())

@@ -269,7 +269,7 @@ fn a_parent_neither_blocks_readiness_nor_cascades_lifecycle() {
     // The child is ready even though its parent is open: a parent is not a
     // prerequisite.
     let listing =
-        waymark_core::ops::list::ready(&project, &waymark_core::ops::list::Filters::new()).unwrap();
+        waymark_core::ops::list::ready(&project, &waymark_core::ops::list::Query::new()).unwrap();
     assert!(
         listing
             .items

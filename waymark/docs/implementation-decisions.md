@@ -668,3 +668,129 @@ argument shapes are `parent set <ID> <PARENT_ID>`, `parent clear <ID>`, `link ad
 **Why:** a dependency tree and a hierarchy tree can contain the same items, and a shared marker would
 make a pasted terminal transcript ambiguous. One envelope keeps every adapter on the same result shape,
 which the spec requires of CLI and MCP alike.
+
+# T8 — collection queries, search, and statistics
+
+### `Filters` grew in place; there is no second filter struct
+
+**Choice:** `query::Filters` is the one filter model. `list`, `ready`, `blocked`, `query`, `search`,
+and the cheap `--text` path all consume it, and `ops::list` re-exports it. It gained
+`parent_present: Option<bool>`, `has_dependencies: Option<bool>`, `readiness: Option<ReadinessFilter>`,
+`fields: Vec<FieldPredicate>`, `text: Option<String>`, `leaves_only: bool`, and
+`archive: ArchiveRange` alongside the pre-existing status/category/owner/creator/parent fields.
+
+**Why:** two filter structs would drift, and the acceptance criterion is that one vocabulary serves all
+three list commands. Widening in place keeps every existing call site compiling while the new fields
+default to "do not restrict".
+
+### `rank` is status group, then dependency *level*, then stable ID
+
+**Choice:** `query::rank_index` computes a level for every active item: all items whose dependencies are
+already ranked are released together, and each release is one level. `rank` sorts by
+`(status.rank_group(), level, stable_id)`, all ascending. Cycle-trapped items never reach indegree zero
+and are appended after the last level in stable-ID order. **The final tie-break is stable ID ascending
+in every sort mode, including `--desc`.** A missing custom-field value sorts last in both directions.
+
+**Why:** the spec pins group → topology → ID but not the tie-break, and not whether topology means
+"depth" or "position in a walk". A level is the only definition that makes a blocker always sort before
+its dependent regardless of creation order while still letting unrelated items interleave
+deterministically — a plain depth-first walk would let an early-ID dependent drag its blocker ahead of
+everything. Keeping the ID tie-break ascending under `--desc` is what makes a descending page a true
+reverse of the ascending one except where values tie, and it means `--limit`/`--offset` pages are stable.
+
+### A `ready`/`blocked` listing still ranks against the whole active graph
+
+**Choice:** `Population::includes_archived` is false for `Ready` and `Blocked`, so neither ever reports an
+archived item whatever `--archive` says. But the level is computed over the entire active graph, not just
+the reported population, so a ready item whose blocker has just closed keeps its deeper level.
+
+**Why:** the alternative — re-ranking a filtered subgraph — would make an item's position depend on
+which filter selected it, so the same item would appear at a different offset on two pages of the same
+result set. That breaks the "union of pages equals the full result" property.
+
+### `ArchiveRange` defaults to `active`, and `ready`/`blocked` still respect it for input
+
+**Choice:** `ArchiveRange::{Active, Archived, All}` parses from `active|archived|all`, defaults to
+`Active`, and is carried on `Filters` (and therefore on `Query` and in the structured JSON document). An
+archived item is never ready and never blocked: it waits on nothing.
+
+**Why:** active-only is the safe default for a human reading a work queue, and an explicit range is the
+only way to see the archive. Making `ready`/`blocked` silently widen to `All` would report items nobody
+can act on.
+
+### The structured query document is the CLI's escape hatch, and it is plain JSON
+
+**Choice:** `waymark query --filter <JSON>|@file|-` parses a JSON object through `Filters::from_json`:
+`status`, `category`, `owner`, `creator`, `parent`, `parent_present`, `dependencies`, `readiness`,
+`leaves`, `text`, `archive`, and `field: [{key, op, value}]`. `null` for a filter, an unknown key, an
+`exists`/`missing` predicate carrying a value, an undecodable `archive`, and any operand that disagrees
+with the declared field type are all `VALIDATION_ERROR`. The document owns the filters; the flags still
+own sort, window, and projection.
+
+**Why:** clap flags cannot express every conjunction, and a second CLI grammar would be a second place for
+the model to drift. `--where "KEY OP [VALUE]"` stays as the convenience spelling of one predicate on
+`list`/`ready`/`blocked`/`search`, and the JSON document is what scripts and the MCP server use.
+
+### Field predicates are typed against the declared schema before anything is read
+
+**Choice:** `FieldOp` is `exists, missing, eq, ne, lt, le, gt, ge, prefix, contains, list_eq, list_ne,
+list_contains`. `Filters::validate(&Config)` rejects an undeclared key, `eq`/`ne` on a type mismatch,
+ordering on a boolean or a list, `prefix`/`contains` on a non-string, and any `list_*` on a non-list.
+`eq`/`ne` on a list compare elements in order; `list_contains` tests membership. Missing never satisfies a
+comparison, and `missing`/`exists` ignore the (absent) operand.
+
+**Why:** failing before the scan means a bad filter costs nothing and reports the same code whether the
+project is empty or not. It also stops `eq` on an integer field with the string `"3"` from quietly
+matching nothing.
+
+### Search reads the body; the cheap `--text` filter does not
+
+**Choice:** `query::Filters::text` matches a case-insensitive substring of the **stable ID and the
+title only** — that is what `list --text` does, and it never opens a body. `search::search` matches the
+same way against title, every frontmatter scalar (category, owner, creator, status, timestamps, custom
+field strings, list elements), and the body. Title hits sort before non-title hits by a stable sort
+applied after the shared ordering; the payload is a projected row with `title_hit` added and
+`snippets: false` in the data block.
+
+**Why:** the spec separates "cheap list text filter" from "search" precisely because opening every body
+is the expensive part; conflating them would make `list --text` as slow as `search`. No snippets keeps
+search out of the business of excerpting prose it does not own, and keeps the row shape identical to a
+list row.
+
+### Stats is counts only, and says so in the payload
+
+**Choice:** `stats::Statistics` carries `archive`, `completeness`, `freshness`, `total`, `by_status`,
+`by_category`, `ready`, `blocked`, an optional one-field `distribution`, and a constant `not_reported`
+list of `history, throughput, completion_rate, cycle_time, lead_time, time_series`. `statistics_json`
+also emits `counts_only: true`. `--top N --top-field KEY` requires a declared **string** field; a
+distribution reports the top `N` values plus an `(unset)` bucket for items without the field.
+
+**Why:** the spec forbids throughput and history but does not say how a caller is meant to know they are
+absent rather than empty. Naming them, and naming the archive range and projection completeness in the
+payload itself, lets a client tell "no history field" from "no history yet". Counts require a complete
+fresh projection, which is why stats never runs against a scoped read.
+
+### Pagination is applied to one snapshot, after filtering, before projection
+
+**Choice:** `Window { limit, offset }` is applied to the fully filtered and sorted vector in one pass.
+`limit == 0` means unlimited; `offset` past the end is an empty page that still reports the true `total`.
+`total` is always the pre-window count. `DEFAULT_LIMIT` is 100 and `MCP_DEFAULT_LIMIT` is 50.
+
+**Why:** applying the window before the sort, or re-reading between pages, is what makes a page union
+skip or repeat rows. One pass over one snapshot is the only construction where the union of pages equals
+the full result even while a writer is active.
+
+### The projection vocabulary is closed, and identity columns are never dropped
+
+**Choice:** `FieldName` is a fixed enum of 20 column names (`schema, id, title, category, status, owner,
+creator, created_at, updated_at, closed_at, parent, dependencies, soft_links, custom_fields,
+archived_at, archive_reason, ready, blocked, blocked_by, children, dependents`), parsed from a
+comma-separated `--fields` list; unknown names are `VALIDATION_ERROR`. Frontmatter columns are nested
+under `item`, derived columns are top-level, and `id` plus `status` are always emitted even when they are
+not in the set. `--compact` is the identity subset. An unset optional value and an empty list are
+**omitted**, never `null`.
+
+**Why:** a closed vocabulary is what lets the CLI, MCP, and Web adapters agree on a row shape without a
+shared schema file, and it makes a typo an error instead of a silently empty column. Keeping `id` is what
+makes a projected row still addressable; keeping `status` is what makes a row renderable as a row.
+Omitting unset values matches the canonical document rule "unset optional values are omitted".
