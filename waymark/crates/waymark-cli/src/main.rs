@@ -23,10 +23,14 @@ use waymark_core::time::SystemClock;
 mod cmd;
 use cmd::query::{QueryArgs, SearchArgs, StatsArgs};
 
+use clap::CommandFactory;
+
+use cmd::agent_doc::AgentDocArgs;
 use cmd::archive::ArchiveArgs;
 use cmd::config::ConfigArgs;
 use cmd::create::CreateArgs;
 use cmd::edit::{BodyArgs, FieldArgs, TitleArgs};
+use cmd::git::GitArgs;
 use cmd::init::InitArgs;
 use cmd::link::LinkArgs;
 use cmd::list::ListArgs;
@@ -110,6 +114,11 @@ enum Command {
     Stats(StatsArgs),
     /// Inspect the project itself.
     Project(ProjectArgs),
+    /// Commit history and diffs over the project's Git repository.
+    Git(GitArgs),
+    /// Print the capability reference generated from this command tree.
+    #[command(name = "agent-doc")]
+    AgentDoc(AgentDocArgs),
     /// Read, validate, and change the project configuration.
     Config(ConfigArgs),
     /// Validate the whole project.
@@ -255,6 +264,8 @@ fn run(cli: Cli) -> Result<(), waymark_core::WaymarkError> {
             cmd::archive::run(&project, &args, &options, json)
         }
         Command::Project(args) => cmd::project::run(args, cli.project.as_deref(), json),
+        Command::Git(args) => cmd::git::run(args, cli.project.as_deref(), json),
+        Command::AgentDoc(args) => cmd::agent_doc::run(Cli::command(), &args, json),
         Command::Config(args) => cmd::config::run(args, cli.project.as_deref(), &options, json),
         Command::Validate => cmd::project::run_validate(cli.project.as_deref(), json),
     }

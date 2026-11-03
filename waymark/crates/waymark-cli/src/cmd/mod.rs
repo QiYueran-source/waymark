@@ -4,10 +4,12 @@
 //! One command family per module; this module owns everything a family would
 //! otherwise duplicate.
 
+pub mod agent_doc;
 pub mod archive;
 pub mod config;
 pub mod create;
 pub mod edit;
+pub mod git;
 pub mod init;
 pub mod link;
 pub mod list;
