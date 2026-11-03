@@ -15,8 +15,9 @@
 //!
 //! # Field values
 //!
-//! A `--set key=value` value is resolved against the declared type, never guessed
-//! from the literal alone:
+//! A `--set key=value` value is resolved against the declared type by the one
+//! shared grammar, [`waymark_core::config::FieldType::parse_value`], and never
+//! guessed from the literal alone:
 //!
 //! - `integer` takes decimal digits with an optional leading `-` (`0x10`, `+3`,
 //!   `3.0`, and `1_000` are rejected);
@@ -27,6 +28,9 @@
 //!   otherwise the bare token verbatim. A token that is a JSON array or object is
 //!   rejected: a structured value for a string field is a mistake, not content.
 //!
+//! `create --field`, `field update --set`, and `migrate schema --default` all
+//! call that parser, so the same token means the same value on every surface.
+//!
 //! Duplicate and conflicting keys are rejected before the write, as are unknown
 //! keys, `null` values, and clearing a required field — all through the core
 //! operation, so the CLI cannot accept something the domain refuses.
@@ -35,8 +39,6 @@ use std::io::Read;
 
 use camino::Utf8PathBuf;
 use clap::{Args, Subcommand};
-use serde_json::Value as Json;
-use waymark_core::config::{FieldDecl, FieldType};
 use waymark_core::envelope::success_envelope;
 use waymark_core::error::{ValidationIssue, WaymarkError};
 use waymark_core::model::FieldKey;
@@ -302,7 +304,7 @@ fn field_changes(
             resolved.push(FieldChangeEntry::set(key, FieldValue::String(raw.clone())));
             continue;
         };
-        match parse_field_value(&declaration, raw) {
+        match declaration.ty.parse_value(raw) {
             Ok(value) => resolved.push(FieldChangeEntry::set(key, value)),
             Err(reason) => {
                 issues.push(ValidationIssue::new(format!("custom_fields.{key}"), reason));
@@ -313,84 +315,6 @@ fn field_changes(
         return Err(WaymarkError::validation("custom_fields", issues).at_field("custom_fields"));
     }
     Ok(resolved)
-}
-
-/// Resolve one raw `--set`/`--field` token against the declared field type.
-///
-/// Shared with `create` so a field value typed on either command line has the
-/// same text grammar and the same parse errors.
-pub(crate) fn parse_field_value(declaration: &FieldDecl, raw: &str) -> Result<FieldValue, String> {
-    match &declaration.ty {
-        FieldType::String => parse_string(raw),
-        FieldType::Integer => parse_integer(raw).map(FieldValue::Integer),
-        FieldType::Boolean => match raw {
-            "true" => Ok(FieldValue::Boolean(true)),
-            "false" => Ok(FieldValue::Boolean(false)),
-            other => Err(format!("expected `true` or `false`, found {other:?}")),
-        },
-        FieldType::List(element) => parse_list(element, raw),
-    }
-}
-
-/// A string is either a JSON string literal or a bare token taken verbatim.
-fn parse_string(raw: &str) -> Result<FieldValue, String> {
-    if raw.starts_with('"') {
-        return match serde_json::from_str::<Json>(raw) {
-            Ok(Json::String(text)) => Ok(FieldValue::String(text)),
-            Ok(_) => Err("a string value must be a JSON string literal".to_owned()),
-            Err(error) => Err(format!("not a valid JSON string literal: {error}")),
-        };
-    }
-    // A structured token for a string field is a mistake, not content.
-    match serde_json::from_str::<Json>(raw) {
-        Ok(Json::Array(_) | Json::Object(_)) => Err(
-            "a string value may not be a JSON array or object; quote it to keep it as text"
-                .to_owned(),
-        ),
-        _ => Ok(FieldValue::String(raw.to_owned())),
-    }
-}
-
-/// Decimal integer syntax only: optional `-`, then at least one ASCII digit.
-fn parse_integer(raw: &str) -> Result<i64, String> {
-    let digits = raw.strip_prefix('-').unwrap_or(raw);
-    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
-        return Err(format!("expected a decimal integer, found {raw:?}"));
-    }
-    raw.parse::<i64>()
-        .map_err(|_| format!("{raw:?} is outside the range of a 64-bit integer"))
-}
-
-/// A list value is a JSON array, recursively checked against the element type.
-fn parse_list(element: &FieldType, raw: &str) -> Result<FieldValue, String> {
-    let parsed: Json = serde_json::from_str(raw)
-        .map_err(|error| format!("expected a JSON array, found {raw:?}: {error}"))?;
-    let Json::Array(items) = parsed else {
-        return Err(format!("expected a JSON array, found {raw:?}"));
-    };
-    let mut values = Vec::with_capacity(items.len());
-    for item in items {
-        values.push(json_to_field_value(element, item)?);
-    }
-    Ok(FieldValue::List(values))
-}
-
-/// Convert one JSON array element to the declared element type, strictly.
-fn json_to_field_value(element: &FieldType, value: Json) -> Result<FieldValue, String> {
-    match (element, value) {
-        (FieldType::String, Json::String(text)) => Ok(FieldValue::String(text)),
-        (FieldType::Integer, Json::Number(number)) => number
-            .as_i64()
-            .map(FieldValue::Integer)
-            .ok_or_else(|| format!("{} is not a whole number", number)),
-        (FieldType::Boolean, Json::Bool(flag)) => Ok(FieldValue::Boolean(flag)),
-        (FieldType::List(_), _) => Err("nested lists are not valid custom-field values".to_owned()),
-        (element, other) => Err(format!(
-            "expected a `{}` element, found {}",
-            element.as_str(),
-            other
-        )),
-    }
 }
 
 /// The `data` block common to title and body edits.

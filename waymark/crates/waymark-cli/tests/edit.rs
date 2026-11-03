@@ -500,3 +500,104 @@ fn an_archived_item_rejects_every_edit_with_item_archived() {
         );
     }
 }
+
+/// `create --field`, `field update --set`, and `migrate schema --default` all
+/// resolve a token through the one core grammar, so the same token yields the
+/// same value on every surface.
+#[test]
+fn one_field_value_grammar_across_create_update_and_migration() {
+    let (_dir, root) = project();
+    let token = "\"hello world\"";
+
+    let created = json_ok(
+        &root,
+        &[
+            "create",
+            "--title",
+            "grammar",
+            "--category",
+            "task",
+            "--owner",
+            "frank",
+            "--field",
+            "effort=1",
+            "--field",
+            &format!("note={token}"),
+        ],
+    );
+    assert_eq!(
+        created["data"]["item"]["custom_fields"]["note"],
+        serde_json::json!("hello world"),
+        "{created}"
+    );
+    let id = created["data"]["id"]
+        .as_str()
+        .expect("the new id")
+        .to_owned();
+
+    let updated = json_ok(
+        &root,
+        &["field", "update", &id, "--set", &format!("note={token}")],
+    );
+    assert_eq!(
+        updated["data"]["item"]["custom_fields"]["note"],
+        serde_json::json!("hello world"),
+        "{updated}"
+    );
+
+    let migrated = json_ok(
+        &root,
+        &[
+            "migrate",
+            "schema",
+            "--add-required-field",
+            "label",
+            "--type",
+            "string",
+            "--default",
+            token,
+        ],
+    );
+    assert_eq!(migrated["data"]["written"], serde_json::json!(true));
+    let shown = json_ok(&root, &["show", &id]);
+    assert_eq!(
+        shown["data"]["item"]["custom_fields"]["label"],
+        serde_json::json!("hello world"),
+        "the migration default uses the same grammar: {shown}"
+    );
+
+    // A structured token for a string field is rejected by the same grammar on
+    // every surface, instead of being accepted by one and refused by another.
+    for arguments in [
+        vec![
+            "create",
+            "--title",
+            "array",
+            "--category",
+            "task",
+            "--owner",
+            "frank",
+            "--field",
+            "note=[\"a\"]",
+        ],
+        vec!["field", "update", &id, "--set", "note=[\"a\"]"],
+        vec![
+            "migrate",
+            "schema",
+            "--add-required-field",
+            "other",
+            "--type",
+            "string",
+            "--default",
+            "[\"a\"]",
+        ],
+    ] {
+        let (code, envelope) = json_err(&root, &arguments);
+        assert_eq!(code, 3, "{arguments:?}");
+        assert_eq!(
+            envelope["error"]["code"],
+            serde_json::json!("VALIDATION_ERROR"),
+            "{arguments:?}"
+        );
+    }
+}
