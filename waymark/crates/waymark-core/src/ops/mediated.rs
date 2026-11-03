@@ -135,10 +135,23 @@ pub fn write_meta(warnings: Vec<Warning>) -> Meta {
 }
 
 /// Stamp `updated_at` from the operation clock and return the instant used.
-pub fn touch(item: &mut WorkItem, options: &OpOptions) -> Timestamp {
+///
+/// The name says what it does: this is a timestamp write, not one of the
+/// spec's "touches" (a frontmatter query, mutation, or archive).
+pub fn stamp_updated_at(item: &mut WorkItem, options: &OpOptions) -> Timestamp {
     let now = Timestamp::new(options.clock.now());
     item.updated_at = now;
     now
+}
+
+/// Compatibility name for [`stamp_updated_at`].
+///
+/// `ops::move` is outside this change's file ownership, so it still calls
+/// `touch`; every other call site uses the honest name. Remove this shim when
+/// `ops::move` can be updated.
+#[doc(hidden)]
+pub fn touch(item: &mut WorkItem, options: &OpOptions) -> Timestamp {
+    stamp_updated_at(item, options)
 }
 
 /// Replace the document at `loaded.path` with the canonical bytes of `item`,

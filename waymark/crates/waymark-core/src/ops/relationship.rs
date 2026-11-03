@@ -155,7 +155,7 @@ fn apply_add(
     item.dependencies.push(target.clone());
     item.dependencies.sort();
     item.dependencies.dedup();
-    mediated::touch(&mut item, options);
+    mediated::stamp_updated_at(&mut item, options);
     let fingerprint = mediated::commit(loaded, &item, options)?;
     Ok(RelationshipOutcome {
         meta: mediated::write_meta(mediated::owner_warnings(project, &item, options)),
@@ -194,7 +194,7 @@ fn apply_remove(
 
     let mut item = loaded.item.clone();
     item.dependencies.retain(|known| known != target);
-    mediated::touch(&mut item, options);
+    mediated::stamp_updated_at(&mut item, options);
     let fingerprint = mediated::commit(loaded, &item, options)?;
     Ok(RelationshipOutcome {
         meta: mediated::write_meta(mediated::owner_warnings(project, &item, options)),

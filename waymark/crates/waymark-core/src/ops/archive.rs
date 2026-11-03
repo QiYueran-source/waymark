@@ -235,7 +235,7 @@ fn apply(
         }
         // The file really changed, so it gets a new modification time. The
         // target does not: only its markers moved.
-        mediated::touch(&mut cleaned, options);
+        mediated::stamp_updated_at(&mut cleaned, options);
         for relation in &relations {
             removals.push(PlannedRemoval {
                 from: document.id.clone(),

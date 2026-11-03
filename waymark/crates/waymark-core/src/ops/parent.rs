@@ -166,7 +166,7 @@ fn finish(
         });
     }
 
-    mediated::touch(&mut item, options);
+    mediated::stamp_updated_at(&mut item, options);
     let fingerprint = mediated::commit(loaded, &item, options)?;
     Ok(ParentOutcome {
         parent: item.parent.clone(),
