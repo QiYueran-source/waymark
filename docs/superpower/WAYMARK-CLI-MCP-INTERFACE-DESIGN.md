@@ -1,6 +1,6 @@
 # Waymark CLI 与 MCP 核心能力设计说明
 
-> 状态：核心能力边界已确认；具体参数、完整 schema、批量语义和迁移接口仍待细化。
+> 状态：核心能力边界已确认；具体参数、完整 schema 和迁移接口仍待细化。
 >
 > 本文是 CLI/MCP 外部接口设计的工作文档。它记录已经确认的能力边界，不替代 [Waymark Functional Specification](./WAYMARK-FUNCTIONAL-SPEC.md)；在接口细节完成后，再同步主功能规格。
 
@@ -11,7 +11,7 @@ Waymark 对外提供 CLI 和 MCP 两种正式接口。两者必须调用同一�
 两种接口的业务能力不人为分叉：
 
 - CLI 和 MCP 都可以访问已确认的项目维护、工作项读取、查询和写入能力；
-- 两者执行相同的 schema、关系、owner/operator、归档、并发、批量、迁移和诊断规则；
+- 两者执行相同的 schema、关系、owner/operator、归档、并发、多文件原子性、迁移和诊断规则；
 - CLI 可以提供人类友好的命令层级、文本输出、快捷命令和退出码；
 - MCP 使用结构化 tool、请求/响应和业务错误；
 - 交互方式和传输表示可以不同，但业务语义不能不同；
@@ -128,7 +128,7 @@ waymark git history ...
 waymark git diff ...
 ```
 
-CLI 负责把人类参数转换成共享函数请求，并将结构化业务错误映射为稳定退出码。破坏性、批量或项目级操作应支持 dry-run 或 plan/apply 机制，具体范围待细化。
+CLI 负责把人类参数转换成共享函数请求，并将结构化业务错误映射为稳定退出码。破坏性、内在涉及多个文件或项目级的操作应支持 dry-run 或 plan/apply 机制，具体范围待细化。
 
 ### 3.2 工作项读取与查询
 
@@ -163,7 +163,7 @@ waymark field update <id> --set <key=value>... --clear <key>...
 - `body replace` 完整替换或清空正文，`--body` 与 `--body-file` 互斥；
 - `field update` 一次更新一个工作项的多个自定义字段，使用显式 `--set` 和 `--clear`；复杂值使用 canonical JSON literal，简单 string/integer/boolean 值可按 schema 使用无歧义的简写。
 
-每个操作只修改自己的数据区域；请求没有实际变化时不写文件、不更新时间。v1 不提供 CLI `$EDITOR`；正文通过 `--body` 或 `--body-file` 直接替换。是否提供人类友好的复合 `edit` 命令、以及跨领域复合编辑是否原子，仍待编辑契约确认。
+每个操作只修改自己的数据区域；请求没有实际变化时不写文件、不更新时间。v1 不提供 CLI `$EDITOR`；正文通过 `--body` 或 `--body-file` 直接替换。这些命令都按**单个工作项**定义，不存在接受多个 ID 或 `items` 数组的批量变体。是否提供人类友好的复合 `edit` 命令、以及跨领域复合编辑是否原子，仍待编辑契约确认。
 
 ### 3.4 专用核心操作
 
@@ -247,7 +247,7 @@ MCP 的编辑 tool 与 CLI 的三个编辑命令共享对应函数：
 - `waymark_replace_body`；
 - `waymark_update_custom_fields`。
 
-MCP 不启动 `$EDITOR`。它使用结构化字符串和字段变更请求，具体 schema、clear 语义、批量形式和返回内容待细化。
+MCP 不启动 `$EDITOR`。它使用结构化字符串和字段变更请求，具体 schema、clear 语义和返回内容待细化。这些 tool 同样按单个工作项定义，没有批量变体。
 
 ## 5. 统一业务契约
 
@@ -257,7 +257,8 @@ CLI 和 MCP 共享以下约束：
 - archived item 拒绝普通写入；
 - 写入使用 fingerprint 冲突检测；
 - 单文件更新经过校验后原子替换；
-- 批量操作先整体预校验，按操作类型执行，默认 all-or-nothing；编辑能力支持显式的操作类型批量，不通过命令重复 ID 隐式批量，也不接受任意混合操作数组；
+- 不提供用户可见的跨工作项批量命令：每次写入只针对一个工作项，CLI 不接受多个 ID，MCP 不接受 `items` 数组，也没有任意混合操作数组；
+- all-or-nothing 与 per-target 结果只适用于**单次操作内在涉及多个文件**的场景（归档的关系清理、迁移、多目标关系写入、配置/schema 变更），由共享写入引擎保证预校验、项目锁、staging、回滚和显式 `rollback_failed`；
 - 归档、迁移和配置变更使用其专属完整性和恢复规则；
 - 系统时间由 Waymark 生成，普通请求不能伪造；
 - 机器响应使用版本化 envelope；
@@ -271,9 +272,7 @@ CLI 和 MCP 共享以下约束：
 - 每个命令和 tool 的最终名称；
 - title、body、自定义字段操作的完整 MCP schema 和返回值；
 - 是否提供复合 `edit` 命令，以及跨领域编辑是否原子；
-- 批量操作的完整请求形状；
 - 读取查询的分页、排序、投影和 archive 参数；
-- 批量操作的完整请求形状；
 - 配置修改和迁移的具体 kind、plan/apply schema；
 - Git 能力是否在两个适配器中使用完全相同的参数。
 
