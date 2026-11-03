@@ -1514,7 +1514,7 @@ impl FieldName {
     ];
 
     /// The wire and CLI literal.
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Schema => "schema",
             Self::Id => "id",
