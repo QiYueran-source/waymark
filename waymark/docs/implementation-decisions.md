@@ -2087,3 +2087,23 @@ document/configuration rewrites (a category-key migration's value rewrites can r
   parse time would make the document unreadable, which the spec does not allow;
   instead the diagnostic run reports `VALIDATION_ERROR` at `title`. `create` and
   `title set` continue to refuse such values before writing.
+
+## Composite-create previews apply the write checks
+
+- **Both halves load soft-link partners through `mediated::load_for_write`.** The
+  preview used to call `Project::load`, which skips the archived and
+  generation checks; a `--dry-run` could therefore promise a creation the real
+  write would refuse with `ITEM_ARCHIVED` or `ITEM_NEEDS_MIGRATION`. The two
+  paths now share the mediated read (the real one still re-reads under the lock
+  to fingerprint the exact bytes it will replace).
+
+## Naming: `touch`, `commit`
+
+- **`mediated::touch` is now `mediated::stamp_updated_at`.** The spec reserves
+  "touch" for a Waymark-controlled frontmatter query, mutation, or archive, and
+  the function writes a timestamp. `ops::move` is outside this change's file
+  ownership, so it still calls a hidden `touch` compatibility shim; every other
+  call site and the implementation use the honest name.
+- **`create.rs::commit` is now `write_new_item`.** The old name collided with
+  the spec's document "commit" vocabulary; the new one names the whole write
+  half (inventory, ID, graph checks, one create-and-partner batch).
