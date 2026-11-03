@@ -185,7 +185,7 @@ pub fn create(
     // The lock is taken *before* the inventory: an ID allocated against a stale
     // inventory could collide with an item another writer just committed.
     crate::lock::with_project_lock(project, options.lock_wait, || {
-        commit(project, prepared, options)
+        write_new_item(project, prepared, options)
     })
 }
 
@@ -226,8 +226,11 @@ fn prepare_only(
     })
 }
 
-/// The write half of [`create`], run while the store lock is held.
-fn commit(
+/// The write half of [`create`]: inventory, ID, graph checks, and the one
+/// batch that creates the new document and rewrites its partners.
+///
+/// Run while the store lock is held.
+fn write_new_item(
     project: &Project,
     prepared: Prepared,
     options: &OpOptions,
