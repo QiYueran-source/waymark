@@ -216,13 +216,17 @@ The following decisions extend the accepted specification; the specification and
 - The basic distribution includes CLI, the shared core, and MCP; Web is optional. A build-time feature selects Web: the default build is the basic version, while a Web-enabled build includes Web. Adding Web to an installed basic executable requires rebuilding or installing a Web-enabled replacement, not dynamically attaching a module. The exact prebuilt release artifacts remain open.
 - A Web-enabled build must obtain complete frontend assets. Missing assets or a frontend build failure must produce a clear build failure, rather than silently shipping a placeholder or stale frontend as a successful Web build.
 - A prebuilt Web-enabled binary includes its frontend assets; an end user running it does not need Rust, Node.js, or npm. To build the frontend from source, the developer needs Node.js and npm unless verified prebuilt assets are supplied instead.
+- Formal releases provide separately named prebuilt basic and Web-enabled binary packages. Both identify their version and included capabilities; the basic package includes CLI and MCP without Web, and the Web package includes those capabilities plus Web.
+- Prefer shipping the already-built frontend assets directly in the published Web source package, rather than downloading them from GitHub Releases at build time. A published package's assets must correspond to its source version and release checks must validate that correspondence. The exact verification mechanism remains open; this preference does not assert that an arbitrary Git checkout already contains built assets.
+- The first Web version listens only on local loopback addresses; it offers no LAN or public network binding option. Local-only binding does not replace browser-origin protections, safe rendering of project content, and other checks against exposing project data to malicious pages.
+- Web acceptance includes real HTTP tests for reads, malformed requests, and absence of writes; frontend automated tests for tree rendering, dependency overlay toggling, detail and persisted view state; and separate basic/Web builds, including a failure test for missing Web assets. These supplement all existing specification-level Web acceptance and do not replace functional, accessibility or security testing.
 
 ## Not yet specified
 
 ### Web, MCP, and distribution follow-up
 
 - The exact compatible rmcp and Web-stack versions and feature combinations; verify the resolved Rust dependency graph against the supported Rust version. If no suitable rmcp combination supports Rust 1.85, determine whether and how far to raise that minimum.
-- The exact feature and prebuilt-artifact layout, frontend asset verification and provenance, and the ownership of integration work across the Web and MCP tickets.
+- The precise feature flags, artifact names, frontend asset verification and provenance, browser-origin protections, and ownership of integration work across the Web and MCP tickets.
 
 Before the Web, MCP, and distribution follow-up above, every original decision ticket had been closed and indexed under Decisions so far. The replacement `waym-WMSPEC01` was accepted with 130 user stories, the absorbed command and tool catalog, and the frozen error registry; the interface working document was retired to `.inbox/superpower/`. The map remains the decision record and implementation tickets are cut from the specification, not from this map. The new follow-up decisions above are not yet reflected in that specification.
 
