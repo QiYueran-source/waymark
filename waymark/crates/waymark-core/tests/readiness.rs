@@ -55,13 +55,9 @@ fn an_unfinished_dependency_blocks_with_the_target_listed() {
     assert!(!readiness.ready);
     assert!(readiness.blocked);
     assert_eq!(readiness.blocked_by, vec![id("wm-000000000002")]);
-    assert!(readiness_refs(&graph, "wm-000000000002").is_empty());
-}
 
-/// A helper that reads whether an item is blocked, so a test can say what it
-/// means without repeating three assertions.
-fn readiness_refs(graph: &Graph, literal: &str) -> Vec<WorkItemId> {
-    readiness(graph, literal).blocked_by
+    // The blocker itself waits for nothing.
+    assert!(graph.is_ready(&id("wm-000000000002")));
 }
 
 #[test]
