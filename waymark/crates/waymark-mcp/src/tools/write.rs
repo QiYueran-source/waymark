@@ -25,12 +25,12 @@ use serde_json::{json, Value};
 use waymark_core::envelope::Meta;
 use waymark_core::model::FieldKey;
 use waymark_core::ops::edit::{self, EditOutcome, FieldOutcome};
-use waymark_core::ops::{create, status};
+use waymark_core::ops::{archive, create, link, owner, parent, r#move, relationship, status};
 
 use crate::envelope::{self, ToolResult};
 use crate::server::WaymarkServer;
 use crate::tools::params;
-use crate::tools::read::item_json;
+use crate::tools::read::{item_fields, item_json};
 
 /// Inputs of `waymark_create_work_item`.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -250,6 +250,243 @@ impl WaymarkServer {
             Ok(status_result(&outcome))
         })
     }
+
+    /// Replace the accountable owner of one item. The new identity is validated
+    /// with the same rule creation uses; repeating the current owner is a true
+    /// no-op. A configured operator that differs from the owner produces the
+    /// advisory `OWNER_MISMATCH` warning in `_meta` without blocking the write.
+    #[tool(
+        name = "waymark_transfer_owner",
+        annotations(
+            title = "Transfer a work-item owner",
+            destructive_hint = true,
+            idempotent_hint = true
+        )
+    )]
+    async fn waymark_transfer_owner(
+        &self,
+        Parameters(args): Parameters<TransferOwnerArgs>,
+    ) -> ToolResult {
+        envelope::respond(|| {
+            let project = self.project()?;
+            let outcome = owner::transfer_owner(
+                &project,
+                &args.id,
+                &args.owner,
+                &params::options(args.dry_run),
+            )?;
+            Ok(owner_result(&outcome))
+        })
+    }
+
+    /// Move one item to another declared category: the document is relocated to
+    /// the category's directory and the persisted `category` changes. Refused
+    /// with `WRITE_CONFLICT` if the destination is occupied, and a same-category
+    /// request is a true no-op.
+    #[tool(
+        name = "waymark_move_work_item",
+        annotations(
+            title = "Move a work item to another category",
+            destructive_hint = true,
+            idempotent_hint = true
+        )
+    )]
+    async fn waymark_move_work_item(
+        &self,
+        Parameters(args): Parameters<MoveWorkItemArgs>,
+    ) -> ToolResult {
+        envelope::respond(|| {
+            let category = params::category_key(&args.category)?;
+            let project = self.project()?;
+            let outcome = r#move::move_item(
+                &project,
+                &args.id,
+                &category,
+                &params::options(args.dry_run),
+            )?;
+            Ok(move_result(&outcome))
+        })
+    }
+
+    /// Give one item a parent, replacing any parent it already has. Re-setting
+    /// the same parent is a true no-op; a cycle, a self-parent, an archived
+    /// endpoint, and a missing parent are all refused by the domain.
+    #[tool(
+        name = "waymark_set_parent",
+        annotations(
+            title = "Set a work-item parent",
+            destructive_hint = true,
+            idempotent_hint = true
+        )
+    )]
+    async fn waymark_set_parent(&self, Parameters(args): Parameters<SetParentArgs>) -> ToolResult {
+        envelope::respond(|| {
+            let project = self.project()?;
+            let outcome = parent::set_parent(
+                &project,
+                &args.id,
+                &args.parent,
+                &params::options(args.dry_run),
+            )?;
+            Ok(parent_result(&outcome, ParentVerb::Set))
+        })
+    }
+
+    /// Remove one item's parent. Clearing an item that has no parent is a true
+    /// no-op.
+    #[tool(
+        name = "waymark_clear_parent",
+        annotations(
+            title = "Clear a work-item parent",
+            destructive_hint = true,
+            idempotent_hint = true
+        )
+    )]
+    async fn waymark_clear_parent(
+        &self,
+        Parameters(args): Parameters<ClearParentArgs>,
+    ) -> ToolResult {
+        envelope::respond(|| {
+            let project = self.project()?;
+            let outcome = parent::clear_parent(&project, &args.id, &params::options(args.dry_run))?;
+            Ok(parent_result(&outcome, ParentVerb::Clear))
+        })
+    }
+
+    /// Make one item wait for a blocking item. A self-reference, a duplicate
+    /// edge, and an edge that would close a cycle are refused by the domain;
+    /// the target must exist and be active.
+    #[tool(
+        name = "waymark_add_dependency",
+        annotations(
+            title = "Add a dependency edge",
+            destructive_hint = true,
+            idempotent_hint = false
+        )
+    )]
+    async fn waymark_add_dependency(
+        &self,
+        Parameters(args): Parameters<DependencyArgs>,
+    ) -> ToolResult {
+        envelope::respond(|| {
+            let project = self.project()?;
+            let outcome = relationship::add_dependency(
+                &project,
+                &args.id,
+                &args.blocking,
+                &params::options(args.dry_run),
+            )?;
+            Ok(dependency_result(&outcome))
+        })
+    }
+
+    /// Remove the hard dependency of one item on a blocking item. Removing an
+    /// edge that is not there is `INVALID_RELATIONSHIP`; a missing target is
+    /// allowed, so a dangling pointer can be cleaned up.
+    #[tool(
+        name = "waymark_remove_dependency",
+        annotations(
+            title = "Remove a dependency edge",
+            destructive_hint = true,
+            idempotent_hint = false
+        )
+    )]
+    async fn waymark_remove_dependency(
+        &self,
+        Parameters(args): Parameters<DependencyArgs>,
+    ) -> ToolResult {
+        envelope::respond(|| {
+            let project = self.project()?;
+            let outcome = relationship::remove_dependency(
+                &project,
+                &args.id,
+                &args.blocking,
+                &params::options(args.dry_run),
+            )?;
+            Ok(dependency_result(&outcome))
+        })
+    }
+
+    /// Associate two items with a symmetric, non-blocking soft link. Both
+    /// documents are replaced as one all-or-nothing batch.
+    #[tool(
+        name = "waymark_add_soft_link",
+        annotations(
+            title = "Add a soft link",
+            destructive_hint = true,
+            idempotent_hint = false
+        )
+    )]
+    async fn waymark_add_soft_link(
+        &self,
+        Parameters(args): Parameters<SoftLinkArgs>,
+    ) -> ToolResult {
+        envelope::respond(|| {
+            let project = self.project()?;
+            let outcome = link::add_soft_link(
+                &project,
+                &args.id,
+                &args.other,
+                &params::options(args.dry_run),
+            )?;
+            Ok(link_result(&outcome, LinkVerb::Add))
+        })
+    }
+
+    /// Remove the soft link between two items. Removing a link that is not there
+    /// is `INVALID_RELATIONSHIP`; when the other document is missing or
+    /// archived, the surviving side alone is cleaned up.
+    #[tool(
+        name = "waymark_remove_soft_link",
+        annotations(
+            title = "Remove a soft link",
+            destructive_hint = true,
+            idempotent_hint = false
+        )
+    )]
+    async fn waymark_remove_soft_link(
+        &self,
+        Parameters(args): Parameters<SoftLinkArgs>,
+    ) -> ToolResult {
+        envelope::respond(|| {
+            let project = self.project()?;
+            let outcome = link::remove_soft_link(
+                &project,
+                &args.id,
+                &args.other,
+                &params::options(args.dry_run),
+            )?;
+            Ok(link_result(&outcome, LinkVerb::Remove))
+        })
+    }
+
+    /// Archive one item: the logical tombstone, not a lifecycle transition. An
+    /// optional reason is stored; inbound edges from active items are removed in
+    /// the same all-or-nothing batch. Re-archiving is `ALREADY_ARCHIVED`, and an
+    /// active child blocks it with `HAS_ACTIVE_CHILDREN`.
+    #[tool(
+        name = "waymark_archive_work_item",
+        annotations(
+            title = "Archive a work item",
+            destructive_hint = true,
+            idempotent_hint = false
+        )
+    )]
+    async fn waymark_archive_work_item(
+        &self,
+        Parameters(args): Parameters<ArchiveWorkItemArgs>,
+    ) -> ToolResult {
+        envelope::respond(|| {
+            let project = self.project()?;
+            let outcome = archive::archive(
+                &project,
+                &args.id,
+                args.reason.as_deref(),
+                &params::options(args.dry_run),
+            )?;
+            Ok(archive_result(&outcome))
+        })
+    }
 }
 
 /// Inputs of `waymark_set_status`.
@@ -313,6 +550,239 @@ fn status_result(outcome: &status::StatusOutcome) -> ToolResult {
             "written": outcome.written,
             "closed_at": outcome.item.closed_at.map(|value| value.to_string()),
             "item": item_json(&outcome.item, &outcome.path),
+        }),
+        outcome.meta.clone(),
+    )
+}
+
+/// Inputs of `waymark_transfer_owner`.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct TransferOwnerArgs {
+    /// Stable ID of the item.
+    pub id: String,
+
+    /// New accountable identity. Trimmed; must be non-empty and single line.
+    pub owner: String,
+
+    /// Report the change without writing it.
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// Inputs of `waymark_move_work_item`.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct MoveWorkItemArgs {
+    /// Stable ID of the item.
+    pub id: String,
+
+    /// Category key to move the item to; must already be declared.
+    pub category: String,
+
+    /// Report the change without writing it.
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// Inputs of `waymark_set_parent`.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SetParentArgs {
+    /// Stable ID of the child.
+    pub id: String,
+
+    /// Stable ID of the new parent.
+    pub parent: String,
+
+    /// Report the change without writing it.
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// Inputs of `waymark_clear_parent`.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ClearParentArgs {
+    /// Stable ID of the item whose parent is removed.
+    pub id: String,
+
+    /// Report the change without writing it.
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// Inputs of `waymark_add_dependency` and `waymark_remove_dependency`.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DependencyArgs {
+    /// Stable ID of the item that waits.
+    pub id: String,
+
+    /// Stable ID of the item it waits for.
+    pub blocking: String,
+
+    /// Report the change without writing it.
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// Inputs of `waymark_add_soft_link` and `waymark_remove_soft_link`.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SoftLinkArgs {
+    /// Stable ID of one end.
+    pub id: String,
+
+    /// Stable ID of the other end.
+    pub other: String,
+
+    /// Report the change without writing it.
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// Inputs of `waymark_archive_work_item`.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ArchiveWorkItemArgs {
+    /// Stable ID of the item to archive.
+    pub id: String,
+
+    /// Free-text reason stored as `archive_reason`. A whitespace-only value
+    /// stores no reason.
+    #[serde(default)]
+    pub reason: Option<String>,
+
+    /// Report the archive and every planned relationship removal without
+    /// writing.
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// Which parent verb ran, so the payload cannot disagree with the operation.
+#[derive(Debug, Clone, Copy)]
+enum ParentVerb {
+    Set,
+    Clear,
+}
+
+/// Which link verb ran.
+#[derive(Debug, Clone, Copy)]
+enum LinkVerb {
+    Add,
+    Remove,
+}
+
+/// One owner transfer as a successful tool result.
+fn owner_result(outcome: &owner::OwnerOutcome) -> ToolResult {
+    envelope::success(
+        json!({
+            "id": outcome.item.id.as_str(),
+            "path": outcome.path.to_string(),
+            "previous_owner": outcome.previous_owner,
+            "owner": outcome.item.owner,
+            "changed": outcome.changed,
+            "written": outcome.written,
+            "item": item_json(&outcome.item, &outcome.path),
+        }),
+        outcome.meta.clone(),
+    )
+}
+
+/// One category move as a successful tool result.
+fn move_result(outcome: &r#move::MoveOutcome) -> ToolResult {
+    envelope::success(
+        json!({
+            "id": outcome.item.id.as_str(),
+            "path": outcome.path.to_string(),
+            "previous_path": outcome.previous_path.to_string(),
+            "previous_category": outcome.previous_category.as_str(),
+            "category": outcome.item.category.as_str(),
+            "changed": outcome.changed,
+            "written": outcome.written,
+            "item": item_json(&outcome.item, &outcome.path),
+        }),
+        outcome.meta.clone(),
+    )
+}
+
+/// One parent change as a successful tool result.
+fn parent_result(outcome: &parent::ParentOutcome, verb: ParentVerb) -> ToolResult {
+    envelope::success(
+        json!({
+            "id": outcome.item.id.as_str(),
+            "path": outcome.path.to_string(),
+            "verb": match verb {
+                ParentVerb::Set => "set",
+                ParentVerb::Clear => "clear",
+            },
+            "parent": outcome.parent.as_ref().map(|id| id.as_str()),
+            "previous_parent": outcome.previous_parent.as_ref().map(|id| id.as_str()),
+            "changed": outcome.changed,
+            "written": outcome.written,
+            "item": item_json(&outcome.item, &outcome.path),
+        }),
+        outcome.meta.clone(),
+    )
+}
+
+/// One dependency change as a successful tool result.
+fn dependency_result(outcome: &relationship::RelationshipOutcome) -> ToolResult {
+    envelope::success(
+        json!({
+            "id": outcome.item.id.as_str(),
+            "path": outcome.path.to_string(),
+            "dependency": outcome.dependency.as_str(),
+            "dependencies": outcome.item.dependencies.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
+            "changed": outcome.changed,
+            "written": outcome.written,
+            "item": item_json(&outcome.item, &outcome.path),
+        }),
+        outcome.meta.clone(),
+    )
+}
+
+/// One soft-link change as a successful tool result.
+fn link_result(outcome: &link::LinkOutcome, verb: LinkVerb) -> ToolResult {
+    envelope::success(
+        json!({
+            "id": outcome.item.id.as_str(),
+            "path": outcome.path.to_string(),
+            "other": outcome.other_id.as_str(),
+            "other_path": outcome.other_path.as_ref().map(|path| path.to_string()),
+            "verb": match verb {
+                LinkVerb::Add => "add",
+                LinkVerb::Remove => "remove",
+            },
+            "soft_links": outcome.item.soft_links.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
+            "changed": outcome.changed,
+            "written": outcome.written,
+            "fingerprints": outcome.fingerprints.iter().map(|fingerprint| fingerprint.as_str()).collect::<Vec<_>>(),
+            "item": item_json(&outcome.item, &outcome.path),
+            "other_item": outcome.other.as_ref().zip(outcome.other_path.as_ref()).map(|(item, path)| item_json(item, path)),
+        }),
+        outcome.meta.clone(),
+    )
+}
+
+/// One archive as a successful tool result.
+fn archive_result(outcome: &archive::ArchiveOutcome) -> ToolResult {
+    envelope::success(
+        json!({
+            "id": outcome.item.id.as_str(),
+            "path": outcome.path.to_string(),
+            "archived_at": outcome.archived_at.to_string(),
+            "archive_reason": outcome.archive_reason,
+            "status": outcome.item.status.as_str(),
+            "closed_at": outcome.item.closed_at.map(|value| value.to_string()),
+            "written": outcome.written,
+            "removals": outcome.removals.iter().map(|removal| json!({
+                "from": removal.from.as_str(),
+                "relation": removal.relation.as_str(),
+            })).collect::<Vec<_>>(),
+            "affected": outcome
+                .affected
+                .iter()
+                .map(|item| json!({
+                    "id": item.id.as_str(),
+                    "path": item.path.to_string(),
+                }))
+                .collect::<Vec<_>>(),
+            "item": item_fields(&outcome.item),
         }),
         outcome.meta.clone(),
     )

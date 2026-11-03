@@ -63,6 +63,16 @@ pub const TOOLS: &[&str] = &[
     "waymark_replace_body",
     "waymark_update_custom_fields",
     "waymark_set_status",
+    // Phase B: lifecycle, relationships, and archive.
+    "waymark_transfer_owner",
+    "waymark_move_work_item",
+    "waymark_set_parent",
+    "waymark_clear_parent",
+    "waymark_add_dependency",
+    "waymark_remove_dependency",
+    "waymark_add_soft_link",
+    "waymark_remove_soft_link",
+    "waymark_archive_work_item",
 ];
 
 /// The phase-A slice of [`TOOLS`], kept as the decisions record's reference.

@@ -98,7 +98,8 @@ async fn the_catalog_exposes_the_advertised_capabilities() {
 #[tokio::test]
 async fn every_tool_routes_to_the_shared_library_and_returns_the_envelope() {
     let fixture = common::fixture(&["one", "two"]);
-    let id = fixture.ids[0].clone();
+    let id0 = fixture.ids[0].clone();
+    let id1 = fixture.ids[1].clone();
     let client = common::Client::connect(fixture.root.clone()).await;
 
     let calls: Vec<(&str, Value)> = vec![
@@ -108,14 +109,98 @@ async fn every_tool_routes_to_the_shared_library_and_returns_the_envelope() {
         ("waymark_config_validate", common::no_args()),
         ("waymark_validate", common::no_args()),
         ("waymark_doctor", common::no_args()),
-        ("waymark_get_work_item", json!({"id": id})),
+        ("waymark_get_work_item", json!({"id": id0})),
         ("waymark_list_work_items", common::no_args()),
         ("waymark_search_work_items", json!({"text": "one"})),
         ("waymark_get_tree", common::no_args()),
-        ("waymark_get_dependency_tree", json!({"id": id})),
+        ("waymark_get_dependency_tree", json!({"id": id0})),
         ("waymark_get_ready_items", common::no_args()),
         ("waymark_get_blocked_items", common::no_args()),
         ("waymark_get_stats", common::no_args()),
+        (
+            "waymark_config_set",
+            json!({"name": "operator", "value": "frank"}),
+        ),
+        (
+            "waymark_config_add_category",
+            json!({"key": "bug", "path": "work/bugs", "name": "Bugs"}),
+        ),
+        (
+            "waymark_config_add_category",
+            json!({"key": "chore", "path": "work/chore"}),
+        ),
+        (
+            "waymark_config_update_category",
+            json!({"key": "chore", "name": "Chores"}),
+        ),
+        ("waymark_config_remove_category", json!({"key": "chore"})),
+        (
+            "waymark_config_add_field",
+            json!({"key": "note", "type": "string"}),
+        ),
+        (
+            "waymark_config_add_field",
+            json!({"key": "points", "type": "integer"}),
+        ),
+        (
+            "waymark_config_update_field",
+            json!({"key": "points", "attribute": "default", "value": "0"}),
+        ),
+        (
+            "waymark_migrate_version",
+            json!({"target_generation": waymark_core::model::FORMAT_GENERATION}),
+        ),
+        (
+            "waymark_migrate_schema",
+            json!({"action": {"kind": "remove_field", "key": "note"}}),
+        ),
+        (
+            "waymark_migrate_storage",
+            json!({"action": {"kind": "category_path", "key": "bug", "path": "work/bugs2"}}),
+        ),
+        ("waymark_git_history", common::no_args()),
+        ("waymark_git_diff", common::no_args()),
+        (
+            "waymark_create_work_item",
+            json!({"title": "three", "category": "task", "owner": "frank", "body": "b"}),
+        ),
+        (
+            "waymark_set_title",
+            json!({"id": id0, "title": "one renamed"}),
+        ),
+        (
+            "waymark_replace_body",
+            json!({"id": id0, "body": "the body"}),
+        ),
+        (
+            "waymark_update_custom_fields",
+            json!({"id": id0, "custom_fields": {"set": {"points": 5}}}),
+        ),
+        (
+            "waymark_set_status",
+            json!({"id": id0, "status": "in_progress"}),
+        ),
+        (
+            "waymark_transfer_owner",
+            json!({"id": id0, "owner": "carol"}),
+        ),
+        (
+            "waymark_move_work_item",
+            json!({"id": id0, "category": "bug"}),
+        ),
+        ("waymark_set_parent", json!({"id": id1, "parent": id0})),
+        ("waymark_clear_parent", json!({"id": id1})),
+        (
+            "waymark_add_dependency",
+            json!({"id": id1, "blocking": id0}),
+        ),
+        (
+            "waymark_remove_dependency",
+            json!({"id": id1, "blocking": id0}),
+        ),
+        ("waymark_add_soft_link", json!({"id": id0, "other": id1})),
+        ("waymark_remove_soft_link", json!({"id": id0, "other": id1})),
+        ("waymark_archive_work_item", json!({"id": id1})),
     ];
 
     for (tool, arguments) in calls {
