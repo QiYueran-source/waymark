@@ -538,6 +538,11 @@ fn every_configuration_defect_is_a_located_config_invalid_finding() {
             "categories.Task",
         ),
         (
+            "field key grammar",
+            format!("{canonical}\n[fields.\"Effort!\"]\ntype = \"string\"\nrequired = false\n"),
+            "fields.Effort!",
+        ),
+        (
             "absolute path",
             canonical.replace("path = \"work/task\"", "path = \"/tmp/task\""),
             "categories.task.path",
