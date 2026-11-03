@@ -11,6 +11,7 @@
 //! - [`store`], [`lock`], [`write`] — the file store: project discovery, path
 //!   mapping, the store-wide write lock, and atomic replacement.
 //! - [`config`] — the project configuration document and its validation.
+//! - [`projection`] — the disposable, fingerprinted in-memory view of the files.
 //! - [`ops`] — one module per capability family, each taking explicit options.
 //! - [`error`], [`location`], [`envelope`] — the machine contract.
 //! - [`testing`] — fixtures and deterministic clock/ID seams, public so every
@@ -26,6 +27,7 @@ pub mod lock;
 pub mod model;
 pub mod ops;
 pub mod parse;
+pub mod projection;
 pub mod query;
 pub mod readiness;
 pub mod search;
