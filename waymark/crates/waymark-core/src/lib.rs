@@ -19,6 +19,7 @@
 pub mod config;
 pub mod envelope;
 pub mod error;
+pub mod git;
 pub mod id;
 pub mod location;
 pub mod lock;
@@ -37,6 +38,7 @@ pub mod write;
 
 pub use config::Config;
 pub use error::{Code, ExitClass, Severity, ValidationIssue, WaymarkError};
+pub use git::{DiffReport, DiffRequest, GitProbe, HistoryReport, HistoryRequest, Repository};
 pub use id::WorkItemId;
 pub use location::{Location, LocationKind};
 pub use model::{CategoryKey, CustomFields, FieldValue, Status, WorkItem};

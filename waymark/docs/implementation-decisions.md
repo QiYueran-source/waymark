@@ -883,3 +883,94 @@ not in the set. `--compact` is the identity subset. An unset optional value and 
 shared schema file, and it makes a typo an error instead of a silently empty column. Keeping `id` is what
 makes a projected row still addressable; keeping `status` is what makes a row renderable as a row.
 Omitting unset values matches the canonical document rule "unset optional values are omitted".
+
+## Git history and diff (T11)
+
+### The repository is the only history; nothing is written
+
+**Choice:** `waymark_core::git::{history, diff}` shell out to the `git` binary with
+`std::process::Command`; no Git crate is added, no file is written, no lock is taken, and nothing is
+recorded under `.waymark/`. There is no audit log, no attribution table, and no second history store.
+
+**Why:** the spec is explicit that Git history and diff are the durable audit trail and that no separate
+application audit log or authenticated attribution exists. Shelling out also makes Waymark see exactly
+what the user's Git sees (their aliases for objects, their repository config, their worktrees) instead of
+reimplementing plumbing through a binding that could disagree.
+
+### Absence is a finding, not a failure
+
+**Choice:** `GitProbe::detect` walks up to a `.git` directory **or** file (a linked worktree's
+`gitdir:` pointer is read and resolved) and searches `PATH` for `git`. When either is missing, both
+operations return `Ok` with an empty payload and one `NOT_A_GIT_REPOSITORY` finding at severity `info`,
+`fixable: false`, on `_meta.diagnostics`. Bad input (an unknown item, a `..` path filter) is still an
+error.
+
+**Why:** the registry already declares `NOT_A_GIT_REPOSITORY` with no exit class and finding severity
+`info`. A tracker that refuses to list history because a checkout is not a repository would break the
+"migration is permitted outside a Git repository" rule for the same reason; and a brand-new repository
+with no commits is likewise an empty success, not an error.
+
+### Scope, pathspecs, and rename following
+
+**Choice:** `history` has three scopes: one item's document (`--item`), one explicit project-relative
+path (`--path`), or the configured `storage_root`. `diff` has two: one item, or the storage root. Every
+pathspec is rewritten against the repository root, so a project that is a subdirectory of its repository
+is still scoped correctly. `--item` and `--path` are mutually exclusive. A `--path` is rejected if it is
+absolute or contains `..`.
+
+**Why:** the spec says "commit history for work items", and the storage root is the useful default when
+the caller does not name one. Pathspec rewriting is what makes the "project lives in a subdirectory"
+case — which discovery already supports — behave the same as the common case. Rejecting `..` keeps a
+read command from being talked into describing files the project does not own.
+
+**Rename following:** `git log --follow` is used only in the item scope, because Git accepts `--follow`
+only with a single path; the storage-root and path scopes are plain `git log`. The report says which
+scope produced it, so a caller is never misled about whether a rename was followed.
+
+### Working-tree diffs cover staged and unstaged, and a new item is still a diff
+
+**Choice:** `diff` without `--commit` runs `git diff HEAD -- <pathspec>` (staged plus unstaged). If an
+item's document is untracked, it is diffed against `/dev/null` so a just-created item still shows a
+whole-file diff; the storage-root scope deliberately reports tracked changes only, exactly as
+`git diff HEAD -- <storage_root>` does. `--commit` runs `git show --format= --patch <commit> --
+<pathspec>`, so the payload is the patch alone and a merge commit shows what Git shows (usually nothing).
+
+**Why:** "the working-tree diff" in the ticket is ambiguous between `git diff` and `git diff HEAD`;
+`HEAD` is the only baseline that includes staged changes, and missing them would make the command lie
+about what a commit will contain. The untracked exception is the one place a naive `git diff HEAD` would
+return "no changes" for work that plainly exists.
+
+### A commit must not be an option
+
+**Choice:** `--commit` is validated as a revision that is non-empty, does not start with `-`, and
+contains no whitespace; anything else is `VALIDATION_ERROR`. Revisions are otherwise passed to Git
+verbatim (`HEAD~2`, a branch, a full or abbreviated SHA).
+
+**Why:** `Command` does not use a shell, so this cannot inject a command, but a value starting with `-`
+would still be parsed by Git as an option and change which command runs.
+
+### `data` is a stable payload, `_meta` is the contract
+
+**Choice:** `HistoryReport::data_json` emits `scope`, `item`, `path`, `paths`, `limit`,
+`repository_root`, and `commits` (each with `id`, `short_id`, `author`, `email`, `committed_at`,
+`summary`). `DiffReport::data_json` emits `scope`, `item`, `baseline`, `commit`, `paths`, `empty`,
+`patch`, `repository_root`. `_meta.completeness` is `scoped` for an item scope and `complete` for the
+storage root. Timestamps use `Timestamp`, the same canonical RFC 3339 rendering as documents.
+
+**Why:** both adapters (and a future MCP tool) need the same payload without a second schema, and reusing
+`Timestamp` keeps one timestamp format in the project. Reporting `paths` and `repository_root` lets a
+caller reproduce the query by hand with `git`.
+
+### Generated agent documentation is derived from the `clap` tree
+
+**Choice:** `waymark agent-doc` takes the CLI's own `clap::Command` (via `Cli::command()`) and walks it:
+command paths, `about` strings, and each argument's flags, value name, requiredness, default, possible
+values, and help. `--json` emits the same tree as an envelope; `--command PATH` narrows it to one
+subtree. It contains no hand-written prose about behaviour, and `clap`'s synthesized `help` and
+`version` arguments are filtered out.
+
+**Why:** the ticket requires documentation that "describes only capabilities that exist and adds no
+semantics of its own". Deriving it from the parser is the only construction where a later ticket cannot
+forget to update it, and where documentation cannot drift from what the binary accepts. A boolean
+switch is rendered without a value placeholder because `clap` otherwise reports `true`/`false` as
+possible values, which is parser plumbing rather than a capability.
