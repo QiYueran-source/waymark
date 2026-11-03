@@ -40,6 +40,7 @@ Produce a handoff-ready functional specification for Waymark, a general-purpose,
 - [Define creation defaults and required inputs](waym-B6TW9KPD): `create` requires title, category, and owner with no derivation; `creator` is optional immutable provenance that may stay unset; a missing required custom field fails the whole create; initial relations turn a scoped create into a complete-projection create.
 - [Define the configuration command surface and its migration boundary](waym-K4QMRT7A): Configuration never reads or rewrites work-item files, and anything that must is a migration; `config` and `migrate` keep separate verbs over shared `category`/`field` nouns; category path and key changes relocate directories rather than editing files, with pure relocations leaving contents, fingerprints and `updated_at` untouched.
 - [Define concurrency and lock lifecycle](waym-J3VX6HQS): One store-wide advisory lock on `.waymark/write.lock` releases through the kernel (no stale reclamation), is acquired once per mediated write and never reentrant, covers configuration and migration too, leaves reads lock-free, and waits a bounded 10 seconds by default before a retryable timeout.
+- [Freeze the error taxonomy and exit-code mapping](waym-M9WL5DZB): One shared registry pins every code's exit class, retryability, typed details and location kinds, and doubles as the diagnostic vocabulary; codes are coarse recovery units rather than error variants, class 4 is narrowed to conflict and state rejection, warnings never change the exit code, and compile-time exhaustiveness plus a golden snapshot make adding a code deliberate.
 - Stable IDs are independent of category, name, and path; storage root and category paths are configurable. Configuration includes a project time zone for human-readable time output and parsing local time inputs without offsets; persisted timestamps remain UTC RFC 3339, offset-bearing inputs retain their instant, and changing the time zone never rewrites work-item files. Ordinary operations cannot accept caller-forged system timestamps; a future explicit historical migration/import path may convert legacy times.
 - Categories are project-defined groupings, without category-specific field schemas in the initial model.
 - Parent is a single cross-category hierarchy edge; parent and hard dependencies are independent, and only dependencies block readiness. Parent lifecycle does not cascade to children.
@@ -175,9 +176,27 @@ Produce a handoff-ready functional specification for Waymark, a general-purpose,
 - In JSON mode the failure envelope `{v, ok: false, error}` is written to stdout, so a parser always receives valid JSON; stderr stays human narrative.
 - The registry is pinned four ways: a wildcard-free compile-time match forces every error variant to declare a code; a registry-consistency test keeps the code table and that match in step; a JSON-schema enum round-trip keeps the documented schema honest; and a golden snapshot records each code's exit class, retryability, details keys, and location kinds. Adding, removing, or re-classifying a code therefore requires updating the snapshot and the documented table in the same change.
 
+### Resolved error registry
+
+Class 2, not found: `ITEM_NOT_FOUND {id, relation?}` and `CATEGORY_NOT_FOUND {key}`. Neither is a finding.
+
+Class 3, invalid input or data: `VALIDATION_ERROR {target, issues:[{path, reason}]}` (finding), `INVALID_ID {value, reason}`, `PARSE_ERROR {path, reason}` (finding), `CONFIG_INVALID {path, issues[]}` (finding), `DUPLICATE_ID {id, paths[]}` (finding), `ID_PATH_MISMATCH {id, path, stem}` (finding), `CYCLE_DETECTED {kind: dependency or parent, cycle[]}` (finding), `INVALID_RELATIONSHIP {relation, from, to, reason}`, and `INCOMPLETE_PROJECTION {completeness, freshness, diagnostics[]}` (finding).
+
+Class 4, conflict or state rejection: `WRITE_CONFLICT {id, path, expected_fingerprint, actual_fingerprint}`, `ITEM_ARCHIVED {id, operation}`, `ALREADY_ARCHIVED {id}`, and `HAS_ACTIVE_CHILDREN {id, children[]}`. None is a finding.
+
+Class 5, filesystem, Git, or environment: `PROJECT_NOT_FOUND {searched}`, `IO_ERROR {path, operation}` (finding), `GIT_ERROR {operation, reason}`, `LOCK_TIMEOUT {lock_path, waited_ms}` (retryable), `LOCK_FAILED {lock_path, reason}`, and `SNAPSHOT_UNSTABLE {retries}` (retryable).
+
+Class 6, version or migration: `UNSUPPORTED_VERSION {found, supported}` (finding), `ITEM_NEEDS_MIGRATION {id, item_generation, project_generation}` (finding), `ACTION_REQUIRES_MIGRATION {action, required_command}`, `MIGRATION_PATH_CONFLICT {target, conflict}`, `MIGRATION_UNSUPPORTED_GENERATION {requested, supported}`, `MIGRATION_PRECONDITION_FAILED {diagnostics[]}`, and `MIGRATION_FAILED {per_target:[{path, outcome, error?}]}`.
+
+Class 7, internal: `ROLLBACK_FAILED {applied[], failed[], rollback_failed[]}`, `ID_GENERATION_FAILED {attempts}`, and `INTERNAL_ERROR {}`.
+
+Codes with no exit class, used as warnings and findings: `OWNER_MISMATCH` (warning, `{item, operator, owner}`), `LOCK_HELD` (info, `{lock_path}`), `MIGRATION_AVAILABLE` (info, `{items[]}`), `NOT_A_GIT_REPOSITORY` (info, `{}`), `DANGLING_REFERENCE` (error-severity finding, `{from, relation, missing[]}`), and `TIMESTAMP_INCOHERENT` (warning finding, `{id, field, value, reason}`).
+
+`LOCK_TIMEOUT` and `SNAPSHOT_UNSTABLE` are the only retryable codes; every other code is terminal. `USAGE_ERROR` at exit 1 is an adapter-level failure and is deliberately absent from the registry.
+
 ## Not yet specified
 
-The fog now holds the in-progress error-taxonomy ticket and the terminal ticket: [Freeze the error taxonomy and exit-code mapping](waym-M9WL5DZB) is the last decision ticket, and [Define the replacement specification's shape](waym-Q2CT8YGX) waits on it. The configuration-surface, creation-defaults, query-surface, lock-mechanics and concurrency-failure questions are closed; their answers are indexed under Decisions so far, with the lock lifecycle under "Resolved write-lock lifecycle" and the taxonomy structure under "Resolved error taxonomy structure".
+Only the terminal ticket remains: [Define the replacement specification's shape](waym-Q2CT8YGX) now waits on no decision ticket. Every earlier decision question is closed and indexed under Decisions so far, with the lock lifecycle under "Resolved write-lock lifecycle" and the taxonomy under "Resolved error taxonomy structure" and "Resolved error registry".
 
 What remains here is detail too fine to spend a decision ticket on, and which the replacement specification can settle directly:
 

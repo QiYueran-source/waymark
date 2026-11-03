@@ -2,11 +2,12 @@
 schema: 1
 id: waym-M9WL5DZB
 title: Freeze the error taxonomy and exit-code mapping
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-11-03T03:25:00.000Z
-updated: 2026-11-03T04:22:14.348Z
+updated: 2026-11-03T04:27:50.254Z
+closed: 2026-11-03T04:27:50.254Z
 assignee: DeepSeek Agent
 parent: waym-VS5Z5543
 labels: [wayfinder:grilling]
