@@ -50,6 +50,10 @@ pub const TOOLS: &[&str] = &[
     "waymark_config_remove_category",
     "waymark_config_add_field",
     "waymark_config_update_field",
+    // Phase B: migration.
+    "waymark_migrate_version",
+    "waymark_migrate_schema",
+    "waymark_migrate_storage",
 ];
 
 /// The phase-A slice of [`TOOLS`], kept as the decisions record's reference.

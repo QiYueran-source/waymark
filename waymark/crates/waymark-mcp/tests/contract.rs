@@ -253,3 +253,68 @@ async fn no_advertised_tool_accepts_a_batch_array() {
     }
     client.shutdown().await;
 }
+
+#[tokio::test]
+async fn write_schemas_are_single_target_and_migration_actions_are_tagged_unions() {
+    let fixture = common::fixture(&["one"]);
+    let client = common::Client::connect(fixture.root.clone()).await;
+    let tools = client.tools().await;
+
+    let tool = |name: &str| {
+        tools
+            .iter()
+            .find(|tool| tool.name == name)
+            .unwrap_or_else(|| panic!("{name} is advertised"))
+    };
+
+    // Every write tool is a single object with no `items`-style array. The
+    // catalog-wide batch check covers the shared helper; this pins the shape of
+    // the write family specifically.
+    for name in waymark_mcp::TOOLS.iter().filter(|name| {
+        name.starts_with("waymark_create")
+            || name.starts_with("waymark_set_")
+            || name.starts_with("waymark_replace_")
+            || name.starts_with("waymark_update_")
+            || name.starts_with("waymark_transfer_")
+            || name.starts_with("waymark_move_")
+            || name.starts_with("waymark_clear_")
+            || name.starts_with("waymark_add_")
+            || name.starts_with("waymark_remove_")
+            || name.starts_with("waymark_archive_")
+            || name.starts_with("waymark_config_set")
+            || name.starts_with("waymark_config_add_")
+            || name.starts_with("waymark_config_update_")
+            || name.starts_with("waymark_config_remove_")
+            || name.starts_with("waymark_migrate_")
+    }) {
+        let schema = tool_schema(tool(name));
+        assert_eq!(schema["type"], "object", "{name}");
+        assert!(
+            schema["properties"].get("items").is_none(),
+            "{name} must not take an items array"
+        );
+        assert!(
+            waymark_mcp::invariants::batch_parameters(&schema).is_empty(),
+            "{name} must be single-target: {schema}"
+        );
+    }
+
+    // A migration action is a tagged union: one action per call, enforced by
+    // the schema rather than by handler-side flag reconciliation.
+    for name in ["waymark_migrate_schema", "waymark_migrate_storage"] {
+        let schema = tool_schema(tool(name));
+        assert_eq!(schema["type"], "object", "{name}");
+        let action = &schema["properties"]["action"];
+        assert!(
+            action["oneOf"].is_array(),
+            "{name} action must be a oneOf union: {action}"
+        );
+        assert_eq!(
+            schema["required"],
+            json!(["action"]),
+            "{name} requires one action"
+        );
+    }
+
+    client.shutdown().await;
+}

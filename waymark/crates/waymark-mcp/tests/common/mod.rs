@@ -7,7 +7,9 @@
 
 #![allow(dead_code)]
 
-use camino::Utf8PathBuf;
+use std::collections::BTreeMap;
+
+use camino::{Utf8Path, Utf8PathBuf};
 use rmcp::model::{CallToolRequestParam, CallToolResult, Tool};
 use rmcp::service::RunningService;
 use rmcp::{RoleClient, ServiceExt};
@@ -190,4 +192,49 @@ pub fn empty_dir() -> (TempDir, Utf8PathBuf) {
 /// The empty argument object.
 pub fn no_args() -> Value {
     json!({})
+}
+
+/// Every regular file under `root`, keyed by repository-relative path, with the
+/// exact bytes on disk. Used to prove a dry run wrote nothing.
+pub fn snapshot(root: &Utf8Path) -> BTreeMap<String, Vec<u8>> {
+    let mut files = BTreeMap::new();
+    collect_files(root, root, &mut files);
+    files
+}
+
+fn collect_files(root: &Utf8Path, directory: &Utf8Path, files: &mut BTreeMap<String, Vec<u8>>) {
+    for entry in std::fs::read_dir(directory).expect("a readable directory") {
+        let entry = entry.expect("a readable directory entry");
+        let path = Utf8PathBuf::from_path_buf(entry.path()).expect("a UTF-8 path");
+        if path.is_dir() {
+            collect_files(root, &path, files);
+        } else if path.is_file() {
+            let relative = path
+                .strip_prefix(root)
+                .expect("the file is under the root")
+                .to_string();
+            files.insert(relative, std::fs::read(&path).expect("a readable file"));
+        }
+    }
+}
+
+/// Read one document as text.
+pub fn read(path: &Utf8Path) -> String {
+    std::fs::read_to_string(path).expect("the document is readable")
+}
+
+/// Warm the write lock so a later snapshot does not see the lock file appear.
+///
+/// Every mediated write takes the one project lock; the lock file is the
+/// mutual-exclusion artifact, not business data. Taking it once before a
+/// write-nothing assertion keeps the comparison strictly byte-for-byte.
+pub fn warm_lock(root: &Utf8Path) -> waymark_core::Project {
+    let project = waymark_core::Project::discover(root).expect("the project opens");
+    waymark_core::lock::with_project_lock(
+        &project,
+        waymark_core::lock::LockWait::immediate(),
+        || Ok::<(), waymark_core::error::WaymarkError>(()),
+    )
+    .expect("the lock is acquirable");
+    project
 }
