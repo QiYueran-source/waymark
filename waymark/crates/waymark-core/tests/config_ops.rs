@@ -159,7 +159,10 @@ fn a_stale_expected_fingerprint_is_a_write_conflict_instead_of_a_rebase() {
         error.details()["actual_fingerprint"],
         serde_json::json!(edited_fingerprint.as_str())
     );
-    assert_eq!(error.details()["path"], serde_json::json!(project.config_path()));
+    assert_eq!(
+        error.details()["path"],
+        serde_json::json!(project.config_path())
+    );
     assert_eq!(read_config(&project), edited, "the conflict writes nothing");
 
     // The current fingerprint is accepted: the option guards a concurrent edit,
@@ -228,7 +231,11 @@ fn a_failed_configuration_write_rolls_back_the_category_directory() {
         !project.root().join("work/bugs").exists(),
         "the directory created before the failed replacement is rolled back"
     );
-    assert_eq!(read_config(&project), config_before, "the config is untouched");
+    assert_eq!(
+        read_config(&project),
+        config_before,
+        "the config is untouched"
+    );
 }
 
 #[test]

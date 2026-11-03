@@ -686,11 +686,7 @@ fn mediate_with(
 /// The details mirror the work-item conflict shape: the path and the two
 /// fingerprints. A configuration document has no stable item ID, so there is no
 /// `id` key.
-fn config_conflict(
-    path: &Utf8Path,
-    expected: &Fingerprint,
-    actual: &Fingerprint,
-) -> WaymarkError {
+fn config_conflict(path: &Utf8Path, expected: &Fingerprint, actual: &Fingerprint) -> WaymarkError {
     WaymarkError::new(
         Code::WriteConflict,
         format!("{path} changed on disk since it was read; reread and retry"),
