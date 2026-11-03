@@ -342,7 +342,8 @@ fn validate_reports_the_configuration_scope_and_exits_three_on_errors() {
         .arg("--json")
         .arg("validate")
         .arg("--project")
-        .arg(&root));
+        .arg(&root)
+        .arg("--strict"));
     assert_eq!(dirty.status(), 3, "stderr: {}", dirty.stderr());
 }
 
