@@ -31,7 +31,8 @@ pub struct WaymarkServer {
 impl WaymarkServer {
     /// A server that resolves its project from `start`.
     pub fn new(start: Utf8PathBuf) -> Self {
-        let tool_router = Self::project_router();
+        let mut tool_router = Self::project_router();
+        tool_router.merge(Self::config_router());
         Self { start, tool_router }
     }
 
