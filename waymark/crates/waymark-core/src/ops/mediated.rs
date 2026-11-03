@@ -57,6 +57,9 @@ pub fn load_for_write(
 }
 
 /// Read an already-located item for a mediated write.
+///
+/// An archived item is `ITEM_ARCHIVED` naming `operation`; a document whose
+/// generation is older than this release's is `ITEM_NEEDS_MIGRATION`.
 pub fn load_entry(
     project: &Project,
     entry: InventoryEntry,
@@ -66,7 +69,24 @@ pub fn load_entry(
     if loaded.item.is_archived() {
         return Err(WaymarkError::item_archived(&loaded.item.id, operation));
     }
+    require_current_generation(project, &loaded.item)?;
     Ok(loaded)
+}
+
+/// Refuse an item whose format generation predates what this release writes.
+///
+/// Ordinary writes never upgrade an older-generation file, so every mediated
+/// write (including archive) refuses one until an explicit version migration
+/// rewrites it. The error names the item's generation and the project's.
+pub fn require_current_generation(project: &Project, item: &WorkItem) -> Result<(), WaymarkError> {
+    if !item.needs_migration() {
+        return Ok(());
+    }
+    Err(WaymarkError::item_needs_migration(
+        &item.id,
+        item.schema,
+        project.config().version.generation,
+    ))
 }
 
 /// Read an already-located item **without** the archived rejection.

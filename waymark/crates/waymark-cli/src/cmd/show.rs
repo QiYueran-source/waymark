@@ -34,6 +34,7 @@ pub fn run(project: &Project, args: &ShowArgs, json: bool) -> Result<(), Waymark
                 "category": read.category.as_str(),
                 "fingerprint": read.fingerprint.as_str(),
                 "item": item_json(&read.item, &read.path),
+                "needs_migration": read.item.needs_migration(),
                 "archived": read.item.is_archived(),
                 "relationships": {
                     // An archived item's own edges are history: they no longer
@@ -70,6 +71,13 @@ pub fn run(project: &Project, args: &ShowArgs, json: bool) -> Result<(), Waymark
         err_line(&format!("  category    {}", read.item.category));
         err_line(&format!("  status      {}", read.item.status.as_str()));
         err_line(&format!("  owner       {}", read.item.owner));
+        if read.item.needs_migration() {
+            err_line(&format!(
+                "  migration   needed (generation {}; this release writes {})",
+                read.item.schema,
+                waymark_core::model::FORMAT_GENERATION
+            ));
+        }
         if let Some(creator) = &read.item.creator {
             err_line(&format!("  creator     {creator}"));
         }
