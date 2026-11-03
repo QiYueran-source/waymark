@@ -218,6 +218,10 @@ pub(crate) fn router(state: AppState) -> Router {
     Router::new()
         .route("/", get(assets::index))
         .route("/assets/{*path}", get(assets::asset))
+        // SvelteKit emits its hashed build output under `/_app/...`; serve that
+        // prefix from `<assets>/_app/...` so the frontend can keep SvelteKit's
+        // default paths.
+        .route("/_app/{*path}", get(assets::app_asset))
         .route("/api/health", get(api::health))
         .route("/api/tree", get(api::tree))
         .route("/api/item/{id}", get(api::item))

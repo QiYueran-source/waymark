@@ -79,6 +79,13 @@ async fn health_reports_a_read_only_service() {
     assert_eq!(body["data"]["status"], "ok");
     assert_eq!(body["data"]["service"], "waymark-web");
     assert_eq!(body["data"]["read_only"], true);
+    // `project.root` is the normalized absolute root the browser keys its local
+    // preferences by; no second endpoint, and nothing is written to the project.
+    let root = body["data"]["project"]["root"]
+        .as_str()
+        .expect("project.root is a string");
+    let canonical = std::fs::canonicalize(fixture.root()).expect("the fixture root canonicalizes");
+    assert_eq!(root, canonical.to_str().expect("a UTF-8 fixture root"));
     running.shutdown().await.unwrap();
 }
 
@@ -323,6 +330,16 @@ async fn assets_are_served_from_the_configured_directory() {
         .unwrap()
         .starts_with("text/javascript"));
     assert_eq!(script.text(), "console.log('waymark');");
+
+    // SvelteKit's generated shell references `/_app/...` directly; that prefix
+    // maps to `<assets>/_app/...` rather than to `<assets>/...`.
+    let direct = get(running.addr(), "/_app/app.js");
+    assert_eq!(direct.status, 200);
+    assert!(direct
+        .header("content-type")
+        .unwrap()
+        .starts_with("text/javascript"));
+    assert_eq!(direct.text(), "console.log('waymark');");
 
     running.shutdown().await.unwrap();
 }

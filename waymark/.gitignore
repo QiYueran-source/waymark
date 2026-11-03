@@ -1,1 +1,4 @@
 /target
+crates/waymark-web/ui/node_modules/
+crates/waymark-web/ui/build/
+crates/waymark-web/ui/.svelte-kit/
