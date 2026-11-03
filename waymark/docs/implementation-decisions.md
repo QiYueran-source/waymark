@@ -198,3 +198,124 @@ says which target it belongs to (`VALIDATION_ERROR.details.target`, or the work 
 the target is an item). Adding a second target/path pair would duplicate that and leave two places
 naming the same subject, which is exactly the drift the registry is meant to prevent. Changing this
 later is a wire break and needs its own ticket.
+
+## Lifecycle and readiness (T5)
+
+### `status set` is the only way a status changes
+
+**Choice:** `ops::status::set_status(project, id, status, options)` takes a [`Status`], and
+`parse_status(&str)` is the single place a literal becomes one. It accepts `open`, `in_progress`, and
+`closed`, plus the two spellings `in progress` and `in-progress` that `Status::from_cli` already
+documents, case-insensitively. `blocked`, `ready`, and every other status-shaped word are
+`VALIDATION_ERROR` on target `status`. `start`, `close`, and `reopen` call the same function with the
+argument filled in; they are not separate operations.
+
+**Why:** `Status` has exactly three variants, so "writable blocked" is unrepresentable at the seam
+rather than merely rejected. Routing the conveniences through the same function means they cannot
+drift from `status set` — a bug there would have to be two bugs to stay hidden. Rejecting unknown
+literals with a locatable validation issue, rather than falling back to `open`, keeps a typo from
+silently reopening work.
+
+### A repeated status is not a write, and a real change stamps `closed_at` from the operation clock
+
+**Choice:** setting the current status returns `changed: false, written: false` and touches neither
+`updated_at` nor the file. A real change sets `updated_at` **and** `closed_at` to the same instant when
+entering `closed`, and clears `closed_at` when leaving it. Moving between `open` and `in_progress`
+leaves `closed_at` absent.
+
+**Why:** the spec says a repeat changes nothing, and "nothing" has to include the mtime or every
+idempotent retry becomes a merge conflict. Using one instant for both fields means `closed_at` and
+`updated_at` agree on the transition that created them, instead of differing by a clock read.
+
+### `blocked_by` includes missing targets, and a closed item is never blocked
+
+**Choice:** `Readiness { ready, blocked, blocked_by }`. An item is blocked when it is **not closed**
+and at least one dependency target is not closed **or does not exist**. A missing target appears in
+`blocked_by` like any other. A closed item reports `ready: false, blocked: false, blocked_by: []` even
+if its dependencies are unfinished, and it never blocks anything downstream.
+
+**Why:** a dangling target is a worse obstacle than an open one — no transition clears it — so
+excluding it from `blocked_by` would make `ready` claim work can start when it cannot, which is exactly
+the silent hiding the acceptance criteria forbid. And the spec is explicit that closed work is not
+waiting on anything: "closed" is the answer, not "blocked by a dependency nobody will ever finish".
+
+### Readiness lives in `readiness::Graph`, built from `&[WorkItem]`
+
+**Choice:** `Graph::from_items(&[WorkItem])` and `Graph::from_project(&Project)` expose `children`,
+`dependents`, `blocked_by`, `readiness`, `is_ready`, `is_blocked`, `path`, `edges`, and
+`diagnostics`. `Readiness` is a plain value. Nothing is cached, written, or derived at parse time.
+
+**Why:** T8's queries, T9's projection, and T10's dependency overlay all need the same computation;
+putting it behind one type with one traversal means they cannot disagree, and `from_items` lets those
+tickets build a graph from a projection they already have instead of rescanning. Doing it without
+`petgraph` keeps the dependency list frozen and the traversal auditable — the iterative cycle walk also
+means a hand-edited thousand-item chain diagnoses instead of overflowing the stack.
+
+### Archived items are not graph nodes
+
+**Choice:** `Graph` holds only active items. An archived item is remembered (so a reference to one is
+not called a typo) but has no edges and no readiness. A dependency on an archived item therefore reads
+as an obstruction and keeps the dependent blocked.
+
+**Why:** the spec says archive removes recognized inbound relationships from active files — that is
+T7's cleanup, and until it runs, an edge pointing at an archived item must not quietly count as
+satisfied. Treating it as missing would be wrong too: the ID is not a typo, it is an archived
+document, and `dependency add` says so with `ITEM_ARCHIVED`.
+
+### `dependency` rejects, it never silently no-ops
+
+**Choice:** `add_dependency` returns `INVALID_RELATIONSHIP` for a self-reference, an edge that already
+exists, and any relation name other than `dependencies`; `CYCLE_DETECTED {kind: "dependency", cycle}`
+with a closed path starting and ending at the source for a cycle; `ITEM_ARCHIVED` for an archived
+target; `ITEM_NOT_FOUND` (with `relation: "dependencies"`) for a target that does not exist.
+`remove_dependency` rejects an edge that is not there but **allows** removing an edge whose target is
+missing, which is how a dangling pointer is cleaned up.
+
+**Why:** a caller that asked to add an edge should learn it was already there — a silent success makes
+"did my change apply" unanswerable. Removal is asymmetric on purpose: a dangling edge cannot be
+resolved any other way, so refusing to delete it would leave the project repairable only by hand.
+
+### `add_relationship` takes the relation name even though only one exists
+
+**Choice:** the public entry point is `add_relationship(project, id, relation, other, options)`, with
+`add_dependency` as a thin wrapper passing `"dependencies"`.
+
+**Why:** `INVALID_RELATIONSHIP` needs a `relation` in its details, and a caller asking for `parent` or
+`soft_links` here must be told the *kind* is wrong rather than silently receiving a dependency. When
+T6 adds those operations they get their own validated functions, not a widened string match.
+
+### `list`, `ready`, and `blocked` share `Filters` and report `complete`
+
+**Choice:** `ops::list::{Filters, Listing, ListedItem, list, ready, blocked}`. `Filters` starts with
+`status` and `category`; T8 adds fields to the same struct. Every read scans the whole project and
+returns `_meta` with `source: memory_projection`, `completeness: complete`, and the graph's
+diagnostics. `list` includes closed items and excludes archived ones; `ready` and `blocked` exclude
+closed items, and a closed item is never in either.
+
+**Why:** the spec says the three commands share one filter set, one sort vocabulary, and one
+pagination model, so one struct is the shape that keeps them from diverging. `complete` is honest:
+these are whole-project answers, unlike `show`, which reads one file and stays `scoped` even though it
+adds derived columns from a project scan.
+
+### `show` keeps `scoped` and adds derived columns
+
+**Choice:** `show` still reads one document and reports `source: direct_file, completeness: scoped`. It
+additionally emits `ready`, `blocked`, `blocked_by`, `relationships.children`, and
+`relationships.dependents` from a whole-project graph. If that scan fails (an unparseable sibling, a
+duplicate ID), `show` still succeeds: the derived fields are null and the scan failure becomes an
+`INCOMPLETE_PROJECTION` diagnostic in `_meta`.
+
+**Why:** the spec lists "derived readiness" as part of `show`'s result, but also says a failed global
+operation must fail explicitly rather than return a partial graph. A direct-file read is not a global
+operation, so the honest answer is the document plus "readiness unknown, and here is why" — refusing to
+show an item because a different file is broken would make a corrupt sibling block all reading.
+
+### `_meta.completeness` on a write result is `scoped`
+
+**Choice:** status and dependency results carry `Meta::direct_file_scoped()`, i.e. `scoped`, even
+though deciding a dependency edge scans the project.
+
+**Why:** the result is one rewritten document. Reporting `complete` would claim a projection the
+caller can reuse for paging, which a single document write does not produce; the scan is an
+implementation detail of validation, not an artifact handed back. T9 owns the projection cache and can
+revisit the wording if it starts handing one out.

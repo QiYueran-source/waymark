@@ -14,7 +14,11 @@
 //! decide what is allowed.
 
 pub mod create;
+pub mod list;
+pub mod mediated;
 pub mod read;
+pub mod relationship;
+pub mod status;
 
 use std::sync::Arc;
 use std::time::Duration;

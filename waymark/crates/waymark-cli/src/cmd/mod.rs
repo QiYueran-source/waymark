@@ -6,7 +6,10 @@
 
 pub mod create;
 pub mod init;
+pub mod list;
+pub mod relationship;
 pub mod show;
+pub mod status;
 
 use std::io::Write;
 
@@ -115,6 +118,18 @@ pub fn lock_wait(milliseconds: Option<u64>) -> LockWait {
 
 /// The machine form of one item: the persisted fields, no prose.
 pub fn item_json(item: &WorkItem, path: &camino::Utf8Path) -> Value {
+    let mut value = item_fields(item);
+    if let Some(map) = value.as_object_mut() {
+        map.insert("path".to_owned(), serde_json::json!(path.to_string()));
+    }
+    value
+}
+
+/// The persisted fields of one item, without the file it happens to live in.
+///
+/// `show` names the document; a page of many items does not, because the path is
+/// a fact about one file and a listing is not about files.
+pub fn item_fields(item: &WorkItem) -> Value {
     serde_json::json!({
         "schema": item.schema,
         "id": item.id.as_str(),
@@ -133,7 +148,6 @@ pub fn item_json(item: &WorkItem, path: &camino::Utf8Path) -> Value {
         "archived_at": item.archived_at.map(|value| value.to_string()),
         "archive_reason": item.archive_reason,
         "body": item.body,
-        "path": path.to_string(),
     })
 }
 
