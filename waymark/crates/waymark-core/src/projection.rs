@@ -20,7 +20,12 @@
 //! second walk disagrees, the snapshot was torn by a concurrent writer; the
 //! build retries a bounded number of times, then fails with retryable
 //! `SNAPSHOT_UNSTABLE`. A verified build is [`Completeness::Complete`] when
-//! every document parsed and [`Completeness::Scoped`] as soon as one did not.
+//! every document parsed and the inventory contained no uncertain
+//! item-shaped path; it is [`Completeness::Scoped`] as soon as one document
+//! failed or one path that is *shaped* like a work-item document could not be
+//! inventoried (a case variant, a symlink, or an unreadable entry). A file that
+//! is plainly not a work item — a stray `README.md`, a `.txt` note — is project
+//! noise and does not by itself make the world partial.
 //! Freshness is [`Freshness::Fresh`] only after that verification.
 //!
 //! # Content fingerprints, not timestamps
@@ -53,6 +58,7 @@ use crate::config::CacheSettings;
 use crate::envelope::{Completeness, Finding, Freshness, Meta, Source};
 use crate::error::{Code, WaymarkError};
 use crate::id::WorkItemId;
+use crate::location::Location;
 use crate::model::{CategoryKey, WorkItem};
 use crate::readiness::{Graph, Readiness};
 use crate::store::{Fingerprint, InventoryEntry, InventoryProblem, Project};
@@ -355,11 +361,7 @@ impl Projection {
     fn assemble(project: &Project, scan: Scan, stats: ProjectionStats) -> Self {
         let cache_settings = project.config().cache;
         Self {
-            completeness: if scan.failures.is_empty() {
-                Completeness::Complete
-            } else {
-                Completeness::Scoped
-            },
+            completeness: completeness_of(&scan.failures, &scan.problems),
             entries: scan.entries,
             failures: scan.failures,
             problems: scan.problems,
@@ -392,11 +394,7 @@ impl Projection {
         self.entries = scan.entries;
         self.failures = scan.failures;
         self.problems = scan.problems;
-        self.completeness = if self.failures.is_empty() {
-            Completeness::Complete
-        } else {
-            Completeness::Scoped
-        };
+        self.completeness = completeness_of(&self.failures, &self.problems);
         self.freshness = Freshness::Fresh;
         self.stats.merge(&stats);
 
@@ -458,9 +456,26 @@ impl Projection {
         &self.problems
     }
 
-    /// The paths that could not be parsed or read.
+    /// The paths that could not be parsed or read, or that the inventory could
+    /// not classify as a document.
+    ///
+    /// A case-variant path is included even though it never became a
+    /// [`ProjectionFailure`]: it is exactly the uncertainty that makes the
+    /// projection scoped, and a caller reporting what is missing should name it.
     pub fn incomplete_paths(&self) -> Vec<&Utf8Path> {
-        self.failures.keys().map(Utf8PathBuf::as_path).collect()
+        let mut paths: Vec<&Utf8Path> = self
+            .failures
+            .keys()
+            .map(Utf8PathBuf::as_path)
+            .chain(
+                self.problems
+                    .iter()
+                    .filter(|problem| concerns_a_document(&problem.path))
+                    .map(|problem| problem.path.as_path()),
+            )
+            .collect();
+        paths.sort_unstable();
+        paths
     }
 
     /// The findings that explain an incomplete projection.
@@ -469,14 +484,20 @@ impl Projection {
     /// cycles are graph diagnostics, not projection diagnostics.
     pub fn diagnostics(&self) -> Vec<Finding> {
         let mut findings = Vec::new();
+        let uncertain: Vec<&InventoryProblem> = self
+            .problems
+            .iter()
+            .filter(|problem| concerns_a_document(&problem.path))
+            .collect();
         if self.completeness == Completeness::Scoped {
             findings.push(Finding::new(
                 Code::IncompleteProjection,
                 format!(
-                    "the projection is {} and {}: {} document(s) could not be read",
+                    "the projection is {} and {}: {} document(s) could not be read and {} item-shaped path(s) are uncertain",
                     self.completeness.as_str(),
                     self.freshness.as_str(),
-                    self.failures.len()
+                    self.failures.len(),
+                    uncertain.len()
                 ),
             ));
         }
@@ -486,6 +507,9 @@ impl Projection {
                 finding = finding.with_location(location.clone());
             }
             findings.push(finding);
+        }
+        for problem in uncertain {
+            findings.push(inventory_finding(problem, self));
         }
         findings
     }
@@ -688,6 +712,93 @@ impl Projection {
                 .is_some_and(|fingerprint| *fingerprint == key.fingerprint),
         });
     }
+}
+
+/// Whether an inventory path is *shaped* like a work-item document.
+///
+/// The inventory refuses a file whose stem is a case variant of a stable ID
+/// (for example `WM-....md`) rather than adding it to [`Inventory::entries`].
+/// That is not project noise: the file names the same ID space Waymark reads,
+/// so a global read cannot claim to have seen the whole world.
+///
+/// The distinction is deliberately the one `ops::doctor` already uses: a path
+/// whose stem parses as a [`WorkItemId`] concerns a document; a stray
+/// `README.md`, a `.txt` note, or a malformed name like `wm-short.md` does not.
+/// Those never enter the projection, and treating them as a partial world would
+/// make every global read fail for a file Waymark would never read anyway.
+///
+/// A symbolic link is excluded even when its stem is a stable ID: the store
+/// deliberately never follows one, so a link is not a document and the problem
+/// is the refusal itself. That keeps a link in place of a document a local
+/// [`Code::ItemNotFound`](crate::error::Code::ItemNotFound), not a global
+/// incompleteness.
+fn concerns_a_document(path: &Utf8Path) -> bool {
+    if WorkItemId::parse(path.file_stem().unwrap_or_default()).is_err() {
+        return false;
+    }
+    !std::fs::symlink_metadata(path)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+}
+
+/// The completeness a verified scan justifies.
+///
+/// A parse/read failure always makes the projection scoped. An uncertain
+/// inventory path does too, but only when it concerns an item-shaped document;
+/// non-item noise stays out of the completeness decision.
+fn completeness_of(
+    failures: &BTreeMap<Utf8PathBuf, ProjectionFailure>,
+    problems: &[InventoryProblem],
+) -> Completeness {
+    if failures.is_empty()
+        && !problems
+            .iter()
+            .any(|problem| concerns_a_document(&problem.path))
+    {
+        Completeness::Complete
+    } else {
+        Completeness::Scoped
+    }
+}
+
+/// The diagnostic for one uncertain, item-shaped inventory path.
+///
+/// A case variant of a live ID is a duplicate claim (the same code and wording
+/// `ops::doctor` reports); a non-lowercase stem with no live counterpart is a
+/// parse error; anything else is the uncertainty itself. The message always
+/// names the path.
+fn inventory_finding(problem: &InventoryProblem, projection: &Projection) -> Finding {
+    let stem = problem.path.file_stem().unwrap_or_default();
+    if let Ok(id) = WorkItemId::parse(stem) {
+        if id.as_str() != stem {
+            if let Some(entry) = projection.entry(&id) {
+                return Finding::new(
+                    Code::DuplicateId,
+                    format!(
+                        "the case variant {} claims the same ID as {}",
+                        problem.path, entry.path
+                    ),
+                )
+                .with_location(Location::file(problem.path.to_string()));
+            }
+            return Finding::new(
+                Code::ParseError,
+                format!(
+                    "the document path {} is not the lowercase form of its stable ID",
+                    problem.path
+                ),
+            )
+            .with_location(Location::file(problem.path.to_string()));
+        }
+    }
+    Finding::new(
+        Code::IncompleteProjection,
+        format!(
+            "the inventory is uncertain about {}: {}",
+            problem.path, problem.reason
+        ),
+    )
+    .with_location(Location::file(problem.path.to_string()))
 }
 
 /// Build a projection, retrying while the inventory moves.
