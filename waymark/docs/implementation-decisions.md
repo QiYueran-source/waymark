@@ -1307,3 +1307,108 @@ document/configuration rewrites (a category-key migration's value rewrites can r
   `UNSUPPORTED_VERSION`.
 - `tests/config.rs`: a generation outside the readable window is `UNSUPPORTED_VERSION`, the previous
   generation parses, and older generations report the readable window in details.
+
+# T13 — storage migration
+
+## Actions and what each changes
+
+- Exactly one action per run, enforced by a CLI `ArgGroup` and by a domain
+  `StorageAction`. `Root { path }` changes `storage_root` and re-bases every category path under it;
+  `CategoryPath { key, path }` changes one declaration and moves one directory; `CategoryKey { from,
+  to }` changes the key, moves the directory, and rewrites the persisted `category` value on every
+  affected work item.
+- A root change derives each category's new path by stripping the old storage root and joining the
+  new one. A category path that is not under the declared storage root cannot be re-based, so the
+  run is refused with a `category_outside_storage_root` diagnostic instead of guessing. A root
+  change to the same value is a content no-op: no moves, no revision bump.
+- A category-key change is not a pure relocation. The new directory path is the old path's parent
+  joined with the new key (so `work/task` becomes `work/chore`, and a custom `lanes/task` becomes
+  `lanes/chore`). The new key must not already be declared (`category_exists`). This keeps a
+  configured nesting stable while still letting the directory follow the key. The key change
+  rewrites `category` through `serialize::to_document`, so archive markers, `updated_at`, bodies,
+  custom fields, and relationships are preserved byte-for-byte otherwise.
+
+## Prevalidation
+
+- Planning runs `ops::migrate::preflight` first (configuration readability, complete/fresh
+  projection, per-file fingerprint agreement, Git warning) and then its own read-only path checks.
+  Every diagnostic is collected; nothing is written.
+- `MIGRATION_PATH_CONFLICT` (frozen details `{target, conflict}`) is used for an existing,
+  overlapping, or case-colliding target: equality, ancestry, or descent against an existing category
+  path (including the source's own ancestry/descent, which a rename cannot perform), a duplicate
+  target between two moved categories, an existing file, and an existing non-empty directory. An
+  existing **empty** directory is an allowed target because `rename(2)` can replace it.
+- Every other rejection is `MIGRATION_PRECONDITION_FAILED` carrying `diagnostics`: absolute paths,
+  paths escaping the repository root, wrong separators, empty components, a symbolic link in the
+  target path or any component it traverses, a missing or unreadable source directory, a source file
+  the directory digest cannot read, a cross-filesystem target, a target parent that is not a
+  directory, an unreadable target, a category outside the storage root, a declared target key, and
+  every configuration issue in the resulting document.
+- A missing category directory is a precondition failure even though the inventory treats it as an
+  empty category: a relocation has no source directory to rename. This is stricter than reads by
+  design, and it is the one place "source files missing" is interpreted to include the directory.
+- The frozen `MIGRATION_PATH_CONFLICT` details shape cannot carry a list, so when a run finds more
+  than one path conflict the `conflict` detail joins every conflict (`path: reason; …`). When
+  precondition diagnostics accompany conflicts they are appended to that string; a run with no
+  conflict reports every diagnostic structurally.
+- Case equivalence compares target paths against every source and every surviving category path
+  case-insensitively, and additionally scans each existing target component against its directory's
+  entries for a case variant. Symbolic links are checked with `symlink_metadata` from the repository
+  root through every target component.
+- `MIGRATION_PATH_CONFLICT` and `MIGRATION_PRECONDITION_FAILED` are both in the version exit class,
+  so the adapter needs no new mapping.
+
+## Execution and rollback
+
+- A pure relocation is one `rename(2)` per category directory. Nothing is copied and no document is
+  rewritten; bytes, fingerprints, and `updated_at` are untouched. Missing target parents are created
+  during execution and remembered, so a failure can remove them again. A target on another filesystem
+  is detected in prevalidation by comparing the device of the source with the nearest existing
+  ancestor of the target, and a rename that still returns `EXDEV` is reported as a clear failure; the
+  migration never silently falls back to copying.
+- A category-key migration applies the renames first, then writes the rewritten documents and the
+  configuration as one `replace_batch_with_file` batch. If that batch fails, every applied rename is
+  restored in reverse order and the created directories are removed; only then is `MIGRATION_FAILED`
+  returned. If a restore or cleanup fails, the run is `ROLLBACK_FAILED` naming the applied, failed,
+  and not-restored paths (merging the batch engine's own lists when it also failed its rollback).
+- `migrate_storage` rebuilds the plan inside the project lock immediately before execution, so a
+  preview followed by a hand edit re-derives correctly. `execute` given a plan directly repeats every
+  read-only check: fingerprints of every rewritten document, the configuration fingerprint, every
+  move's source-directory digest, and the whole path/destination prevalidation. A change between
+  planning and execution is `MIGRATION_PRECONDITION_FAILED`; a stale plan is never applied.
+- The plan carries `moves: Vec<PlannedMove>` (from, to, source digest) and `category_change:
+  Option<CategoryChange>`; the report carries `moves: Vec<MoveOutcome>` and `rewritten:
+  Vec<RewrittenCategory>`. The version/schema plans leave these empty. `count` remains the number of
+  rewritten documents, not moved directories. There is still no plan file, plan id, or plan/apply
+  handshake.
+- Failed execution reports `TargetOutcome`s for directory destinations, rewritten-document
+  destinations, and the configuration path; move targets that were restored are `skipped`.
+
+## Configuration and report
+
+- The configuration and the moves agree by construction: the next configuration is derived from the
+  same plan that produces the moves and is serialized before any write. The revision increments by
+  exactly one when content changes; a no-op does not move it, and a failed run leaves both the
+  configuration and the files as they were.
+- The storage dry run repeats the full read-only check, reports every move as `skipped` and every
+  rewritten value, and writes nothing — not even a lock file write (the lock file already exists in
+  an initialised project).
+- Outside Git the run proceeds with the `NOT_A_GIT_REPOSITORY` warning that `preflight` attaches to
+  `_meta.warnings`.
+
+## What the diagnostics ticket (T14) must know
+
+- No registry code was added or changed. The new diagnostics are details values inside the existing
+  `MIGRATION_PRECONDITION_FAILED.diagnostics` array, with `kind` values `absolute_path`,
+  `escaping_path`, `invalid_path`, `symlink_in_path`, `source_missing`, `source_unreadable`,
+  `cross_device`, `target_parent_not_a_directory`, `target_unreadable`,
+  `category_outside_storage_root`, `category_exists`, and `config_issue` (plus the existing
+  `incomplete_projection`, `fingerprint_disagreement`, `unreadable_fingerprint`,
+  `config_unreadable`, and `projection_unreadable`).
+- `MIGRATION_PATH_CONFLICT` still has only `{target, conflict}`; multiple conflicts are folded into
+  `conflict`. A structured list would be a registry change and is deliberately not made here.
+- `MIGRATION_FAILED.per_target` now legitimately contains directory paths (move destinations) as
+  well as document and configuration paths. `ROLLBACK_FAILED` lists absolute directory paths in
+  `applied`, `failed`, and `rollback_failed`.
+- Report JSON adds `moves` (`{from, to, outcome, error?}`) and `rewritten`
+  (`{id, path, from, to}`). `affected`, `targets`, and `count` keep their version/schema meanings.
