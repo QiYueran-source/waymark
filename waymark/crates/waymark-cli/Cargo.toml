@@ -1,0 +1,19 @@
+[package]
+name = "waymark-cli"
+description = "Waymark command-line adapter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "waymark"
+path = "src/main.rs"
+
+[dependencies]
+waymark-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+clap.workspace = true
+chrono.workspace = true
+camino.workspace = true

@@ -1,0 +1,28 @@
+[package]
+name = "waymark-core"
+description = "Waymark domain library: every rule the CLI, MCP server, and Web view share"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+chrono.workspace = true
+chrono-tz.workspace = true
+sha2.workspace = true
+fd-lock.workspace = true
+tempfile.workspace = true
+camino.workspace = true
+thiserror.workspace = true
+serde_norway.workspace = true
+getrandom.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true
