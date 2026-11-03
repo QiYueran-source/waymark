@@ -16,7 +16,8 @@ use waymark_core::ops::config::{self, FieldAttribute, Scalar};
 use waymark_core::ops::create::{self, CreateRequest};
 use waymark_core::ops::edit::{self, FieldChange, FieldChangeEntry};
 use waymark_core::ops::list::{self, Query};
-use waymark_core::ops::migrate::{self, SchemaAction};
+use waymark_core::lock::{with_project_lock, LockWait};
+use waymark_core::ops::migrate::{self, SchemaAction, StorageAction};
 use waymark_core::ops::{archive, read, OpOptions};
 use waymark_core::testing::fixtures;
 use waymark_core::{InitOptions, Project};
@@ -432,6 +433,52 @@ fn adding_a_required_field_supplies_its_default_so_no_item_is_left_invalid() {
     );
     assert!(config_text(&project).contains("[fields.effort]"));
     assert!(config_text(&project).contains("required = true"));
+}
+
+#[test]
+fn every_dry_run_reports_without_waiting_for_the_project_lock() {
+    let (_dir, project) = project_with_fields(&[]);
+    let (_id, _path) = create_one(&project, "First");
+
+    // Hold the one write lock, then run every migration preview under an
+    // immediate wait: a preview that took the lock would answer LOCK_TIMEOUT
+    // instead of its report.
+    with_project_lock(&project, LockWait::default_policy(), || {
+        let dry = options().dry_run().with_lock_wait(LockWait::immediate());
+
+        let version = migrate::migrate_version(&project, FORMAT_GENERATION, &dry)
+            .expect("a version preview never waits on the write lock");
+        assert!(!version.written);
+
+        let schema = migrate::migrate_schema(
+            &project,
+            SchemaAction::AddRequiredField {
+                key: field_key("effort"),
+                ty: FieldType::Integer,
+                default: Some(FieldValue::Integer(1)),
+            },
+            &dry,
+        )
+        .expect("a schema preview never waits on the write lock");
+        assert!(!schema.written);
+        assert!(schema.config_changed);
+
+        let storage = migrate::migrate_storage(
+            &project,
+            &StorageAction::Root {
+                path: "items".to_owned(),
+            },
+            &dry,
+        )
+        .expect("a storage preview never waits on the write lock");
+        assert!(!storage.written);
+        Ok(())
+    })
+    .expect("the lock is released");
+
+    // None of the previews wrote anything.
+    assert!(config_text(&project).contains("storage_root = \"work\""));
+    assert!(!config_text(&project).contains("[fields.effort]"));
 }
 
 #[test]

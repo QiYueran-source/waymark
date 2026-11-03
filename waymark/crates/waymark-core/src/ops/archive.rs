@@ -154,6 +154,11 @@ pub fn archive(
     options: &OpOptions,
 ) -> Result<ArchiveOutcome, WaymarkError> {
     let reason = normalize_reason(reason);
+    // A dry run performs every check and writes nothing, so it must not wait on
+    // the write lock: the spec says previews never block on it.
+    if options.dry_run {
+        return apply(project, id, reason, options);
+    }
     crate::lock::with_project_lock(project, options.lock_wait, || {
         apply(project, id, reason, options)
     })

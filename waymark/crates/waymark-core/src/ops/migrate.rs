@@ -872,10 +872,12 @@ pub fn execute(
     }
 }
 
-/// Plan and execute a version migration under the project lock.
+/// Plan and execute a version migration.
 ///
-/// This is the command surface: the plan is rebuilt inside the lock right
-/// before execution, so no preview can be applied to newer bytes.
+/// A real run takes the project lock and rebuilds the plan inside it right
+/// before execution, so no preview can be applied to newer bytes. A dry run
+/// performs the same read-only plan and checks without taking the lock, because
+/// previews never block on the write lock.
 pub fn migrate_version(
     project: &Project,
     target_generation: u32,
@@ -887,30 +889,46 @@ pub fn migrate_version(
             FORMAT_GENERATION,
         ));
     }
+    if options.dry_run {
+        let plan = plan_version(project, target_generation)?;
+        return execute(project, &plan, options);
+    }
     crate::lock::with_project_lock(project, options.lock_wait, || {
         let plan = plan_version(project, target_generation)?;
         execute(project, &plan, options)
     })
 }
 
-/// Plan and execute a schema migration under the project lock.
+/// Plan and execute a schema migration.
+///
+/// A dry run is lock-free: it runs every check and reports, and writes nothing.
 pub fn migrate_schema(
     project: &Project,
     action: SchemaAction,
     options: &OpOptions,
 ) -> Result<MigrationReport, WaymarkError> {
+    if options.dry_run {
+        let plan = plan_schema(project, &action)?;
+        return execute(project, &plan, options);
+    }
     crate::lock::with_project_lock(project, options.lock_wait, || {
         let plan = plan_schema(project, &action)?;
         execute(project, &plan, options)
     })
 }
 
-/// Plan and execute a storage migration under the project lock.
+/// Plan and execute a storage migration.
+///
+/// A dry run is lock-free: it runs every check and reports, and writes nothing.
 pub fn migrate_storage(
     project: &Project,
     action: &StorageAction,
     options: &OpOptions,
 ) -> Result<MigrationReport, WaymarkError> {
+    if options.dry_run {
+        let plan = plan_storage(project, action)?;
+        return execute(project, &plan, options);
+    }
     crate::lock::with_project_lock(project, options.lock_wait, || {
         let plan = plan_storage(project, action)?;
         execute(project, &plan, options)
