@@ -1887,6 +1887,11 @@ document/configuration rewrites (a category-key migration's value rewrites can r
   takes `key` + `attribute` + `value`, and `waymark_config_add_field` takes an
   optional textual `default`. These are the exact tokens the CLI passes; parsing
   stays in `ops::config`, so the adapter does not acquire a second value grammar.
+- **`waymark_config_update_category` changes the display name only.** The
+  display name is the only category attribute `ops::config` can change in
+  place; the other attribute, the directory path, is a storage migration and is
+  therefore not an optional second field. Exposing it here and refusing it would
+  be an adapter-side rule the domain does not have.
 - **A type change or making a field required is `ACTION_REQUIRES_MIGRATION`.**
   Those refusals come from the domain, with its recovery command, not from an
   adapter-side allow-list. A required declaration via `add_field` reaches the
