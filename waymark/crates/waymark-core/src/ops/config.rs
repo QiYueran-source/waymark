@@ -310,16 +310,24 @@ pub fn add_category(
 }
 
 /// Create `directory` and any missing ancestors, returning every directory this
-/// call created, outermost first.
+/// call actually created, outermost first.
+///
+/// Each level is created separately so the returned list names only our own
+/// directories: a directory another process created first is not ours to remove
+/// if the configuration replacement then fails.
 fn create_directory_tree(directory: &Utf8Path) -> Result<Vec<Utf8PathBuf>, WaymarkError> {
-    let missing = missing_directories(directory);
-    match std::fs::create_dir_all(directory) {
-        Ok(()) => Ok(missing),
-        Err(source) => {
-            remove_directory_tree(&missing);
-            Err(WaymarkError::io(directory.to_string(), "create", &source))
+    let mut created = Vec::new();
+    for path in missing_directories(directory) {
+        match std::fs::create_dir(&path) {
+            Ok(()) => created.push(path),
+            Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists && path.is_dir() => {}
+            Err(source) => {
+                remove_directory_tree(&created);
+                return Err(WaymarkError::io(path.to_string(), "create", &source));
+            }
         }
     }
+    Ok(created)
 }
 
 /// The missing ancestors of `directory`, outermost first, including itself.
