@@ -155,6 +155,11 @@ impl Timestamp {
     pub fn as_string(self) -> String {
         format_utc(self.0)
     }
+
+    /// Parse the canonical persisted form (see [`parse_utc`]).
+    pub fn parse(input: &str) -> Result<Self, TimeError> {
+        parse_utc(input).map(Self::new)
+    }
 }
 
 impl std::fmt::Display for Timestamp {

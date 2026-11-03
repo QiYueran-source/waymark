@@ -1,0 +1,114 @@
+//! Where a problem is: a tagged union over the five place kinds the spec names.
+//!
+//! Every variant serializes with a `kind` discriminator so machine consumers can
+//! branch without parsing the message. The union is additive: a new place kind
+//! is a new variant, never a new string field.
+
+use serde::{Deserialize, Serialize};
+
+use crate::id::WorkItemId;
+
+/// A locatable place in the project.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Location {
+    /// A work item, addressed by stable ID.
+    WorkItem {
+        /// The normalized stable ID.
+        id: WorkItemId,
+    },
+    /// A file, addressed by its path and — when a parser can report it — the
+    /// 1-based position inside it.
+    File {
+        /// The path as it was resolved (repository-relative or absolute).
+        path: String,
+        /// 1-based line, when known.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        line: Option<u32>,
+        /// 1-based column, when known.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        column: Option<u32>,
+    },
+    /// A field of a document, addressed by its persisted key or a dotted path.
+    Field {
+        /// The field path, for example `title` or `custom_fields.effort`.
+        field: String,
+    },
+    /// A key of the project configuration.
+    ConfigKey {
+        /// The configuration key path, for example `categories.bug.path`.
+        key: String,
+    },
+    /// A directed relation between two work items.
+    Relationship {
+        /// The item the relation starts at.
+        from: WorkItemId,
+        /// The persisted relation name, for example `dependencies`.
+        relation: String,
+        /// The item the relation points to.
+        to: WorkItemId,
+    },
+}
+
+impl Location {
+    /// A work-item location.
+    pub fn work_item(id: &WorkItemId) -> Self {
+        Self::WorkItem { id: id.clone() }
+    }
+
+    /// A file location.
+    pub fn file(path: impl Into<String>) -> Self {
+        Self::File {
+            path: path.into(),
+            line: None,
+            column: None,
+        }
+    }
+
+    /// A file location with a 1-based position inside it.
+    pub fn file_at(path: impl Into<String>, line: u32, column: u32) -> Self {
+        Self::File {
+            path: path.into(),
+            line: Some(line),
+            column: Some(column),
+        }
+    }
+
+    /// A field location.
+    pub fn field(field: impl Into<String>) -> Self {
+        Self::Field {
+            field: field.into(),
+        }
+    }
+
+    /// A configuration-key location.
+    pub fn config_key(key: impl Into<String>) -> Self {
+        Self::ConfigKey { key: key.into() }
+    }
+
+    /// A relationship location.
+    pub fn relationship(from: &WorkItemId, relation: impl Into<String>, to: &WorkItemId) -> Self {
+        Self::Relationship {
+            from: from.clone(),
+            relation: relation.into(),
+            to: to.clone(),
+        }
+    }
+}
+
+impl std::fmt::Display for Location {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::WorkItem { id } => write!(f, "work item {id}"),
+            Self::File { path, line, column } => match (line, column) {
+                (Some(line), Some(column)) => write!(f, "file {path}:{line}:{column}"),
+                _ => write!(f, "file {path}"),
+            },
+            Self::Field { field } => write!(f, "field {field}"),
+            Self::ConfigKey { key } => write!(f, "config key {key}"),
+            Self::Relationship { from, relation, to } => {
+                write!(f, "relationship {relation} {from} -> {to}")
+            }
+        }
+    }
+}
