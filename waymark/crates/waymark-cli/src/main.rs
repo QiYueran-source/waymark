@@ -23,6 +23,7 @@ use waymark_core::time::SystemClock;
 mod cmd;
 
 use cmd::create::CreateArgs;
+use cmd::edit::{BodyArgs, FieldArgs, TitleArgs};
 use cmd::init::InitArgs;
 use cmd::list::ListArgs;
 use cmd::relationship::DependencyArgs;
@@ -64,6 +65,12 @@ enum Command {
     Show(ShowArgs),
     /// Change the lifecycle state of one item.
     Status(StatusArgs),
+    /// Replace the title of one item.
+    Title(TitleArgs),
+    /// Replace or clear the body of one item.
+    Body(BodyArgs),
+    /// Set and clear custom fields of one item.
+    Field(FieldArgs),
     /// Move one item to `in_progress`.
     Start(TransitionArgs),
     /// Move one item to `closed`.
@@ -133,6 +140,18 @@ fn run(cli: Cli) -> Result<(), waymark_core::WaymarkError> {
         Command::Status(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
             cmd::status::run(&project, args, &options, json)
+        }
+        Command::Title(args) => {
+            let project = cmd::open_project(cli.project.as_deref())?;
+            cmd::edit::run_title(&project, args, &options, json)
+        }
+        Command::Body(args) => {
+            let project = cmd::open_project(cli.project.as_deref())?;
+            cmd::edit::run_body(&project, args, &options, json)
+        }
+        Command::Field(args) => {
+            let project = cmd::open_project(cli.project.as_deref())?;
+            cmd::edit::run_field(&project, args, &options, json)
         }
         Command::Start(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;

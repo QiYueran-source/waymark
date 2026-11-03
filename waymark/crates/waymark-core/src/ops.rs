@@ -14,6 +14,7 @@
 //! decide what is allowed.
 
 pub mod create;
+pub mod edit;
 pub mod list;
 pub mod mediated;
 pub mod read;
