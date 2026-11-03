@@ -1,0 +1,484 @@
+[
+  {
+    "code": "ACTION_REQUIRES_MIGRATION",
+    "details": [
+      "action",
+      "required_command"
+    ],
+    "exit": 6,
+    "finding": null,
+    "location_kinds": [
+      "work_item",
+      "config_key"
+    ],
+    "retryable": false
+  },
+  {
+    "code": "ALREADY_ARCHIVED",
+    "details": [
+      "id"
+    ],
+    "exit": 4,
+    "finding": null,
+    "location_kinds": [
+      "work_item"
+    ],
+    "retryable": false
+  },
+  {
+    "code": "CATEGORY_NOT_FOUND",
+    "details": [
+      "key"
+    ],
+    "exit": 2,
+    "finding": null,
+    "location_kinds": [
+      "field",
+      "config_key"
+    ],
+    "retryable": false
+  },
+  {
+    "code": "CONFIG_INVALID",
+    "details": [
+      "path",
+      "issues"
+    ],
+    "exit": 3,
+    "finding": "error",
+    "location_kinds": [
+      "config_key",
+      "file"
+    ],
+    "retryable": false
+  },
+  {
+    "code": "CYCLE_DETECTED",
+    "details": [
+      "kind",
+      "cycle"
+    ],
+    "exit": 3,
+    "finding": "error",
+    "location_kinds": [
+      "work_item",
+      "relationship"
+    ],
+    "retryable": false
+  },
+  {
+    "code": "DANGLING_REFERENCE",
+    "details": [
+      "from",
+      "relation",
+      "missing"
+    ],
+    "exit": null,
+    "finding": "error",
+    "location_kinds": [
+      "work_item",
+      "relationship"
+    ],
+    "retryable": false
+  },
+  {
+    "code": "DUPLICATE_ID",
+    "details": [
+      "id",
+      "paths"
+    ],
+    "exit": 3,
+    "finding": "error",
+    "location_kinds": [
+      "file",
+      "work_item"
+    ],
+    "retryable": false
+  },
+  {
+    "code": "GIT_ERROR",
+    "details": [
+      "operation",
+      "reason"
+    ],
+    "exit": 5,
+    "finding": null,
+    "location_kinds": [],
+    "retryable": false
+  },
+  {
+    "code": "HAS_ACTIVE_CHILDREN",
+    "details": [
+      "id",
+      "children"
+    ],
+    "exit": 4,
+    "finding": null,
+    "location_kinds": [
+      "work_item",
+      "relationship"
+    ],
+    "retryable": false
+  },
+  {
+    "code": "ID_GENERATION_FAILED",
+    "details": [
+      "attempts"
+    ],
+    "exit": 7,
+    "finding": null,
+    "location_kinds": [],
+    "retryable": false
+  },
+  {
+    "code": "ID_PATH_MISMATCH",
+    "details": [
+      "id",
+      "path",
+      "stem"
+    ],
+    "exit": 3,
+    "finding": "error",
+    "location_kinds": [
+      "file",
+      "work_item"
+    ],
+    "retryable": false
+  },
+  {
+    "code": "INCOMPLETE_PROJECTION",
+    "details": [
+      "completeness",
+      "freshness",
+      "diagnostics"
+    ],
+    "exit": 3,
+    "finding": "error",
+    "location_kinds": [
+      "file",
+      "work_item"
+    ],
+    "retryable": false
+  },
+  {
+    "code": "INTERNAL_ERROR",
+    "details": [],
+    "exit": 7,
+    "finding": null,
+    "location_kinds": [],
+    "retryable": false
+  },
+  {
+    "code": "INVALID_ID",
+    "details": [
+      "value",
+      "reason"
+    ],
+    "exit": 3,
+    "finding": null,
+    "location_kinds": [
+      "field",
+      "file"
+    ],
+    "retryable": false
+  },
+  {
+    "code": "INVALID_RELATIONSHIP",
+    "details": [
+      "relation",
+      "from",
+      "to",
+      "reason"
+    ],
+    "exit": 3,
+    "finding": null,
+    "location_kinds": [
+      "work_item",
+      "relationship"
+    ],
+    "retryable": false
+  },
+  {
+    "code": "IO_ERROR",
+    "details": [
+      "path",
+      "operation"
+    ],
+    "exit": 5,
+    "finding": "error",
+    "location_kinds": [
+      "file"
+    ],
+    "retryable": false
+  },
+  {
+    "code": "ITEM_ARCHIVED",
+    "details": [
+      "id",
+      "operation"
+    ],
+    "exit": 4,
+    "finding": null,
+    "location_kinds": [
+      "work_item"
+    ],
+    "retryable": false
+  },
+  {
+    "code": "ITEM_NEEDS_MIGRATION",
+    "details": [
+      "id",
+      "item_generation",
+      "project_generation"
+    ],
+    "exit": 6,
+    "finding": "error",
+    "location_kinds": [
+      "work_item",
+      "file"
+    ],
+    "retryable": false
+  },
+  {
+    "code": "ITEM_NOT_FOUND",
+    "details": [
+      "id",
+      "relation"
+    ],
+    "exit": 2,
+    "finding": null,
+    "location_kinds": [
+      "work_item",
+      "relationship"
+    ],
+    "retryable": false
+  },
+  {
+    "code": "LOCK_FAILED",
+    "details": [
+      "lock_path",
+      "reason"
+    ],
+    "exit": 5,
+    "finding": null,
+    "location_kinds": [],
+    "retryable": false
+  },
+  {
+    "code": "LOCK_HELD",
+    "details": [
+      "lock_path"
+    ],
+    "exit": null,
+    "finding": "info",
+    "location_kinds": [],
+    "retryable": false
+  },
+  {
+    "code": "LOCK_TIMEOUT",
+    "details": [
+      "lock_path",
+      "waited_ms"
+    ],
+    "exit": 5,
+    "finding": null,
+    "location_kinds": [],
+    "retryable": true
+  },
+  {
+    "code": "MIGRATION_AVAILABLE",
+    "details": [
+      "items"
+    ],
+    "exit": null,
+    "finding": "info",
+    "location_kinds": [
+      "work_item"
+    ],
+    "retryable": false
+  },
+  {
+    "code": "MIGRATION_FAILED",
+    "details": [
+      "per_target"
+    ],
+    "exit": 6,
+    "finding": null,
+    "location_kinds": [
+      "file",
+      "work_item"
+    ],
+    "retryable": false
+  },
+  {
+    "code": "MIGRATION_PATH_CONFLICT",
+    "details": [
+      "target",
+      "conflict"
+    ],
+    "exit": 6,
+    "finding": null,
+    "location_kinds": [
+      "file"
+    ],
+    "retryable": false
+  },
+  {
+    "code": "MIGRATION_PRECONDITION_FAILED",
+    "details": [
+      "diagnostics"
+    ],
+    "exit": 6,
+    "finding": null,
+    "location_kinds": [
+      "file",
+      "work_item",
+      "config_key"
+    ],
+    "retryable": false
+  },
+  {
+    "code": "MIGRATION_UNSUPPORTED_GENERATION",
+    "details": [
+      "requested",
+      "supported"
+    ],
+    "exit": 6,
+    "finding": null,
+    "location_kinds": [],
+    "retryable": false
+  },
+  {
+    "code": "NOT_A_GIT_REPOSITORY",
+    "details": [],
+    "exit": null,
+    "finding": "info",
+    "location_kinds": [],
+    "retryable": false
+  },
+  {
+    "code": "OWNER_MISMATCH",
+    "details": [
+      "item",
+      "operator",
+      "owner"
+    ],
+    "exit": null,
+    "finding": "warning",
+    "location_kinds": [
+      "work_item"
+    ],
+    "retryable": false
+  },
+  {
+    "code": "PARSE_ERROR",
+    "details": [
+      "path",
+      "reason"
+    ],
+    "exit": 3,
+    "finding": "error",
+    "location_kinds": [
+      "file"
+    ],
+    "retryable": false
+  },
+  {
+    "code": "PROJECT_NOT_FOUND",
+    "details": [
+      "searched"
+    ],
+    "exit": 5,
+    "finding": null,
+    "location_kinds": [],
+    "retryable": false
+  },
+  {
+    "code": "ROLLBACK_FAILED",
+    "details": [
+      "applied",
+      "failed",
+      "rollback_failed"
+    ],
+    "exit": 7,
+    "finding": null,
+    "location_kinds": [
+      "file"
+    ],
+    "retryable": false
+  },
+  {
+    "code": "SNAPSHOT_UNSTABLE",
+    "details": [
+      "retries"
+    ],
+    "exit": 5,
+    "finding": null,
+    "location_kinds": [],
+    "retryable": true
+  },
+  {
+    "code": "TIMESTAMP_INCOHERENT",
+    "details": [
+      "id",
+      "field",
+      "value",
+      "reason"
+    ],
+    "exit": null,
+    "finding": "warning",
+    "location_kinds": [
+      "work_item",
+      "field"
+    ],
+    "retryable": false
+  },
+  {
+    "code": "UNSUPPORTED_VERSION",
+    "details": [
+      "found",
+      "supported"
+    ],
+    "exit": 6,
+    "finding": "error",
+    "location_kinds": [
+      "file",
+      "work_item",
+      "config_key"
+    ],
+    "retryable": false
+  },
+  {
+    "code": "VALIDATION_ERROR",
+    "details": [
+      "target",
+      "issues"
+    ],
+    "exit": 3,
+    "finding": "error",
+    "location_kinds": [
+      "work_item",
+      "file",
+      "field",
+      "config_key",
+      "relationship"
+    ],
+    "retryable": false
+  },
+  {
+    "code": "WRITE_CONFLICT",
+    "details": [
+      "id",
+      "path",
+      "expected_fingerprint",
+      "actual_fingerprint"
+    ],
+    "exit": 4,
+    "finding": null,
+    "location_kinds": [
+      "work_item",
+      "file"
+    ],
+    "retryable": false
+  }
+]

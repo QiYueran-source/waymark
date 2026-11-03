@@ -262,8 +262,13 @@ fn two_files_claiming_one_id_are_reported_rather_than_resolved() {
     }
 
     let error = project.locate(&id).unwrap_err();
-    assert_eq!(error.code(), Code::ValidationError);
-    assert!(error.message().contains("wm-3f7k9q2m4x8c"), "{error}");
+    assert_eq!(error.code(), Code::DuplicateId);
+    assert_eq!(error.details()["id"], serde_json::json!(id.as_str()));
+    assert_eq!(
+        error.details()["paths"].as_array().map(Vec::len),
+        Some(2),
+        "{error}"
+    );
 }
 
 #[test]

@@ -13,7 +13,7 @@
 use camino::Utf8PathBuf;
 
 use crate::envelope::Meta;
-use crate::error::{ValidationIssue, WaymarkError};
+use crate::error::WaymarkError;
 use crate::id::WorkItemId;
 use crate::model::WorkItem;
 use crate::store::{Fingerprint, InventoryEntry, Project};
@@ -77,13 +77,8 @@ fn read_entry(
     let bytes = project.read_bytes(&entry.path)?;
     let item = crate::parse::parse_item_file(&entry.path)?;
     if item.id != *id {
-        return Err(WaymarkError::validation(
-            format!("work item {id}"),
-            vec![ValidationIssue::new(
-                "id",
-                format!("the document at {} declares {}", entry.path, item.id),
-            )],
-        ));
+        let stem = entry.path.file_stem().unwrap_or_default();
+        return Err(WaymarkError::id_path_mismatch(&item.id, &entry.path, stem));
     }
     Ok(ReadItem {
         item,
@@ -101,7 +96,6 @@ fn read_entry(
 /// Crockford body are required.
 pub fn normalize(input: &str) -> Result<WorkItemId, WaymarkError> {
     let trimmed = input.trim();
-    WorkItemId::parse(trimmed).map_err(|error| {
-        WaymarkError::invalid_id(trimmed, &error).with_location(crate::Location::field("id"))
-    })
+    WorkItemId::parse(trimmed)
+        .map_err(|error| WaymarkError::invalid_id(trimmed, &error).at_field("id"))
 }

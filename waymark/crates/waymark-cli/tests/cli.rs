@@ -371,15 +371,86 @@ fn running_outside_a_project_exits_five() {
 }
 
 #[test]
-fn a_bad_flag_exits_one() {
+fn a_bad_flag_exits_one_and_names_usage_error_on_stderr() {
     let result = run(waymark().arg("--nonsense"));
     assert_eq!(result.status(), 1, "stderr: {}", result.stderr());
+    assert!(
+        result.stderr().contains("USAGE_ERROR"),
+        "a usage failure names its code: {}",
+        result.stderr()
+    );
+    assert!(
+        result.stdout().is_empty(),
+        "human mode writes nothing to stdout: {}",
+        result.stdout()
+    );
 }
 
 #[test]
-fn an_unknown_subcommand_exits_one() {
+fn an_unknown_subcommand_exits_one_and_names_usage_error_on_stderr() {
     let result = run(waymark().arg("frobnicate"));
     assert_eq!(result.status(), 1, "stderr: {}", result.stderr());
+    assert!(
+        result.stderr().contains("USAGE_ERROR"),
+        "a usage failure names its code: {}",
+        result.stderr()
+    );
+}
+
+#[test]
+fn a_usage_failure_keeps_stdout_machine_only_in_json_mode() {
+    let result = run(waymark().arg("--json").arg("frobnicate"));
+    assert_eq!(result.status(), 1, "stderr: {}", result.stderr());
+    // One JSON value on stdout, prose on stderr: the same split every other
+    // failure uses, so a parser never has to look at stderr for a usage error.
+    assert_eq!(result.stdout().lines().count(), 1, "{}", result.stdout());
+    assert!(
+        result.stderr().contains("frobnicate"),
+        "{}",
+        result.stderr()
+    );
+}
+
+#[test]
+fn a_bad_flag_in_json_mode_writes_one_failure_envelope_on_stdout() {
+    let result = run(waymark().arg("--json").arg("--nonsense"));
+    assert_eq!(result.status(), 1, "stderr: {}", result.stderr());
+    let envelope = result.json();
+    assert_eq!(envelope["v"], serde_json::json!(1));
+    assert_eq!(envelope["ok"], serde_json::json!(false));
+    assert_eq!(envelope["error"]["code"], serde_json::json!("USAGE_ERROR"));
+    assert_eq!(envelope["error"]["retryable"], serde_json::json!(false));
+    assert_eq!(envelope["error"]["details"], serde_json::json!({}));
+}
+
+#[test]
+fn an_unknown_subcommand_in_json_mode_keeps_the_json_contract() {
+    let result = run(waymark().arg("--json").arg("frobnicate"));
+    assert_eq!(result.status(), 1, "stderr: {}", result.stderr());
+    assert_eq!(
+        result.json()["error"]["code"],
+        serde_json::json!("USAGE_ERROR")
+    );
+}
+
+#[test]
+fn usage_error_is_absent_from_the_domain_registry() {
+    // A domain failure in JSON mode never reports the adapter's usage code, so a
+    // consumer can tell "you typed the command wrong" from "the project is
+    // broken" without consulting the exit code.
+    let (_dir, root) = tempdir();
+    init(&root);
+    let result = run(waymark()
+        .arg("--json")
+        .arg("show")
+        .arg("wm-000000000000")
+        .arg("--project")
+        .arg(&root));
+    assert_eq!(result.status(), 2, "stderr: {}", result.stderr());
+    assert_ne!(
+        result.json()["error"]["code"],
+        serde_json::json!("USAGE_ERROR")
+    );
 }
 
 #[test]
