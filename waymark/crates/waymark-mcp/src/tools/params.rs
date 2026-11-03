@@ -96,7 +96,11 @@ pub fn field_changes(
 }
 
 /// Convert one JSON value into a Waymark custom-field value.
-fn field_value(value: &Value) -> Result<FieldValue, String> {
+///
+/// Shared with `waymark_create_work_item` so a created value and an updated
+/// value accept exactly the same JSON shapes; the domain still owns the declared
+/// type check.
+pub(crate) fn field_value(value: &Value) -> Result<FieldValue, String> {
     match value {
         Value::String(text) => Ok(FieldValue::String(text.clone())),
         Value::Bool(flag) => Ok(FieldValue::Boolean(*flag)),

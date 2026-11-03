@@ -3,6 +3,144 @@
 mod common;
 
 use serde_json::json;
+use waymark_core::config::FieldType;
+use waymark_core::model::FieldKey;
+use waymark_core::ops::config;
+
+/// Declare a custom field on the fixture project before a create call.
+fn add_field(fixture: &common::Fixture, key: &str, ty: FieldType, required: bool) {
+    config::add_field(
+        &fixture.project(),
+        &FieldKey::parse(key).unwrap(),
+        ty,
+        required,
+        None,
+        &common::options(),
+    )
+    .expect("the field is declared");
+}
+
+#[tokio::test]
+async fn create_accepts_the_complete_initial_state() {
+    let fixture = common::fixture(&["one", "two"]);
+    add_field(&fixture, "points", FieldType::Integer, false);
+    add_field(&fixture, "note", FieldType::String, false);
+    let parent = fixture.ids[0].clone();
+    let linked = fixture.ids[1].clone();
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    let result = client
+        .call(
+            "waymark_create_work_item",
+            json!({
+                "title": "Composite item",
+                "category": "task",
+                "owner": "frank",
+                "creator": "alice",
+                "body": "the body\n",
+                "custom_fields": {"points": 7, "note": "hello"},
+                "parent": parent,
+                "dependencies": [parent],
+                "soft_links": [linked]
+            }),
+        )
+        .await;
+    let envelope = common::envelope(&result);
+    assert_eq!(envelope["ok"], true, "{envelope}");
+    assert_eq!(envelope["data"]["written"], true);
+    assert_eq!(envelope["data"]["item"]["creator"], "alice");
+    assert_eq!(envelope["data"]["item"]["custom_fields"]["points"], 7);
+    assert_eq!(envelope["data"]["item"]["custom_fields"]["note"], "hello");
+    assert_eq!(envelope["data"]["item"]["parent"], parent);
+    assert_eq!(
+        envelope["data"]["item"]["dependencies"],
+        json!([fixture.ids[0].clone()])
+    );
+    assert_eq!(
+        envelope["data"]["item"]["soft_links"],
+        json!([fixture.ids[1].clone()])
+    );
+    assert_eq!(envelope["data"]["partners"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        envelope["data"]["fingerprints"].as_array().unwrap().len(),
+        2
+    );
+
+    let id = envelope["data"]["id"].as_str().expect("the new id");
+    let linked_document =
+        common::read(&fixture.root.join("work/task").join(format!("{linked}.md")));
+    assert!(
+        linked_document.contains(&format!("  - {id}")),
+        "the partner document records the new ID symmetrically: {linked_document}"
+    );
+
+    client.shutdown().await;
+}
+
+/// Declare a required field by editing the configuration document.
+///
+/// `config::add_field` deliberately refuses a required declaration outside the
+/// migration path, so a test that needs one writes it the way `init` would.
+fn declare_required_field(fixture: &common::Fixture, key: &str, ty: FieldType) {
+    let path = fixture.root.join(".waymark").join("config.toml");
+    let document = std::fs::read_to_string(&path).expect("the configuration reads");
+    let declaration = format!(
+        "[fields.{key}]\ntype = \"{}\"\nrequired = true\n\n[cache]",
+        ty.as_str()
+    );
+    std::fs::write(&path, document.replace("[cache]", &declaration))
+        .expect("the configuration is writable");
+}
+
+#[tokio::test]
+async fn create_rejects_a_null_or_missing_required_custom_field() {
+    let fixture = common::fixture(&[]);
+    declare_required_field(&fixture, "effort", FieldType::Integer);
+    let before = common::snapshot(&fixture.root);
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    let null = client
+        .call(
+            "waymark_create_work_item",
+            json!({
+                "title": "Null field",
+                "category": "task",
+                "owner": "frank",
+                "custom_fields": {"effort": null}
+            }),
+        )
+        .await;
+    let error = common::business_error(&null);
+    assert_eq!(error["code"], "VALIDATION_ERROR", "{error}");
+    assert_eq!(
+        error["details"]["issues"][0]["path"],
+        "custom_fields.effort"
+    );
+
+    let missing = client
+        .call(
+            "waymark_create_work_item",
+            json!({
+                "title": "Missing required",
+                "category": "task",
+                "owner": "frank"
+            }),
+        )
+        .await;
+    let error = common::business_error(&missing);
+    assert_eq!(error["code"], "VALIDATION_ERROR", "{error}");
+    assert_eq!(
+        error["details"]["issues"][0]["path"],
+        "custom_fields.effort"
+    );
+    assert_eq!(
+        common::snapshot(&fixture.root),
+        before,
+        "a refused creation writes nothing"
+    );
+
+    client.shutdown().await;
+}
 
 #[tokio::test]
 async fn create_work_item_mints_identity_and_writes_the_document() {

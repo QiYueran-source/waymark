@@ -8,6 +8,9 @@
 
 mod common;
 
+use std::collections::BTreeMap;
+
+use camino::Utf8Path;
 use serde_json::json;
 use waymark_core::config::FieldType;
 use waymark_core::model::FieldKey;
@@ -90,6 +93,113 @@ async fn create_matches_the_cli() {
     assert_eq!(
         mcp["data"]["item"]["custom_fields"],
         cli["data"]["item"]["custom_fields"]
+    );
+
+    client.shutdown().await;
+}
+
+/// A whole-tree snapshot normalized for a freshly minted ID.
+///
+/// The two adapters mint different stable IDs, so the new document's own `id`
+/// line, its file name, and every partner's symmetric reference to it differ.
+/// Replacing that one literal with a placeholder — after normalizing the
+/// operation clock — leaves every other byte, including field order, comparable.
+fn normalized_created_tree(root: &Utf8Path, created: &str) -> BTreeMap<String, Vec<u8>> {
+    common::snapshot(root)
+        .into_iter()
+        .map(|(path, bytes)| {
+            let path = path.replace(created, "<new-id>");
+            let text = String::from_utf8_lossy(&bytes);
+            let normalized = common::normalize_clocks(&text).replace(created, "<new-id>");
+            (path, normalized.into_bytes())
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn composite_create_matches_the_cli() {
+    let fixture = common::fixture(&["one", "two"]);
+    add_field(&fixture, "note", FieldType::String);
+    add_field(&fixture, "points", FieldType::Integer);
+    let parent = fixture.ids[0].clone();
+    let linked = fixture.ids[1].clone();
+    let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    let result = client
+        .call(
+            "waymark_create_work_item",
+            json!({
+                "title": "Composite item",
+                "category": "task",
+                "owner": "frank",
+                "creator": "alice",
+                "body": "the body\n",
+                "custom_fields": {"note": "hello", "points": 7},
+                "parent": parent,
+                "dependencies": [parent],
+                "soft_links": [linked]
+            }),
+        )
+        .await;
+    let mcp = common::envelope(&result);
+    assert_eq!(mcp["ok"], true, "{mcp}");
+    let mcp_id = mcp["data"]["id"].as_str().expect("the MCP id").to_owned();
+
+    let cli = common::cli_json(
+        &cli_root,
+        &[
+            "create",
+            "--title",
+            "Composite item",
+            "--category",
+            "task",
+            "--owner",
+            "frank",
+            "--creator",
+            "alice",
+            "--body",
+            "the body\n",
+            "--field",
+            "note=hello",
+            "--field",
+            "points=7",
+            "--parent",
+            &parent,
+            "--dependency",
+            &parent,
+            "--link",
+            &linked,
+        ],
+    );
+    let cli_id = cli["data"]["id"].as_str().expect("the CLI id").to_owned();
+
+    for field in [
+        "title",
+        "category",
+        "owner",
+        "creator",
+        "body",
+        "status",
+        "custom_fields",
+        "parent",
+        "dependencies",
+        "soft_links",
+    ] {
+        assert_eq!(
+            mcp["data"]["item"][field], cli["data"]["item"][field],
+            "the adapters disagree about `{field}`"
+        );
+    }
+    assert_eq!(mcp["data"]["partners"].as_array().unwrap().len(), 1);
+    assert_eq!(cli["data"]["partners"].as_array().unwrap().len(), 1);
+    assert_eq!(mcp["data"]["fingerprints"].as_array().unwrap().len(), 2);
+    assert_eq!(cli["data"]["fingerprints"].as_array().unwrap().len(), 2);
+
+    assert_eq!(
+        normalized_created_tree(&fixture.root, &mcp_id),
+        normalized_created_tree(&cli_root, &cli_id),
+        "composite creation must write the same tree through both adapters"
     );
 
     client.shutdown().await;

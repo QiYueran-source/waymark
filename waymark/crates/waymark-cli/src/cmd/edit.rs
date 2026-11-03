@@ -315,8 +315,11 @@ fn field_changes(
     Ok(resolved)
 }
 
-/// Resolve one raw `--set` token against the declared field type.
-fn parse_field_value(declaration: &FieldDecl, raw: &str) -> Result<FieldValue, String> {
+/// Resolve one raw `--set`/`--field` token against the declared field type.
+///
+/// Shared with `create` so a field value typed on either command line has the
+/// same text grammar and the same parse errors.
+pub(crate) fn parse_field_value(declaration: &FieldDecl, raw: &str) -> Result<FieldValue, String> {
     match &declaration.ty {
         FieldType::String => parse_string(raw),
         FieldType::Integer => parse_integer(raw).map(FieldValue::Integer),

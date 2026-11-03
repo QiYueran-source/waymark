@@ -228,7 +228,10 @@ fn describe_missing_target(
 }
 
 /// The cycle `from -> target` would close, as a closed path starting at `from`.
-fn dependency_cycle(
+///
+/// Shared with composite creation: `from` may be the ID about to be minted, and
+/// `Graph::path` still finds a dangling reference to it from `target`'s chain.
+pub(crate) fn dependency_cycle(
     graph: &Graph,
     from: &WorkItemId,
     target: &WorkItemId,

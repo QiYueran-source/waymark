@@ -102,7 +102,9 @@ fn create(root: &Utf8PathBuf) -> String {
         .arg("--owner")
         .arg("frank")
         .arg("--body")
-        .arg("original body\n"));
+        .arg("original body\n")
+        .arg("--field")
+        .arg("effort=1"));
     assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
     let id = result.json()["data"]["id"]
         .as_str()

@@ -96,7 +96,27 @@ pub struct BatchTarget<'a> {
     pub bytes: &'a [u8],
 }
 
-/// One document a batch replaced.
+/// One document an all-or-nothing batch **creates**.
+///
+/// A create target is the inverse of [`BatchTarget`]'s expectation: the path
+/// must not exist yet. The batch stages it with the same temp-file-then-rename
+/// discipline, and a failure after it was renamed removes it again, so a
+/// reported failure never leaves a half-created document behind.
+///
+/// This exists for composite creation, which mints one new document and
+/// rewrites its symmetric soft-link partners in one batch. A [`BatchTarget`]
+/// cannot express it because every replacement must fingerprint existing bytes.
+#[derive(Debug, Clone, Copy)]
+pub struct BatchCreate<'a> {
+    /// The item the document belongs to. Used to shape conflict errors.
+    pub id: &'a crate::id::WorkItemId,
+    /// The document to create; it must not exist.
+    pub path: &'a Utf8Path,
+    /// The complete new document.
+    pub bytes: &'a [u8],
+}
+
+/// One document a batch replaced or created.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BatchApplied {
     /// The item the document belongs to, when it is a work-item document.
@@ -128,7 +148,9 @@ pub struct FileTarget<'a> {
 struct RawTarget<'a> {
     id: Option<&'a crate::id::WorkItemId>,
     path: &'a Utf8Path,
-    expected: &'a Fingerprint,
+    /// `Some` replaces an existing document; `None` creates one that must be
+    /// absent.
+    expected: Option<&'a Fingerprint>,
     bytes: &'a [u8],
 }
 
@@ -137,7 +159,18 @@ impl<'a> From<&'a BatchTarget<'a>> for RawTarget<'a> {
         Self {
             id: Some(target.id),
             path: target.path,
-            expected: target.expected,
+            expected: Some(target.expected),
+            bytes: target.bytes,
+        }
+    }
+}
+
+impl<'a> From<&'a BatchCreate<'a>> for RawTarget<'a> {
+    fn from(target: &'a BatchCreate<'a>) -> Self {
+        Self {
+            id: Some(target.id),
+            path: target.path,
+            expected: None,
             bytes: target.bytes,
         }
     }
@@ -148,7 +181,7 @@ impl<'a> From<&'a FileTarget<'a>> for RawTarget<'a> {
         Self {
             id: None,
             path: target.path,
-            expected: target.expected,
+            expected: Some(target.expected),
             bytes: target.bytes,
         }
     }
@@ -186,6 +219,30 @@ pub fn replace_batch(targets: &[BatchTarget<'_>]) -> Result<Vec<BatchApplied>, W
     run_batch(&raw)
 }
 
+/// Create new documents and replace existing ones as one all-or-nothing batch.
+///
+/// This is composite creation's writer: the new document and every symmetric
+/// partner it rewrites land together, so a partner failure removes the new
+/// document and the store is exactly as it was.
+///
+/// The contract is [`replace_batch`]'s, extended with two rules for a
+/// [`BatchCreate`]:
+///
+/// - prevalidation requires the path to be **absent**; an existing document,
+///   directory, or symlink is a `WRITE_CONFLICT` (expected `absent`);
+/// - rollback removes a created document instead of restoring bytes.
+///
+/// Applied entries are returned in request order: creates first, then
+/// replacements.
+pub fn replace_batch_with_creates(
+    creates: &[BatchCreate<'_>],
+    targets: &[BatchTarget<'_>],
+) -> Result<Vec<BatchApplied>, WaymarkError> {
+    let mut raw: Vec<RawTarget<'_>> = creates.iter().map(RawTarget::from).collect();
+    raw.extend(targets.iter().map(RawTarget::from));
+    run_batch(&raw)
+}
+
 /// Replace work-item documents and one non-item document as one batch.
 ///
 /// This is the migration scaffold's writer: a schema or version migration
@@ -210,23 +267,33 @@ fn run_batch(targets: &[RawTarget<'_>]) -> Result<Vec<BatchApplied>, WaymarkErro
     }
 
     // 1. Prevalidate, and capture the bytes every rollback would restore.
-    let mut originals: Vec<(camino::Utf8PathBuf, Vec<u8>)> = Vec::with_capacity(targets.len());
+    //    A create target captures no bytes: its rollback is a removal.
+    let mut originals: Vec<(camino::Utf8PathBuf, Option<Vec<u8>>)> =
+        Vec::with_capacity(targets.len());
     let mut seen: std::collections::BTreeSet<&Utf8Path> = std::collections::BTreeSet::new();
     for target in targets {
         if !seen.insert(target.path) {
             return Err(WaymarkError::internal(format!(
-                "the batch names {} twice; a document may be replaced only once per batch",
+                "the batch names {} twice; a document may be written only once per batch",
                 target.path
             )));
         }
-        validate_batch_target(target)?;
-        let original = fs::read(target.path)
-            .map_err(|source| WaymarkError::io(target.path.to_string(), "read", &source))?;
-        let actual = Fingerprint::of(&original);
-        if actual != *target.expected {
-            return Err(conflict(target, actual.as_str()));
+        match target.expected {
+            Some(expected) => {
+                validate_batch_target(target)?;
+                let original = fs::read(target.path)
+                    .map_err(|source| WaymarkError::io(target.path.to_string(), "read", &source))?;
+                let actual = Fingerprint::of(&original);
+                if actual != *expected {
+                    return Err(conflict(target, actual.as_str()));
+                }
+                originals.push((target.path.to_path_buf(), Some(original)));
+            }
+            None => {
+                validate_batch_create(target)?;
+                originals.push((target.path.to_path_buf(), None));
+            }
         }
-        originals.push((target.path.to_path_buf(), original));
     }
 
     // 2. Stage every new document before touching a destination.
@@ -284,13 +351,9 @@ fn run_batch(targets: &[RawTarget<'_>]) -> Result<Vec<BatchApplied>, WaymarkErro
 /// has no stable ID, so its conflict carries a null `id`; migration callers
 /// translate it into `MIGRATION_FAILED` before it reaches an adapter.
 fn conflict(target: &RawTarget<'_>, actual: &str) -> WaymarkError {
+    let expected = target.expected.map(Fingerprint::as_str).unwrap_or("absent");
     match target.id {
-        Some(id) => WaymarkError::write_conflict(
-            id,
-            target.path.to_string(),
-            target.expected.as_str(),
-            actual,
-        ),
+        Some(id) => WaymarkError::write_conflict(id, target.path.to_string(), expected, actual),
         None => WaymarkError::new(
             crate::error::Code::WriteConflict,
             format!(
@@ -301,7 +364,7 @@ fn conflict(target: &RawTarget<'_>, actual: &str) -> WaymarkError {
         .with_details(serde_json::json!({
             "id": serde_json::Value::Null,
             "path": target.path.to_string(),
-            "expected_fingerprint": target.expected.as_str(),
+            "expected_fingerprint": expected,
             "actual_fingerprint": actual,
         })),
     }
@@ -310,13 +373,23 @@ fn conflict(target: &RawTarget<'_>, actual: &str) -> WaymarkError {
 /// Put the first `replaced` captured documents back, and report the ones that
 /// could not be restored.
 ///
-/// A restore itself goes through [`write_atomic`], so it inherits the same
-/// symlink and regular-file refusals: a document that vanished or became a
-/// directory after the batch started is reported, never silently skipped.
-fn restore(originals: &[(camino::Utf8PathBuf, Vec<u8>)], replaced: usize) -> Vec<String> {
+/// A replacement is restored from the bytes captured during prevalidation; a
+/// created document is removed again. A restore itself goes through
+/// [`write_atomic`], so it inherits the same symlink and regular-file refusals:
+/// a document that vanished or became a directory after the batch started is
+/// reported, never silently skipped.
+fn restore(originals: &[(camino::Utf8PathBuf, Option<Vec<u8>>)], replaced: usize) -> Vec<String> {
     let mut failed: Vec<String> = Vec::new();
     for (path, original) in originals.iter().take(replaced) {
-        if write_atomic(path, original).is_err() {
+        let restored = match original {
+            Some(bytes) => write_atomic(path, bytes).is_ok(),
+            None => match fs::remove_file(path) {
+                Ok(()) => true,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+                Err(_) => false,
+            },
+        };
+        if !restored {
             failed.push(path.to_string());
         }
     }
@@ -352,6 +425,19 @@ fn validate_batch_target(target: &RawTarget<'_>) -> Result<(), WaymarkError> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             Err(conflict(target, "missing"))
         }
+        Err(source) => Err(WaymarkError::io(target.path.to_string(), "read", &source)),
+    }
+}
+
+/// Refuse a create target whose destination already exists.
+///
+/// A create is only safe when the name is free: a symlink, directory, or
+/// document already there is a `WRITE_CONFLICT` with expected `absent`, so a
+/// compound operation never writes over something it did not mint.
+fn validate_batch_create(target: &RawTarget<'_>) -> Result<(), WaymarkError> {
+    match fs::symlink_metadata(target.path) {
+        Ok(_) => Err(conflict(target, "present")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(source) => Err(WaymarkError::io(target.path.to_string(), "read", &source)),
     }
 }
@@ -950,6 +1036,71 @@ mod tests {
     #[test]
     fn an_empty_batch_is_a_successful_no_op() {
         assert!(replace_batch(&[]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_batch_creates_new_documents_and_replaces_existing_ones_together() {
+        let dir = scratch();
+        let existing = document_path(&dir, "existing.md");
+        let fresh = document_path(&dir, "fresh.md");
+        fs::write(&existing, b"one\n").unwrap();
+        let id = item_id();
+
+        let applied = replace_batch_with_creates(
+            &[BatchCreate {
+                id: &id,
+                path: &fresh,
+                bytes: b"NEW\n",
+            }],
+            &[BatchTarget {
+                id: &id,
+                path: &existing,
+                expected: &Fingerprint::of(b"one\n"),
+                bytes: b"ONE\n",
+            }],
+        )
+        .expect("both documents are written");
+
+        assert_eq!(applied.len(), 2);
+        assert_eq!(applied[0].path, fresh);
+        assert_eq!(applied[0].fingerprint, Fingerprint::of(b"NEW\n"));
+        assert_eq!(fs::read_to_string(&fresh).unwrap(), "NEW\n");
+        assert_eq!(fs::read_to_string(&existing).unwrap(), "ONE\n");
+    }
+
+    #[test]
+    fn a_create_target_that_already_exists_writes_nothing() {
+        let dir = scratch();
+        let existing = document_path(&dir, "existing.md");
+        let occupied = document_path(&dir, "occupied.md");
+        fs::write(&existing, b"one\n").unwrap();
+        fs::write(&occupied, b"someone else\n").unwrap();
+        let id = item_id();
+
+        let error = replace_batch_with_creates(
+            &[BatchCreate {
+                id: &id,
+                path: &occupied,
+                bytes: b"NEW\n",
+            }],
+            &[BatchTarget {
+                id: &id,
+                path: &existing,
+                expected: &Fingerprint::of(b"one\n"),
+                bytes: b"ONE\n",
+            }],
+        )
+        .expect_err("the create target is not free");
+
+        assert_eq!(error.code(), crate::error::Code::WriteConflict);
+        assert_eq!(error.details()["expected_fingerprint"], "absent");
+        assert_eq!(error.details()["actual_fingerprint"], "present");
+        assert_eq!(fs::read_to_string(&occupied).unwrap(), "someone else\n");
+        assert_eq!(
+            fs::read_to_string(&existing).unwrap(),
+            "one\n",
+            "no replacement was made"
+        );
     }
 
     #[test]

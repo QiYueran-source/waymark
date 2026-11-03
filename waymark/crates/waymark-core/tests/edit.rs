@@ -70,7 +70,8 @@ fn field_project() -> (tempfile::TempDir, Project) {
 
 /// Create one item carrying the required field and return its stable ID.
 fn make(project: &Project, title: &str) -> String {
-    let mut request = CreateRequest::new(title, "task", "frank");
+    let mut request = CreateRequest::new(title, "task", "frank")
+        .with_field(FieldKey::parse("effort").unwrap(), FieldValue::Integer(1));
     request = request.with_body("original body\n");
     let created = create::create(project, request, &options_at(0)).expect("creation succeeds");
     let id = created.item.id.clone();

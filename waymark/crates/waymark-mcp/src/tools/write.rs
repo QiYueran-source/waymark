@@ -44,9 +44,31 @@ pub struct CreateWorkItemArgs {
     /// Accountable identity. Trimmed; must be non-empty and single line.
     pub owner: String,
 
+    /// Provenance identity. Trimmed and validated like `owner`; defaults to the
+    /// configured operator when omitted.
+    #[serde(default)]
+    pub creator: Option<String>,
+
     /// Markdown body. Omitted means an empty body.
     #[serde(default)]
     pub body: Option<String>,
+
+    /// Declared custom fields to set, keyed by field name. A JSON string,
+    /// integer, boolean, or homogeneous list of those; `null` is rejected.
+    #[serde(default)]
+    pub custom_fields: BTreeMap<String, Value>,
+
+    /// Stable ID of the parent the item starts under.
+    #[serde(default)]
+    pub parent: Option<String>,
+
+    /// Stable IDs the item waits for. All must exist and be active.
+    #[serde(default)]
+    pub dependencies: Vec<String>,
+
+    /// Stable IDs to soft-link to. Stored symmetrically on both sides.
+    #[serde(default)]
+    pub soft_links: Vec<String>,
 
     /// Validate and report what would be written, without writing.
     #[serde(default)]
@@ -115,9 +137,12 @@ pub struct CustomFieldChanges {
 #[tool_router(router = write_router, vis = "pub(crate)")]
 impl WaymarkServer {
     /// Create one work item. The domain mints the stable ID and the timestamps;
-    /// callers cannot supply them. Returns the complete created item, its path,
-    /// and whether the store changed. `dry_run` validates and reports the ID and
-    /// path it would allocate without writing.
+    /// callers cannot supply them. The request may also carry a creator, custom
+    /// fields, a parent, dependencies, and soft links, all written as one
+    /// atomic operation. Returns the complete created item, its path, every
+    /// rewritten soft-link partner, one fingerprint per written document, and
+    /// whether the store changed. `dry_run` performs every check and reports the
+    /// same shape without writing.
     #[tool(
         name = "waymark_create_work_item",
         annotations(
@@ -133,8 +158,23 @@ impl WaymarkServer {
         envelope::respond(|| {
             let project = self.project()?;
             let mut request = create::CreateRequest::new(args.title, args.category, args.owner);
+            if let Some(creator) = args.creator {
+                request = request.with_creator(creator);
+            }
             if let Some(body) = args.body {
                 request = request.with_body(body);
+            }
+            for (key, value) in create_fields(&args.custom_fields)? {
+                request = request.with_field(key, value);
+            }
+            if let Some(parent) = args.parent {
+                request = request.with_parent(parent);
+            }
+            for dependency in args.dependencies {
+                request = request.with_dependency(dependency);
+            }
+            for link in args.soft_links {
+                request = request.with_soft_link(link);
             }
             let created = create::create(&project, request, &params::options(args.dry_run))?;
             Ok(envelope::success(
@@ -143,6 +183,10 @@ impl WaymarkServer {
                     "path": created.path.to_string(),
                     "written": created.written,
                     "item": item_json(&created.item, &created.path),
+                    "partners": created.partners.iter().map(|partner| {
+                        item_json(&partner.item, &partner.path)
+                    }).collect::<Vec<_>>(),
+                    "fingerprints": created.fingerprints.iter().map(|fingerprint| fingerprint.as_str()).collect::<Vec<_>>(),
                 }),
                 Meta::direct_file_scoped(),
             ))
@@ -516,6 +560,51 @@ fn edit_result(outcome: &EditOutcome) -> ToolResult {
         }),
         outcome.meta.clone(),
     )
+}
+
+/// Translate a create request's custom-field map into the domain's typed list.
+///
+/// The adapter owns only what the core type cannot represent: a JSON `null` and
+/// values that are not scalars (a float or object) are refused here with the
+/// shared `VALIDATION_ERROR` shape. Every well-formed value is handed to the
+/// domain, which owns the declared-type, required-field, and duplicate rules.
+fn create_fields(
+    fields: &BTreeMap<String, Value>,
+) -> Result<Vec<(FieldKey, waymark_core::FieldValue)>, waymark_core::WaymarkError> {
+    use waymark_core::error::ValidationIssue;
+    use waymark_core::WaymarkError;
+
+    let mut issues = Vec::new();
+    let mut out = Vec::with_capacity(fields.len());
+    for (key, value) in fields {
+        let path = format!("custom_fields.{key}");
+        let parsed = match FieldKey::parse(key) {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                issues.push(ValidationIssue::new(
+                    path,
+                    format!("`{key}` is not a valid custom-field key: {error}"),
+                ));
+                continue;
+            }
+        };
+        if value.is_null() {
+            issues.push(ValidationIssue::new(
+                path,
+                "null is not a custom-field value; omit the key instead",
+            ));
+            continue;
+        }
+        match params::field_value(value) {
+            Ok(value) => out.push((parsed, value)),
+            Err(reason) => issues.push(ValidationIssue::new(path, reason)),
+        }
+    }
+    if issues.is_empty() {
+        Ok(out)
+    } else {
+        Err(WaymarkError::validation("custom_fields", issues).at_field("custom_fields"))
+    }
 }
 
 /// One custom-field update as a successful tool result.
