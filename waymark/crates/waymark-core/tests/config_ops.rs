@@ -8,6 +8,7 @@ use waymark_core::model::FieldKey;
 use waymark_core::ops::config::{self, FieldAttribute, Scalar};
 use waymark_core::ops::create::CreateRequest;
 use waymark_core::ops::{create, OpOptions};
+use waymark_core::store::Fingerprint;
 use waymark_core::testing::fixtures;
 use waymark_core::{CategoryKey, FieldValue, Project};
 
@@ -132,6 +133,52 @@ fn an_invalid_scalar_is_a_validation_error_and_writes_nothing() {
 }
 
 #[test]
+fn a_stale_expected_fingerprint_is_a_write_conflict_instead_of_a_rebase() {
+    let (_dir, project) = fixtures::deterministic_project();
+    let original = Fingerprint::of(&std::fs::read(project.config_path()).expect("readable"));
+
+    // A hand edit that leaves the revision counter alone changes the bytes; the
+    // fingerprint is the conflict check, not the counter.
+    let edited = format!("{}# hand edited\n", read_config(&project));
+    std::fs::write(project.config_path(), &edited).expect("the configuration is writable");
+    let edited_fingerprint = Fingerprint::of(edited.as_bytes());
+
+    let error = config::set_scalar(
+        &project,
+        Scalar::Operator,
+        "frank",
+        &options().with_expected_config_fingerprint(original.clone()),
+    )
+    .expect_err("the caller's expectation no longer holds");
+    assert_eq!(error.code(), Code::WriteConflict);
+    assert_eq!(
+        error.details()["expected_fingerprint"],
+        serde_json::json!(original.as_str())
+    );
+    assert_eq!(
+        error.details()["actual_fingerprint"],
+        serde_json::json!(edited_fingerprint.as_str())
+    );
+    assert_eq!(
+        error.details()["path"],
+        serde_json::json!(project.config_path())
+    );
+    assert_eq!(read_config(&project), edited, "the conflict writes nothing");
+
+    // The current fingerprint is accepted: the option guards a concurrent edit,
+    // it does not forbid writing at all.
+    let written = config::set_scalar(
+        &project,
+        Scalar::Operator,
+        "frank",
+        &options().with_expected_config_fingerprint(edited_fingerprint),
+    )
+    .expect("a current fingerprint writes");
+    assert!(written.changed);
+    assert!(read_config(&project).contains("operator = \"frank\""));
+}
+
+#[test]
 fn a_category_can_be_added_renamed_and_removed() {
     let (_dir, project) = fixtures::deterministic_project();
     let added = config::add_category(&project, &key("bug"), "work/bugs", None, &options())
@@ -140,6 +187,10 @@ fn a_category_can_be_added_renamed_and_removed() {
     assert_eq!(added.config.categories[&key("bug")].name, "Bug");
     assert_eq!(added.config.categories[&key("bug")].path, "work/bugs");
     assert_eq!(added.revision, 1);
+    assert!(
+        project.root().join("work/bugs").is_dir(),
+        "adding a category also creates its directory"
+    );
 
     let renamed =
         config::set_category_name(&project, &key("bug"), "Bugs", &options()).expect("it renames");
@@ -149,6 +200,42 @@ fn a_category_can_be_added_renamed_and_removed() {
     let removed = config::remove_category(&project, &key("bug"), &options()).expect("it removes");
     assert!(!removed.config.categories.contains_key(&key("bug")));
     assert_eq!(removed.revision, 3);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_failed_configuration_write_rolls_back_the_category_directory() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (_dir, project) = fixtures::deterministic_project();
+    // Make sure the lock file and the ignore entry already exist: only the
+    // configuration replacement may fail, not lock acquisition.
+    config::set_scalar(&project, Scalar::Operator, "frank", &options()).expect("the scalar writes");
+    let config_before = read_config(&project);
+
+    let metadata_dir = project.root().join(".waymark");
+    let original = std::fs::metadata(&metadata_dir)
+        .expect("the metadata directory exists")
+        .permissions();
+    let mut read_only = original.clone();
+    read_only.set_mode(0o555);
+    std::fs::set_permissions(&metadata_dir, read_only).expect("the directory is made read-only");
+
+    let error = config::add_category(&project, &key("bug"), "work/bugs", None, &options())
+        .expect_err("the configuration cannot be replaced");
+
+    std::fs::set_permissions(&metadata_dir, original).expect("the directory is writable again");
+
+    assert_eq!(error.code(), Code::IoError);
+    assert!(
+        !project.root().join("work/bugs").exists(),
+        "the directory created before the failed replacement is rolled back"
+    );
+    assert_eq!(
+        read_config(&project),
+        config_before,
+        "the config is untouched"
+    );
 }
 
 #[test]

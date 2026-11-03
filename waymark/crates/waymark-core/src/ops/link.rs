@@ -166,8 +166,8 @@ fn apply_add(
     right_item.soft_links.push(left.id().clone());
     normalize_links(&mut right_item);
 
-    mediated::touch(&mut left_item, options);
-    mediated::touch(&mut right_item, options);
+    mediated::stamp_updated_at(&mut left_item, options);
+    mediated::stamp_updated_at(&mut right_item, options);
 
     let meta = link_meta(project, [&left_item, &right_item], options);
     commit_pair(&left, &left_item, &right, &right_item, meta, options)
@@ -183,7 +183,7 @@ fn apply_remove(
     let mut left_item = left.item.clone();
     left_item.soft_links.retain(|known| known != partner);
     normalize_links(&mut left_item);
-    mediated::touch(&mut left_item, options);
+    mediated::stamp_updated_at(&mut left_item, options);
 
     let Some(right) = right else {
         // Only one document to replace: a batch of one is still an atomic write.
@@ -205,7 +205,7 @@ fn apply_remove(
     let mut right_item = right.item.clone();
     right_item.soft_links.retain(|known| known != left.id());
     normalize_links(&mut right_item);
-    mediated::touch(&mut right_item, options);
+    mediated::stamp_updated_at(&mut right_item, options);
 
     let meta = link_meta(project, [&left_item, &right_item], options);
     commit_pair(&left, &left_item, &right, &right_item, meta, options)

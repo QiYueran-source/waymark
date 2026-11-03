@@ -154,6 +154,11 @@ pub fn archive(
     options: &OpOptions,
 ) -> Result<ArchiveOutcome, WaymarkError> {
     let reason = normalize_reason(reason);
+    // A dry run performs every check and writes nothing, so it must not wait on
+    // the write lock: the spec says previews never block on it.
+    if options.dry_run {
+        return apply(project, id, reason, options);
+    }
     crate::lock::with_project_lock(project, options.lock_wait, || {
         apply(project, id, reason, options)
     })
@@ -230,7 +235,7 @@ fn apply(
         }
         // The file really changed, so it gets a new modification time. The
         // target does not: only its markers moved.
-        mediated::touch(&mut cleaned, options);
+        mediated::stamp_updated_at(&mut cleaned, options);
         for relation in &relations {
             removals.push(PlannedRemoval {
                 from: document.id.clone(),

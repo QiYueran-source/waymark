@@ -505,6 +505,58 @@ fn an_archived_target_creates_nothing() {
 }
 
 #[test]
+fn a_dry_run_applies_the_same_mediated_checks_to_soft_link_partners() {
+    let (_dir, project) = project();
+
+    // An archived partner is refused by both the preview and the write.
+    let retired = make(&project, "retired");
+    archive_by_hand(&project, &retired);
+    let before = snapshot(project.root());
+    let preview = create::create(
+        &project,
+        request("plan").with_soft_link(retired.as_str()),
+        &options().dry_run(),
+    )
+    .expect_err("the preview refuses an archived partner");
+    let write = create::create(
+        &project,
+        request("plan").with_soft_link(retired.as_str()),
+        &options(),
+    )
+    .expect_err("the write refuses an archived partner");
+    assert_eq!(preview.code(), Code::ItemArchived);
+    assert_eq!(preview.code(), write.code());
+    assert_eq!(snapshot(project.root()), before);
+
+    // A partner whose generation predates this release is only caught by the
+    // mediated read: the graph still sees an active node. The preview must catch
+    // it exactly like the write.
+    let stale = make(&project, "stale");
+    let path = task_path(&project, &stale);
+    let text = std::fs::read_to_string(&path).expect("the document is readable");
+    let downgraded = text.replacen("schema: 1\n", "schema: 0\n", 1);
+    assert_ne!(text, downgraded);
+    std::fs::write(&path, downgraded).expect("the document is writable");
+    let before = snapshot(project.root());
+
+    let preview = create::create(
+        &project,
+        request("plan").with_soft_link(stale.as_str()),
+        &options().dry_run(),
+    )
+    .expect_err("the preview refuses a stale partner");
+    let write = create::create(
+        &project,
+        request("plan").with_soft_link(stale.as_str()),
+        &options(),
+    )
+    .expect_err("the write refuses a stale partner");
+    assert_eq!(preview.code(), Code::ItemNeedsMigration);
+    assert_eq!(preview.code(), write.code());
+    assert_eq!(snapshot(project.root()), before);
+}
+
+#[test]
 fn a_duplicate_reference_creates_nothing() {
     let (_dir, project) = project();
     let seed = make(&project, "seed");

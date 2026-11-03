@@ -11,6 +11,7 @@ use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use waymark_core::config::{Config, FieldDecl, FieldType};
 use waymark_core::error::Code;
+use waymark_core::lock::{with_project_lock, LockWait};
 use waymark_core::model::FieldKey;
 use waymark_core::ops::archive::{self, InboundRelation};
 use waymark_core::ops::create::CreateRequest;
@@ -698,6 +699,32 @@ fn a_dry_run_performs_every_check_and_reports_every_removal() {
     );
     assert_eq!(document(&project, &dependent), dependent_before);
     assert_eq!(document(&project, &partner), partner_before);
+}
+
+#[test]
+fn a_dry_run_does_not_wait_for_the_project_lock() {
+    let (_dir, project) = project();
+    let target = make(&project, "target");
+    let dependent = make(&project, "dependent");
+    relationship::add_dependency(&project, &dependent, &target, &options())
+        .expect("the edge is added");
+
+    // Hold the one write lock, then preview under an immediate wait: a dry run
+    // that took the lock would answer LOCK_TIMEOUT instead of its report.
+    with_project_lock(&project, LockWait::default_policy(), || {
+        let outcome = archive::archive(
+            &project,
+            &target,
+            Some("preview"),
+            &options().with_lock_wait(LockWait::immediate()).dry_run(),
+        )
+        .expect("a dry run never waits on the write lock");
+        assert!(!outcome.written);
+        assert!(outcome.fingerprints.is_empty());
+        assert_eq!(outcome.removals.len(), 1);
+        Ok(())
+    })
+    .expect("the lock is released");
 }
 
 #[test]

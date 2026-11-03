@@ -25,6 +25,7 @@
 //! `ACTION_REQUIRES_MIGRATION`.
 
 use camino::{Utf8Path, Utf8PathBuf};
+use serde_json::json;
 
 use crate::config::{
     default_category_name, Category, Config, ConfigIssue, FieldDecl, FieldType, Version,
@@ -36,7 +37,7 @@ use crate::location::Location;
 use crate::lock::with_project_lock;
 use crate::model::{CategoryKey, FieldKey, FieldValue};
 use crate::ops::OpOptions;
-use crate::store::Project;
+use crate::store::{Fingerprint, Project};
 use crate::time::parse_timezone;
 
 /// The result of one configuration operation.
@@ -270,43 +271,88 @@ pub fn add_category(
     options: &OpOptions,
 ) -> Result<ConfigOutcome, WaymarkError> {
     let name = name.map_or_else(|| default_category_name(key), str::to_owned);
-    let outcome = mediate(project, options, |current| {
-        if current.categories.contains_key(key) {
-            return Err(invalid(
-                format!("categories.{key}"),
-                format!("the category `{key}` already exists"),
-            ));
-        }
-        let mut next = current.clone();
-        next.categories.insert(
-            key.clone(),
-            Category {
-                path: path.trim().to_owned(),
-                name,
-            },
-        );
-        Ok((next, vec![format!("categories.{key}")]))
-    })?;
-
     // The declaration is what makes a category exist; the directory is where its
-    // documents will go. Creating it here is a directory, never a work-item file,
-    // and keeps `add category` as complete as `init`. A directory that already
-    // exists (or that another process creates first) is fine.
-    if outcome.changed && !options.dry_run {
-        let directory = project.root().join(
-            outcome
-                .config
+    // documents will go. It is created **inside** the same critical section,
+    // before the configuration is replaced, and removed again if the replacement
+    // fails: a reported failure leaves neither a declaration nor a directory.
+    // Creating a directory is never a work-item write, and an existing directory
+    // (or one another process creates first) is fine.
+    mediate_with(
+        project,
+        options,
+        |next| {
+            let category = next
                 .categories
                 .get(key)
-                .expect("the category was just declared")
-                .path
-                .as_str(),
-        );
-        if let Err(source) = std::fs::create_dir_all(&directory) {
-            return Err(WaymarkError::io(directory.to_string(), "create", &source));
+                .expect("the replacement declares the category");
+            let directory = project.root().join(&category.path);
+            let created = create_directory_tree(&directory)?;
+            Ok(Some(Box::new(move || remove_directory_tree(&created))))
+        },
+        |current| {
+            if current.categories.contains_key(key) {
+                return Err(invalid(
+                    format!("categories.{key}"),
+                    format!("the category `{key}` already exists"),
+                ));
+            }
+            let mut next = current.clone();
+            next.categories.insert(
+                key.clone(),
+                Category {
+                    path: path.trim().to_owned(),
+                    name,
+                },
+            );
+            Ok((next, vec![format!("categories.{key}")]))
+        },
+    )
+}
+
+/// Create `directory` and any missing ancestors, returning every directory this
+/// call actually created, outermost first.
+///
+/// Each level is created separately so the returned list names only our own
+/// directories: a directory another process created first is not ours to remove
+/// if the configuration replacement then fails.
+fn create_directory_tree(directory: &Utf8Path) -> Result<Vec<Utf8PathBuf>, WaymarkError> {
+    let mut created = Vec::new();
+    for path in missing_directories(directory) {
+        match std::fs::create_dir(&path) {
+            Ok(()) => created.push(path),
+            Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists && path.is_dir() => {}
+            Err(source) => {
+                remove_directory_tree(&created);
+                return Err(WaymarkError::io(path.to_string(), "create", &source));
+            }
         }
     }
-    Ok(outcome)
+    Ok(created)
+}
+
+/// The missing ancestors of `directory`, outermost first, including itself.
+fn missing_directories(directory: &Utf8Path) -> Vec<Utf8PathBuf> {
+    let mut missing = Vec::new();
+    let mut cursor = Some(directory);
+    while let Some(path) = cursor {
+        if path.exists() {
+            break;
+        }
+        missing.push(path.to_path_buf());
+        cursor = path.parent();
+    }
+    missing.reverse();
+    missing
+}
+
+/// Remove the directories this operation created, deepest first.
+///
+/// `remove_dir` only removes an empty directory, so a concurrent writer's file is
+/// never deleted; a directory that cannot be removed is simply left behind.
+fn remove_directory_tree(created: &[Utf8PathBuf]) {
+    for path in created.iter().rev() {
+        let _ = std::fs::remove_dir(path);
+    }
 }
 
 /// Change a category's display name. Items are untouched.
@@ -565,9 +611,40 @@ fn mediate(
     options: &OpOptions,
     body: impl FnOnce(&Config) -> Result<(Config, Vec<String>), WaymarkError>,
 ) -> Result<ConfigOutcome, WaymarkError> {
+    mediate_with(project, options, |_| Ok(None), body)
+}
+
+/// Undo work a configuration write did before its replacement failed.
+type Rollback = Box<dyn FnOnce()>;
+
+/// The locked read-modify-validate-write cycle with a pre-replacement hook.
+///
+/// `before_write` receives the validated replacement and runs **inside the same
+/// critical section**, immediately before the one atomic configuration
+/// replacement. It may create the things the new configuration implies (a
+/// category directory) and returns the undo for them; the undo runs when the
+/// replacement itself fails, so a reported failure leaves nothing behind. A dry
+/// run never calls it.
+fn mediate_with(
+    project: &Project,
+    options: &OpOptions,
+    before_write: impl FnOnce(&Config) -> Result<Option<Rollback>, WaymarkError>,
+    body: impl FnOnce(&Config) -> Result<(Config, Vec<String>), WaymarkError>,
+) -> Result<ConfigOutcome, WaymarkError> {
     let config_path = project.config_path();
     with_project_lock(project, options.lock_wait, || {
+        // Fingerprint the exact bytes on disk, then parse them: a caller that
+        // supplied an expectation is guarding against a concurrent hand edit,
+        // not against this module's canonical rendering.
+        let raw = std::fs::read(&config_path)
+            .map_err(|source| WaymarkError::io(config_path.to_string(), "read", &source))?;
         let current = Config::load(&config_path)?;
+        if let Some(expected) = &options.expected_config_fingerprint {
+            let actual = Fingerprint::of(&raw);
+            if &actual != expected {
+                return Err(config_conflict(&config_path, expected, &actual));
+            }
+        }
         let previous_revision = current.version.revision;
         let current_bytes = current.to_toml_string();
 
@@ -594,7 +671,13 @@ fn mediate(
         }
         let bytes = next.to_toml_string();
         if !options.dry_run {
-            crate::write::replace_unchecked(&config_path, bytes.as_bytes())?;
+            let rollback = before_write(&next)?;
+            if let Err(error) = crate::write::replace_unchecked(&config_path, bytes.as_bytes()) {
+                if let Some(rollback) = rollback {
+                    rollback();
+                }
+                return Err(error);
+            }
         }
         Ok(ConfigOutcome {
             config: next,
@@ -604,6 +687,24 @@ fn mediate(
             changed_keys,
         })
     })
+}
+
+/// The `WRITE_CONFLICT` a stale expected configuration fingerprint produces.
+///
+/// The details mirror the work-item conflict shape: the path and the two
+/// fingerprints. A configuration document has no stable item ID, so there is no
+/// `id` key.
+fn config_conflict(path: &Utf8Path, expected: &Fingerprint, actual: &Fingerprint) -> WaymarkError {
+    WaymarkError::new(
+        Code::WriteConflict,
+        format!("{path} changed on disk since it was read; reread and retry"),
+    )
+    .with_details(json!({
+        "path": path.to_string(),
+        "expected_fingerprint": expected.as_str(),
+        "actual_fingerprint": actual.as_str(),
+    }))
+    .with_location(Location::config_key(CONFIG_FILE))
 }
 
 fn config_invalid_error(path: &Utf8Path, issues: &[ConfigIssue]) -> WaymarkError {

@@ -185,7 +185,7 @@ pub fn create(
     // The lock is taken *before* the inventory: an ID allocated against a stale
     // inventory could collide with an item another writer just committed.
     crate::lock::with_project_lock(project, options.lock_wait, || {
-        commit(project, prepared, options)
+        write_new_item(project, prepared, options)
     })
 }
 
@@ -205,10 +205,13 @@ fn prepare_only(
 
     let mut partners = Vec::with_capacity(prepared.soft_links.len());
     for partner_id in &prepared.soft_links {
-        let (partner, entry) = project.load(partner_id)?;
+        // The same mediated read the real write uses: a partner that is archived
+        // or older-generation must refuse the preview too, otherwise the dry run
+        // would promise a creation the write cannot perform.
+        let partner = mediated::load_for_write(project, partner_id.as_str(), "create")?;
         partners.push(ChangedPartner {
-            item: link_partner(partner, &id, now),
-            path: entry.path,
+            item: link_partner(partner.item, &id, now),
+            path: partner.path,
             fingerprint: None,
         });
     }
@@ -223,8 +226,11 @@ fn prepare_only(
     })
 }
 
-/// The write half of [`create`], run while the store lock is held.
-fn commit(
+/// The write half of [`create`]: inventory, ID, graph checks, and the one
+/// batch that creates the new document and rewrites its partners.
+///
+/// Run while the store lock is held.
+fn write_new_item(
     project: &Project,
     prepared: Prepared,
     options: &OpOptions,

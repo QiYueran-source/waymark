@@ -249,7 +249,7 @@ fn apply_field_changes(
         });
     }
 
-    mediated::touch(&mut item, options);
+    mediated::stamp_updated_at(&mut item, options);
     let fingerprint = mediated::commit(loaded, &item, options)?;
     Ok(FieldOutcome {
         item,
@@ -407,7 +407,7 @@ fn finish_edit(
             meta,
         });
     }
-    mediated::touch(&mut item, options);
+    mediated::stamp_updated_at(&mut item, options);
     let fingerprint = mediated::commit(loaded, &item, options)?;
     Ok(EditOutcome {
         item,

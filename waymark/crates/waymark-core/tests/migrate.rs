@@ -11,12 +11,13 @@ use serde_json::json;
 use waymark_core::config::{Config, FieldDecl, FieldType};
 use waymark_core::envelope::Warning;
 use waymark_core::error::Code;
+use waymark_core::lock::{with_project_lock, LockWait};
 use waymark_core::model::{FieldKey, FieldValue, WorkItem, FORMAT_GENERATION};
 use waymark_core::ops::config::{self, FieldAttribute, Scalar};
 use waymark_core::ops::create::{self, CreateRequest};
 use waymark_core::ops::edit::{self, FieldChange, FieldChangeEntry};
 use waymark_core::ops::list::{self, Query};
-use waymark_core::ops::migrate::{self, SchemaAction};
+use waymark_core::ops::migrate::{self, SchemaAction, StorageAction};
 use waymark_core::ops::{archive, read, OpOptions};
 use waymark_core::testing::fixtures;
 use waymark_core::{InitOptions, Project};
@@ -435,6 +436,52 @@ fn adding_a_required_field_supplies_its_default_so_no_item_is_left_invalid() {
 }
 
 #[test]
+fn every_dry_run_reports_without_waiting_for_the_project_lock() {
+    let (_dir, project) = project_with_fields(&[]);
+    let (_id, _path) = create_one(&project, "First");
+
+    // Hold the one write lock, then run every migration preview under an
+    // immediate wait: a preview that took the lock would answer LOCK_TIMEOUT
+    // instead of its report.
+    with_project_lock(&project, LockWait::default_policy(), || {
+        let dry = options().dry_run().with_lock_wait(LockWait::immediate());
+
+        let version = migrate::migrate_version(&project, FORMAT_GENERATION, &dry)
+            .expect("a version preview never waits on the write lock");
+        assert!(!version.written);
+
+        let schema = migrate::migrate_schema(
+            &project,
+            SchemaAction::AddRequiredField {
+                key: field_key("effort"),
+                ty: FieldType::Integer,
+                default: Some(FieldValue::Integer(1)),
+            },
+            &dry,
+        )
+        .expect("a schema preview never waits on the write lock");
+        assert!(!schema.written);
+        assert!(schema.config_changed);
+
+        let storage = migrate::migrate_storage(
+            &project,
+            &StorageAction::Root {
+                path: "items".to_owned(),
+            },
+            &dry,
+        )
+        .expect("a storage preview never waits on the write lock");
+        assert!(!storage.written);
+        Ok(())
+    })
+    .expect("the lock is released");
+
+    // None of the previews wrote anything.
+    assert!(config_text(&project).contains("storage_root = \"work\""));
+    assert!(!config_text(&project).contains("[fields.effort]"));
+}
+
+#[test]
 fn a_required_field_without_a_default_cannot_leave_an_item_invalid() {
     let (_dir, project) = project_with_fields(&[]);
     let (_id, _path) = create_one(&project, "First");
@@ -484,6 +531,41 @@ fn schema_migration_refuses_a_field_type_change_with_the_same_command_as_config(
         from_migration.details().get("required_command"),
         from_config.details().get("required_command")
     );
+}
+
+#[test]
+fn add_required_field_cannot_promote_an_existing_optional_field() {
+    let (_dir, project) = project_with_fields(&[("effort", FieldType::Integer, false)]);
+    let before = config_text(&project);
+
+    // The same refusal `config set field effort required true` already gives:
+    // promotion is a manual schema change, never a migration action.
+    let from_config = config::set_field(
+        &project,
+        &field_key("effort"),
+        FieldAttribute::Required,
+        "true",
+        &options(),
+    )
+    .expect_err("a requiredness change is migration territory");
+    let from_migration = migrate::migrate_schema(
+        &project,
+        SchemaAction::AddRequiredField {
+            key: field_key("effort"),
+            ty: FieldType::Integer,
+            default: Some(FieldValue::Integer(1)),
+        },
+        &options(),
+    )
+    .expect_err("the existing declaration cannot be promoted");
+
+    assert_eq!(from_migration.code(), Code::ActionRequiresMigration);
+    assert_eq!(from_migration.message(), from_config.message());
+    assert_eq!(
+        from_migration.details().get("required_command"),
+        from_config.details().get("required_command")
+    );
+    assert_eq!(config_text(&project), before, "nothing is declared");
 }
 
 #[test]
