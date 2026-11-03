@@ -265,3 +265,35 @@ fn archive_by_hand(project: &Project, id: &str) {
     item.archived_at = Some(fixtures::instant());
     std::fs::write(&path, waymark_core::serialize::to_document(&item)).unwrap();
 }
+
+#[test]
+fn a_soft_link_to_a_deleted_target_stays_written_and_is_diagnosed() {
+    let (_dir, project) = project();
+    let left = make(&project, "task", "left");
+    let right = make(&project, "task", "right");
+    add_soft_link(&project, &left, &right, &options()).unwrap();
+
+    // The target document disappears; the surviving half-link is data, not a
+    // reason to rewrite anything on a read.
+    let path = read::read(&project, &right).unwrap().path;
+    std::fs::remove_file(path).unwrap();
+    let before = document(&project, &left);
+
+    let graph = waymark_core::Graph::from_project(&project).unwrap();
+    let findings: Vec<_> = graph
+        .diagnostics()
+        .into_iter()
+        .filter(|finding| {
+            finding.code == Code::DanglingReference && finding.message.contains("soft_links")
+        })
+        .collect();
+
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert!(findings[0].message.contains(&left));
+    assert!(findings[0].message.contains(&right));
+    assert_eq!(
+        document(&project, &left),
+        before,
+        "reading never rewrites the surviving side"
+    );
+}
