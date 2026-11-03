@@ -13,6 +13,7 @@ pub mod link;
 pub mod list;
 pub mod parent;
 pub mod project;
+pub mod query;
 pub mod relationship;
 pub mod show;
 pub mod status;

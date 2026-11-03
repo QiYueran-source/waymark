@@ -21,6 +21,7 @@ use waymark_core::ops::OpOptions;
 use waymark_core::time::SystemClock;
 
 mod cmd;
+use cmd::query::{QueryArgs, SearchArgs, StatsArgs};
 
 use cmd::archive::ArchiveArgs;
 use cmd::config::ConfigArgs;
@@ -101,6 +102,12 @@ enum Command {
     Blocked(ListArgs),
     /// Retire one work item without deleting it.
     Archive(ArchiveArgs),
+    /// Run a list read driven by a structured JSON filter document.
+    Query(QueryArgs),
+    /// Search titles, frontmatter, and bodies case-insensitively.
+    Search(SearchArgs),
+    /// Report counts only: totals, by status, by category, ready, and blocked.
+    Stats(StatsArgs),
     /// Inspect the project itself.
     Project(ProjectArgs),
     /// Read, validate, and change the project configuration.
@@ -230,6 +237,18 @@ fn run(cli: Cli) -> Result<(), waymark_core::WaymarkError> {
         Command::Blocked(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
             cmd::list::run(&project, &args, cmd::list::Which::Blocked, json)
+        }
+        Command::Query(args) => {
+            let project = cmd::open_project(cli.project.as_deref())?;
+            cmd::query::run_query(&project, &args, json)
+        }
+        Command::Search(args) => {
+            let project = cmd::open_project(cli.project.as_deref())?;
+            cmd::query::run_search(&project, &args, json)
+        }
+        Command::Stats(args) => {
+            let project = cmd::open_project(cli.project.as_deref())?;
+            cmd::query::run_stats(&project, &args, json)
         }
         Command::Archive(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;

@@ -15,9 +15,10 @@ use waymark_core::model::FieldKey;
 use waymark_core::ops::archive::{self, InboundRelation};
 use waymark_core::ops::create::CreateRequest;
 use waymark_core::ops::edit::FieldChangeEntry;
-use waymark_core::ops::list::{self, Filters};
+use waymark_core::ops::list::{self, Query};
 use waymark_core::ops::tree::hierarchy_tree;
 use waymark_core::ops::{create, edit, link, parent, read, relationship, status, OpOptions};
+use waymark_core::query::ArchiveRange;
 use waymark_core::testing::{fixtures, SequentialIds};
 use waymark_core::{FieldValue, FixedClock, InitOptions, Project, Status, WorkItemId};
 
@@ -577,11 +578,11 @@ fn archived_items_leave_the_active_collections_and_the_tree() {
     archive::archive(&project, &retired_root, None, &options_at(6)).expect("the root archives");
     archive::archive(&project, &retired, None, &options_at(7)).expect("the dependent archives");
 
-    let listed = list::list(&project, &Filters::new()).expect("list succeeds");
+    let listed = list::list(&project, &Query::new()).expect("list succeeds");
     assert_eq!(titles(&listed), vec!["kept", "blocker"]);
-    let ready = list::ready(&project, &Filters::new()).expect("ready succeeds");
+    let ready = list::ready(&project, &Query::new()).expect("ready succeeds");
     assert!(!titles(&ready).contains(&"retired".to_owned()));
-    let blocked = list::blocked(&project, &Filters::new()).expect("blocked succeeds");
+    let blocked = list::blocked(&project, &Query::new()).expect("blocked succeeds");
     assert!(titles(&blocked).is_empty(), "{:?}", titles(&blocked));
 
     let tree = hierarchy_tree(&project, None, None).expect("the tree reads");
@@ -610,29 +611,36 @@ fn the_archived_only_range_selects_only_archived_items() {
     let kept = make(&project, "kept");
     archive::archive(&project, &retired, Some("done"), &options_at(10)).expect("archive succeeds");
 
-    let archived = list::list(&project, &Filters::new().with_archived()).expect("list succeeds");
+    let archived = list::list(&project, &Query::new().with_archive(ArchiveRange::Archived))
+        .expect("list succeeds");
     assert_eq!(titles(&archived), vec!["retired"]);
     assert_eq!(archived.items[0].item.id.as_str(), retired);
     assert!(archived.items[0].item.is_archived());
     assert!(!archived.items[0].readiness.ready);
     assert!(!archived.items[0].readiness.blocked);
 
-    let active = list::list(&project, &Filters::new()).expect("list succeeds");
+    let active = list::list(&project, &Query::new()).expect("list succeeds");
     assert_eq!(titles(&active), vec!["kept"]);
     assert_eq!(active.items[0].item.id.as_str(), kept);
 
     // Readiness is about active work: an archived range never claims either.
-    assert!(list::ready(&project, &Filters::new().with_archived())
-        .expect("ready succeeds")
-        .is_empty());
-    assert!(list::blocked(&project, &Filters::new().with_archived())
-        .expect("blocked succeeds")
-        .is_empty());
+    assert!(
+        list::ready(&project, &Query::new().with_archive(ArchiveRange::Archived))
+            .expect("ready succeeds")
+            .is_empty()
+    );
+    assert!(
+        list::blocked(&project, &Query::new().with_archive(ArchiveRange::Archived))
+            .expect("blocked succeeds")
+            .is_empty()
+    );
 
     // The archive range composes with the status filter.
     assert!(list::list(
         &project,
-        &Filters::new().with_archived().with_status(Status::Closed)
+        &Query::new()
+            .with_archive(ArchiveRange::Archived)
+            .with_status(Status::Closed)
     )
     .expect("list succeeds")
     .is_empty());
@@ -640,7 +648,9 @@ fn the_archived_only_range_selects_only_archived_items() {
         titles(
             &list::list(
                 &project,
-                &Filters::new().with_archived().with_status(Status::Open)
+                &Query::new()
+                    .with_archive(ArchiveRange::Archived)
+                    .with_status(Status::Open)
             )
             .expect("list succeeds")
         ),
