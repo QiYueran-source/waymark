@@ -107,6 +107,25 @@ pub enum ReadinessFilter {
     Blocked,
 }
 
+impl ReadinessFilter {
+    /// Parse the documented wire literal: `ready` or `blocked`.
+    pub fn parse(literal: &str) -> Option<Self> {
+        match literal {
+            "ready" => Some(Self::Ready),
+            "blocked" => Some(Self::Blocked),
+            _ => None,
+        }
+    }
+
+    /// The documented wire literal.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ready => "ready",
+            Self::Blocked => "blocked",
+        }
+    }
+}
+
 /// One custom-field predicate.
 ///
 /// The operand is optional only for the two presence operations; every other
@@ -439,6 +458,12 @@ impl Filters {
     }
 
     /// Parse the structured JSON filter form used by `waymark query`.
+    ///
+    /// The documented keys are [`FILTER_KEYS`]. `leaves` is the single leaf
+    /// spelling, `field` the single predicate-array spelling, and `readiness`
+    /// the single readiness spelling with the values `ready` and `blocked`.
+    /// The boolean `ready`/`blocked` keys are deprecated synonyms retained for
+    /// callers of the earlier MCP document; see [`DEPRECATED_FILTER_KEYS`].
     pub fn from_json(value: &Value) -> Result<Self, WaymarkError> {
         let object = value
             .as_object()
@@ -492,6 +517,21 @@ impl Filters {
                         },
                     });
                 }
+                "readiness" => {
+                    let literal = string_value(entry, "readiness")?;
+                    filters.readiness =
+                        Some(ReadinessFilter::parse(&literal).ok_or_else(|| {
+                            invalid(
+                                "readiness",
+                                format!("{literal:?} is not `ready` or `blocked`"),
+                            )
+                        })?);
+                }
+                // Deprecated boolean synonyms for `readiness`. They stay because
+                // the MCP tool description documented them before `readiness`
+                // existed; one spelling per concept is `readiness`, and the
+                // synonyms are documented as deprecated rather than silently
+                // accepted.
                 "ready" => {
                     let ready = bool_value(entry, "ready")?;
                     filters.readiness = Some(if ready {
@@ -508,7 +548,7 @@ impl Filters {
                         ReadinessFilter::Ready
                     });
                 }
-                "field" | "fields" => {
+                "field" => {
                     let entries = entry.as_array().ok_or_else(|| {
                         invalid("field", "`field` must be an array of predicates")
                     })?;
@@ -527,16 +567,46 @@ impl Filters {
                         )
                     })?;
                 }
-                other => {
-                    return Err(invalid(
-                        format!("filter.{other}"),
-                        "unknown structured filter key",
-                    ))
-                }
+                other => return Err(unknown_filter_key(other)),
             }
         }
         Ok(filters)
     }
+}
+
+/// The structured filter keys [`Filters::from_json`] accepts.
+///
+/// This is the documented set; the unknown-key error names it. One spelling per
+/// concept: `field` (not `fields`), `leaves` (not `leaf`), and `readiness` with
+/// the values `ready`/`blocked` (not a boolean flag).
+pub const FILTER_KEYS: &[&str] = &[
+    "archive",
+    "category",
+    "creator",
+    "dependencies",
+    "field",
+    "leaves",
+    "owner",
+    "parent",
+    "parent_present",
+    "readiness",
+    "status",
+    "text",
+];
+
+/// Boolean filter keys accepted as deprecated synonyms for `readiness`.
+pub const DEPRECATED_FILTER_KEYS: &[&str] = &["blocked", "ready"];
+
+/// The error for a key outside [`FILTER_KEYS`] and [`DEPRECATED_FILTER_KEYS`].
+fn unknown_filter_key(key: &str) -> WaymarkError {
+    invalid(
+        format!("filter.{key}"),
+        format!(
+            "unknown structured filter key; accepted keys: {} (deprecated boolean aliases: {})",
+            FILTER_KEYS.join(", "),
+            DEPRECATED_FILTER_KEYS.join(", ")
+        ),
+    )
 }
 
 fn invalid(path: impl Into<String>, reason: impl Into<String>) -> WaymarkError {

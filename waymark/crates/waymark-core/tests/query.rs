@@ -681,6 +681,83 @@ fn the_structured_filter_rejects_null_unknown_keys_and_typed_mismatches() {
     );
 }
 
+#[test]
+fn the_documented_readiness_key_is_canonical_and_boolean_aliases_stay_deprecated() {
+    use waymark_core::query::ReadinessFilter;
+
+    let ready = Filters::from_json(&serde_json::json!({"readiness": "ready"})).unwrap();
+    assert_eq!(ready.readiness, Some(ReadinessFilter::Ready));
+    let blocked = Filters::from_json(&serde_json::json!({"readiness": "blocked"})).unwrap();
+    assert_eq!(blocked.readiness, Some(ReadinessFilter::Blocked));
+
+    // The earlier MCP document advertised boolean `ready`/`blocked`; they remain
+    // accepted as deprecated synonyms so that document keeps working.
+    for (document, expected) in [
+        (serde_json::json!({"ready": true}), ReadinessFilter::Ready),
+        (
+            serde_json::json!({"blocked": true}),
+            ReadinessFilter::Blocked,
+        ),
+        (
+            serde_json::json!({"ready": false}),
+            ReadinessFilter::Blocked,
+        ),
+        (
+            serde_json::json!({"blocked": false}),
+            ReadinessFilter::Ready,
+        ),
+    ] {
+        assert_eq!(
+            Filters::from_json(&document).unwrap().readiness,
+            Some(expected),
+            "{document}"
+        );
+    }
+
+    assert_eq!(
+        Filters::from_json(&serde_json::json!({"readiness": "sleepy"}))
+            .unwrap_err()
+            .code(),
+        waymark_core::Code::ValidationError
+    );
+}
+
+#[test]
+fn the_unknown_filter_key_error_lists_the_accepted_keys() {
+    let error = Filters::from_json(&serde_json::json!({"nonsense": 1})).unwrap_err();
+    for key in waymark_core::query::FILTER_KEYS {
+        assert!(
+            error.message().contains(key),
+            "the accepted set omits {key}: {}",
+            error.message()
+        );
+    }
+    assert!(error.message().contains("deprecated"));
+    assert!(
+        !error.message().contains("fields"),
+        "`fields` is not an accepted spelling: {}",
+        error.message()
+    );
+
+    // The undocumented `fields` alias was dropped: it is an unknown key now.
+    assert_eq!(
+        Filters::from_json(&serde_json::json!({"fields": []}))
+            .unwrap_err()
+            .code(),
+        waymark_core::Code::ValidationError
+    );
+    // `field` remains the single predicate-array spelling.
+    assert_eq!(
+        Filters::from_json(&serde_json::json!({"field": [
+            {"key": "effort", "op": "exists"}
+        ]}))
+        .unwrap()
+        .fields
+        .len(),
+        1
+    );
+}
+
 // -- search -----------------------------------------------------------------
 
 #[test]
