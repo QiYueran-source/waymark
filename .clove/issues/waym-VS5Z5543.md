@@ -205,11 +205,25 @@ Codes with no exit class, used as warnings and findings: `OWNER_MISMATCH` (warni
 - The working document's unresolved interface questions do not enter the specification. They join this map's Not yet specified list, where the specification is forbidden to infer an answer.
 - The specification lives in the Clove tracker as its own work item under `.clove/issues/`, not in `docs/`. No spec-like document remains under `docs/`; such documents are retired or migrated into it.
 
+### Reopened decisions: Web, MCP, and distribution
+
+The following decisions extend the accepted specification; the specification and implementation tickets have not yet been synchronized with them.
+
+- Use existing frameworks for the Web HTTP service and for MCP, rather than implementing HTTP or the MCP protocol by hand. Clove is technical prior art, not a requirement to copy its product scope or response contracts. The exact frameworks and versions remain open.
+- The basic distribution includes CLI, the shared core, and MCP; Web is optional. A Web-enabled build or installation is separate from the basic one. Compiling in Web is not a promise that it can be added dynamically to an already installed executable.
+- A Web-enabled build must obtain complete frontend assets. Missing assets or a frontend build failure must produce a clear build failure, rather than silently shipping a placeholder or stale frontend as a successful Web build.
+- A prebuilt Web-enabled binary includes its frontend assets; an end user running it does not need Rust, Node.js, or npm. To build the frontend from source, the developer needs Node.js and npm unless verified prebuilt assets are supplied instead.
+
 ## Not yet specified
 
-The design tree is exhausted: every decision ticket is closed, indexed under Decisions so far, with the lock lifecycle under "Resolved write-lock lifecycle" and the taxonomy under "Resolved error taxonomy structure" and "Resolved error registry". The rewrite is done and accepted: `waym-WMSPEC01` follows the shape settled in "Resolved replacement-specification shape", with 130 user stories, the absorbed command and tool catalog, the frozen error registry, and the interface working document retired to `.inbox/superpower/`. This map is closed; implementation tickets are cut from the specification, not from this map.
+### Web, MCP, and distribution follow-up
 
-What remains here is detail too fine to spend a decision ticket on, and which the replacement specification can settle directly:
+- Which HTTP, MCP, and frontend frameworks and versions should be selected, and whether they meet the supported Rust version.
+- The exact feature and artifact layout, frontend asset verification and provenance, and the ownership of integration work across the Web and MCP tickets.
+
+Before the Web, MCP, and distribution follow-up above, every original decision ticket had been closed and indexed under Decisions so far. The replacement `waym-WMSPEC01` was accepted with 130 user stories, the absorbed command and tool catalog, and the frozen error registry; the interface working document was retired to `.inbox/superpower/`. The map remains the decision record and implementation tickets are cut from the specification, not from this map. The new follow-up decisions above are not yet reflected in that specification.
+
+The following earlier details also remain unspecified:
 
 - the frontmatter field name and value shape that carries the format generation;
 - whether `sync` stays a public command, folds into `doctor`, or is implied by per-operation inventory checks;
