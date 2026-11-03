@@ -264,3 +264,29 @@ fn doctor_reports_a_held_lock_without_waiting() {
         result.stdout()
     );
 }
+
+/// Diagnostics travel the one dispatch and the one exit mapping like every
+/// other command: an unopenable project is a `PROJECT_NOT_FOUND` failure with
+/// the registry's exit class, not a special diagnostic exit.
+#[test]
+fn a_diagnostic_failure_uses_the_shared_exit_mapping() {
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let empty = Utf8PathBuf::from_path_buf(dir.path().to_path_buf())
+        .expect("a UTF-8 path")
+        .join("no-project");
+    std::fs::create_dir_all(&empty).unwrap();
+
+    for command in ["doctor", "validate"] {
+        let result = run(waymark()
+            .arg("--json")
+            .arg("--project")
+            .arg(&empty)
+            .arg(command));
+        assert_eq!(result.status(), 5, "{command}: {}", result.stderr());
+        assert_eq!(
+            result.json()["error"]["code"],
+            serde_json::json!("PROJECT_NOT_FOUND"),
+            "{command}"
+        );
+    }
+}
