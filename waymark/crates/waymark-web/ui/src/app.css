@@ -404,7 +404,7 @@ code {
 }
 
 /* The innermost column draws the elbow into this row: a solid parenthood edge. */
-.guide:last-of-type::after {
+.guide.innermost::after {
 	content: '';
 	position: absolute;
 	top: 50%;

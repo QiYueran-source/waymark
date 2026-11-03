@@ -41,7 +41,7 @@
 >
 	<div class="node-row">
 		{#each Array(depth) as _, guideIndex (guideIndex)}
-			<span class="guide" aria-hidden="true"></span>
+			<span class="guide" class:innermost={guideIndex === depth - 1} aria-hidden="true"></span>
 		{/each}
 
 		{#if hasChildren}
