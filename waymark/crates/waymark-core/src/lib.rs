@@ -16,6 +16,8 @@
 //! - [`error`], [`location`], [`envelope`] — the machine contract.
 //! - [`testing`] — fixtures and deterministic clock/ID seams, public so every
 //!   downstream crate's tests share them.
+//! - [`view`] — the shared JSON renderers the CLI and MCP adapters publish, so
+//!   one machine payload is stated once.
 
 pub mod config;
 pub mod envelope;
@@ -36,6 +38,7 @@ pub mod stats;
 pub mod store;
 pub mod testing;
 pub mod time;
+pub mod view;
 pub mod write;
 
 pub use config::Config;
