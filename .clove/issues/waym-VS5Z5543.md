@@ -119,7 +119,11 @@ Produce a handoff-ready functional specification for Waymark, a general-purpose,
 
 ### Resolved migration and versioning semantics
 
-- The configuration version is `major.minor`. The minor increments by exactly one on every Waymark-mediated configuration write; direct hand edits do not move it. The major is raised only by an explicit version-migration command and is never bumped implicitly by ordinary configuration edits.
+- The configuration version is written `major.minor`, meaning `format generation.configuration revision`. The major is the on-disk format generation: it is declared by the installed Waymark release and changes only when Waymark's own file format changes (core field set, serialization rules, or body rules). No configuration edit can raise the major.
+- The minor is a monotonic configuration revision counter: it increments by exactly one when a Waymark-mediated configuration write actually changes configuration content, and does not increment for a no-op write. Direct hand edits of the configuration file do not move it. A version migration that also rewrites configuration counts as one configuration write.
+- The minor is informational only. Freshness, projection invalidation, concurrency conflict detection, and cache invalidation are determined by file fingerprints, never by the revision counter; hand-edited configuration is detected by fingerprint regardless of the counter.
+- `migrate version` accepts only a target format generation that the installed Waymark release can write; the user chooses when to run the migration, not which generation number to declare.
+- Work-item frontmatter persists only the format generation. It never persists the configuration revision, so a configuration change can never make an existing work item stale.
 - Migration has three kinds: version (format/compatibility generation), schema (project custom-field definitions), and storage (storage root, category key, or category path relocation). All three expose a `--dry-run` preview that performs the full read-only check and reports affected files, and a real execution that performs the same checks before writing.
 - No persisted migration plan artifact is designed: there is no plan file, plan id, or plan/apply handshake. `--dry-run` plus re-derivation at execution time replaces it.
 - Durable migration backups under `.waymark/` are not provided. Recovery after a successful-but-wrong migration relies on Git or user copies. A single migration run is still application-level all-or-nothing with in-run rollback from staged copies, and rollback failure is reported explicitly.
@@ -137,7 +141,7 @@ Produce a handoff-ready functional specification for Waymark, a general-purpose,
 
 The remaining interface-design work is to settle the exact public CLI command tree, MCP tool names, request/response schemas, archive-range and pagination parameters, dry-run coverage, and which convenience aliases are retained. The shared function-library boundary, equal CLI/MCP capability coverage, and the initial separation of title/body/custom-field editing from protected core-field operations are settled; command spelling and transport schemas remain open until the interface design ticket is resolved.
 
-Open migration questions: what version marker a work item persists (only the major generation, or the full `major.minor`), and how a change is classified as a major format generation change rather than an ordinary configuration revision.
+Open migration questions: the concrete `migrate schema` and `migrate storage` parameters, their prevalidation rule sets, their error codes, and how `migrate version` reports that the installed release cannot write the requested generation.
 
 The archive, in-process projection/cache, body-editing, projection validation, query-range, migration, relationship-operation, lifecycle/ownership, creation, timezone, and adapter-parity contracts resolved so far are recorded above and must be reflected in the functional specification and implementation tickets. The design is ready for a consistency pass and then synchronization to the functional specification and implementation tickets when requested.
 
