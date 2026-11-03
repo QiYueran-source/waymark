@@ -605,3 +605,37 @@ fn a_symlinked_category_path_is_a_finding() {
         "{findings:?}"
     );
 }
+
+#[test]
+fn an_empty_operator_value_clears_the_key() {
+    let (_dir, project) = fixtures::deterministic_project();
+    config::set_scalar(&project, Scalar::Operator, "frank", &options()).unwrap();
+    let cleared = config::set_scalar(&project, Scalar::Operator, "  ", &options())
+        .expect("clearing is a change");
+    assert!(cleared.changed);
+    assert_eq!(cleared.config.operator, None);
+    assert!(!read_config(&project).contains("operator ="));
+    assert_eq!(cleared.revision, 2);
+
+    let repeated = config::set_scalar(&project, Scalar::Operator, "", &options()).unwrap();
+    assert!(!repeated.changed, "clearing an absent operator is a no-op");
+}
+
+#[test]
+fn an_invalid_configuration_cannot_be_opened_as_a_project() {
+    let (_dir, project) = fixtures::deterministic_project();
+    std::fs::write(
+        project.config_path(),
+        config::show(&project)
+            .unwrap()
+            .to_toml_string()
+            .replace("path = \"work/task\"", "path = \"/tmp/elsewhere\""),
+    )
+    .unwrap();
+    let error = Project::open(project.root()).expect_err("the document is invalid");
+    assert_eq!(error.code(), Code::ConfigInvalid);
+    // ... and the finding-oriented path still points at the key.
+    let findings = config::validate_config_path(&project.config_path());
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert!(findings[0].message.contains("categories.task.path"));
+}

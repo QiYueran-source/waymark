@@ -717,7 +717,11 @@ fn validate_relative_path(key: &str, raw: &str) -> Vec<ConfigIssue> {
             "a path must not escape the repository root",
         ));
     }
-    if value != "." && value.split('/').any(str::is_empty) {
+    // An absolute path's leading component is empty by construction; reporting
+    // both would describe one mistake twice. The absolute-path issue is the
+    // better description, so the empty-component check only speaks when nothing
+    // else already rejected the path.
+    if issues.is_empty() && value != "." && value.split('/').any(str::is_empty) {
         issues.push(ConfigIssue::key(
             key,
             "a path must not contain an empty component",
