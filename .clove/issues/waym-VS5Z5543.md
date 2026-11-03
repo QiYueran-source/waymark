@@ -144,18 +144,14 @@ Produce a handoff-ready functional specification for Waymark, a general-purpose,
 
 ## Not yet specified
 
-These are the areas the map still sees only dimly: in scope, but not yet sharp enough to settle. Everything else — archive, lifecycle, ownership, relationships, custom fields, query semantics, projection and caching, body editing, the title/body/custom-field edit split, versioning, and the three migration kinds — is resolved above.
+The fog has been graduated into five decision tickets and one terminal ticket: [Define the configuration command surface and its migration boundary](waym-K4QMRT7A), [Define creation defaults and required inputs](waym-B6TW9KPD), [Define the query and reporting surface](waym-R8YF2NCE), [Define concurrency and lock lifecycle](waym-J3VX6HQS), [Freeze the error taxonomy and exit-code mapping](waym-M9WL5DZB) (blocked by the first four), and [Define the replacement specification's shape](waym-Q2CT8YGX) (blocked by all five).
 
-- **Query and reporting surface.** Which parameters `list`, `tree`, `children`, `leaves`, `ready`, `blocked`, `search`, `query`, and `stats` expose: pagination model, default ordering, field projection, archive-range naming, tree grouping and depth, and what `stats` actually counts. The underlying semantics (deterministic ordering, snapshot-local pagination, active-only default) are settled; the external shape is not.
-- **Creation defaults and required inputs.** Whether `owner` may be omitted and default to the declared operator, whether `creator` is always the operator, what happens when a required custom field is absent at creation, and which category or field defaults apply.
-- **Configuration command surface, and its boundary with migration.** Which settings are edited through `config` and which must go through `migrate storage`; how a category is removed or its items reassigned; and how configuration writes handle atomicity and revision increments. The interface design document still lists storage-root and category-path operations under `config`, which the migration decisions now claim.
-- **Concurrency and lock lifecycle.** Lock acquisition, timeout, and recovery from a lock left behind by a crashed process; how a long-lived MCP projection and a short-lived CLI invocation contend for the same project.
-- **MCP transport and presentation.** stdio versus HTTP, tool-name convention, whether resources or subscriptions are exposed, and how business errors ride alongside JSON-RPC protocol errors.
-- **Work-item format marker.** The frontmatter field name and value shape that carries the format generation.
-- **Projection synchronization surface.** Whether `sync` remains a public command, what it reports, and whether read paths may trigger it implicitly.
-- **Error-code closure.** The initial taxonomy is listed as "such as"; the final enumerable set and its exit-code mapping need freezing before adapters are written.
-- **Human-readable output shape.** Command-level tables, detail views, and tree rendering, and whether CLI and Web share work-state colours and markers.
-- **Next specification shape.** The destination is a handoff-ready functional specification, but the previous one is retired; the structure, sectioning, and acceptance criteria of its replacement are undecided.
+What remains here is detail too fine to spend a decision ticket on, and which the replacement specification can settle directly:
+
+- the frontmatter field name and value shape that carries the format generation;
+- whether `sync` stays a public command, folds into `doctor`, or is implied by per-operation inventory checks;
+- MCP transport specifics (stdio versus HTTP, tool-name convention, whether resources or subscriptions are exposed);
+- the concrete shape of human-readable CLI output, and whether CLI and Web share work-state colours and markers.
 
 ## Out of scope
 
