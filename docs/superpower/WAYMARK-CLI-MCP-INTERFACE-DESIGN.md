@@ -161,9 +161,9 @@ waymark field update <id> --set <key=value>... --clear <key>...
 
 - `title set` 完整替换 title；
 - `body replace` 完整替换或清空正文，`--body` 与 `--body-file` 互斥；
-- `field update` 一次更新一个工作项的多个自定义字段，使用显式 `--set` 和 `--clear`。
+- `field update` 一次更新一个工作项的多个自定义字段，使用显式 `--set` 和 `--clear`；复杂值使用 canonical JSON literal，简单 string/integer/boolean 值可按 schema 使用无歧义的简写。
 
-每个操作只修改自己的数据区域；请求没有实际变化时不写文件、不更新时间。是否恢复 Clove 风格的 CLI `$EDITOR`、是否提供人类友好的复合 `edit` 命令、以及跨领域复合编辑是否原子，仍待编辑契约确认。
+每个操作只修改自己的数据区域；请求没有实际变化时不写文件、不更新时间。v1 不提供 CLI `$EDITOR`；正文通过 `--body` 或 `--body-file` 直接替换。是否提供人类友好的复合 `edit` 命令、以及跨领域复合编辑是否原子，仍待编辑契约确认。
 
 ### 3.4 专用核心操作
 
@@ -269,10 +269,9 @@ CLI 和 MCP 共享以下约束：
 本文不提前决定以下内容：
 
 - 每个命令和 tool 的最终名称；
-- title、body、自定义字段操作的精确参数和 clear/unset 语义；
-- CLI 是否支持 `$EDITOR`；
+- title、body、自定义字段操作的完整 MCP schema 和返回值；
 - 是否提供复合 `edit` 命令，以及跨领域编辑是否原子；
-- 自定义字段 CLI 值如何解析为 integer、boolean 和 list；
+- 批量操作的完整请求形状；
 - 读取查询的分页、排序、投影和 archive 参数；
 - 批量操作的完整请求形状；
 - 配置修改和迁移的具体 kind、plan/apply schema；
