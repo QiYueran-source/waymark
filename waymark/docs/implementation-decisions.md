@@ -2285,3 +2285,19 @@ takes the `ArchiveRange` and `Projection` explicitly because those are caller ch
   exit for every command; the special doctor/validate match and the dead arm
   are gone. The existing exit contract is unchanged: findings exit 0 by
   default, `--strict` returns the invalid-data class.
+
+# Review fixes — shared display state
+
+- **The display state and blocked-reason prose live in `waymark_core::view`.**
+  `DisplayState` (`Ready`, `InProgress`, `Blocked`, `Closed`; `as_str`,
+  `parse`, `Display`), `display_state(&Readiness, &WorkItem)`, and
+  `blocked_reason(&Graph, &Readiness)` are the one derivation. Precedence is
+  `closed` → `blocked` → `in_progress` → `ready` (closed includes archived), and
+  the prose is `waiting on wm-… (unfinished|archived|missing), …`. The Web calls
+  both directly. The CLI calls `display_state` and keeps only a label mapping
+  onto its older column vocabulary (`archived` for an archived item, `ready`
+  for an unblocked in-progress item, `-` for a closed `list` row), so its human
+  output stays byte-identical; that is presentation, not a second precedence
+  rule. `blocked_by` remains the CLI/JSON fact, and the Web derives
+  `blocked_reason` from the same helper rather than owning the prose.
+

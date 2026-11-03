@@ -20,12 +20,13 @@ use serde_json::{json, Value};
 
 use waymark_core::envelope::Meta;
 use waymark_core::error::WaymarkError;
-use waymark_core::model::{CategoryKey, Status, WorkItem};
+use waymark_core::model::{CategoryKey, WorkItem};
 use waymark_core::ops::list::complete_meta;
 use waymark_core::ops::read;
 use waymark_core::ops::tree::{self, HierarchyTree, TreeNode, UnresolvedItem};
 use waymark_core::readiness::{Graph, Readiness};
 use waymark_core::store::Project;
+use waymark_core::view::{blocked_reason, display_state};
 
 use crate::render;
 use crate::respond;
@@ -303,44 +304,15 @@ fn item_data(project: &Project, id: &str) -> Result<Value, WaymarkError> {
     }))
 }
 
-/// The derived, renderable state of one node.
+/// The derived, renderable state of one node, in the Web's stable vocabulary.
 ///
-/// Precedence is `closed` → `blocked` → `in_progress` → `ready`: a closed item is
-/// never blocked, and a blocked in-progress item is primarily blocked (the
-/// actual `status` is sent separately, so the frontend can still show
-/// "in progress" as a label if it wants).
+/// The precedence itself lives in [`waymark_core::view::display_state`]; this
+/// only adapts the optional readiness the two routes carry. A `None` readiness
+/// is defensive (a rendered node always has one): the node still gets its
+/// lifecycle-based state, while `ready`/`blocked` stay `null` at the call site.
 fn item_state(item: &WorkItem, readiness: Option<&Readiness>) -> &'static str {
-    if item.is_archived() || item.status.is_closed() {
-        "closed"
-    } else if readiness.is_some_and(|readiness| readiness.blocked) {
-        "blocked"
-    } else if item.status == Status::InProgress {
-        "in_progress"
-    } else {
-        "ready"
-    }
-}
-
-/// Human-readable reason for a derived block, or `None` when not blocked.
-fn blocked_reason(graph: &Graph, readiness: &Readiness) -> Option<String> {
-    if !readiness.blocked {
-        return None;
-    }
-    let parts: Vec<String> = readiness
-        .blocked_by
-        .iter()
-        .map(|id| {
-            let label = if graph.get(id).is_some() {
-                "unfinished"
-            } else if graph.is_archived(id) {
-                "archived"
-            } else {
-                "missing"
-            };
-            format!("{} ({label})", id.as_str())
-        })
-        .collect();
-    Some(format!("waiting on {}", parts.join(", ")))
+    let readiness = readiness.cloned().unwrap_or_else(Readiness::ready);
+    display_state(&readiness, item).as_str()
 }
 
 fn id_list(ids: &[waymark_core::WorkItemId]) -> Vec<&str> {
@@ -409,5 +381,37 @@ fn hex(byte: u8) -> Option<u8> {
         b'a'..=b'f' => Some(byte - b'a' + 10),
         b'A'..=b'F' => Some(byte - b'A' + 10),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use waymark_core::ops::tree::TreeNode;
+    use waymark_core::readiness::Graph;
+    use waymark_core::testing::fixtures;
+
+    #[test]
+    fn a_blocked_node_keeps_its_state_and_reason() {
+        let blocker = fixtures::work_item("wm-000000000002", "task", "Blocker").build();
+        let mut dependent = fixtures::work_item("wm-000000000001", "task", "Dependent").build();
+        dependent.dependencies = vec![blocker.id.clone()];
+        let graph = Graph::from_items(&[blocker, dependent.clone()]);
+        let node = TreeNode {
+            id: dependent.id.clone(),
+            item: Some(dependent),
+            depth: 0,
+            repeated: false,
+            children: Vec::new(),
+        };
+
+        let value = node_json(&node, &graph, &[]);
+        assert_eq!(value["state"], "blocked");
+        assert_eq!(value["ready"], false);
+        assert_eq!(value["blocked"], true);
+        assert_eq!(
+            value["blocked_reason"],
+            "waiting on wm-000000000002 (unfinished)"
+        );
     }
 }

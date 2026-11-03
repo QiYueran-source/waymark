@@ -19,9 +19,10 @@ use waymark_core::error::{ValidationIssue, WaymarkError};
 use waymark_core::ops::list::{self, Listing};
 use waymark_core::ops::status::parse_status;
 use waymark_core::query::{
-    ArchiveRange, FieldKey, FieldOp, FieldPredicate, Filters, Projection, Query, Sort, SortField,
-    Window,
+    ArchiveRange, FieldKey, FieldOp, FieldPredicate, Filters, ListedItem, Projection, Query, Sort,
+    SortField, Window,
 };
+use waymark_core::view::{display_state, DisplayState};
 use waymark_core::{CategoryKey, FieldValue, Project, WorkItemId};
 
 use super::{emit, err_line};
@@ -432,6 +433,45 @@ pub fn run_with_query(
     }
 }
 
+/// The `state` column of a human listing.
+///
+/// The precedence lives in [`waymark_core::view::display_state`]; this maps it
+/// onto the CLI's long-standing column vocabulary. `ready` covers an unblocked
+/// in-progress row (the `status` column already distinguishes it), an archived
+/// row says `archived`, and an active closed row has no readiness state to show.
+fn state_column(row: &ListedItem) -> &'static str {
+    match display_state(&row.readiness, &row.item) {
+        DisplayState::Closed if row.item.is_archived() => "archived",
+        DisplayState::Closed => "-",
+        DisplayState::InProgress => "ready",
+        other => other.as_str(),
+    }
+}
+
+/// Every line one human listing row renders.
+fn row_lines(row: &ListedItem) -> Vec<String> {
+    let mut lines = vec![format!(
+        "{}  {:<12} {:<8} {}",
+        row.item.id,
+        row.item.status.as_str(),
+        state_column(row),
+        row.item.title
+    )];
+    if row.needs_migration {
+        lines.push("    needs migration".to_owned());
+    }
+    if !row.readiness.blocked_by.is_empty() {
+        let ids: Vec<&str> = row
+            .readiness
+            .blocked_by
+            .iter()
+            .map(|id| id.as_str())
+            .collect();
+        lines.push(format!("    blocked by {}", ids.join(", ")));
+    }
+    lines
+}
+
 /// Render a listing in the mode the caller asked for.
 pub fn render(
     listing: &Listing,
@@ -451,32 +491,8 @@ pub fn render(
         err_line("no items");
     }
     for row in &listing.items {
-        err_line(&format!(
-            "{}  {:<12} {:<8} {}",
-            row.item.id,
-            row.item.status.as_str(),
-            if row.item.is_archived() {
-                "archived"
-            } else if row.readiness.blocked {
-                "blocked"
-            } else if row.readiness.ready {
-                "ready"
-            } else {
-                "-"
-            },
-            row.item.title
-        ));
-        if row.needs_migration {
-            err_line("    needs migration");
-        }
-        if !row.readiness.blocked_by.is_empty() {
-            let ids: Vec<&str> = row
-                .readiness
-                .blocked_by
-                .iter()
-                .map(|id| id.as_str())
-                .collect();
-            err_line(&format!("    blocked by {}", ids.join(", ")));
+        for line in row_lines(row) {
+            err_line(&line);
         }
     }
     err_line(&format!(
@@ -494,4 +510,38 @@ pub fn render(
         err_line(&format!("  {}: {}", finding.code, finding.message));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use waymark_core::readiness::Readiness;
+    use waymark_core::testing::fixtures;
+
+    #[test]
+    fn a_blocked_row_keeps_its_state_and_blocked_by_lines() {
+        let blocker = WorkItemId::parse("wm-000000000002").expect("a valid stable ID");
+        let mut item = fixtures::work_item("wm-000000000001", "task", "Dependent").build();
+        item.dependencies = vec![blocker.clone()];
+        let row = ListedItem {
+            item,
+            readiness: Readiness {
+                ready: false,
+                blocked: true,
+                blocked_by: vec![blocker],
+            },
+            children: Vec::new(),
+            dependents: Vec::new(),
+            needs_migration: false,
+        };
+
+        assert_eq!(state_column(&row), "blocked");
+        assert_eq!(
+            row_lines(&row),
+            vec![
+                "wm-000000000001  open         blocked  Dependent".to_owned(),
+                "    blocked by wm-000000000002".to_owned(),
+            ]
+        );
+    }
 }
