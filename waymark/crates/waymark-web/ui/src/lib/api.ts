@@ -40,11 +40,18 @@ interface SuccessEnvelope<T> {
 	data?: T;
 }
 
-/** Diagnostic entries are opaque; render strings as-is, everything else as JSON. */
+/**
+ * Diagnostic entries are opaque; render strings as-is, everything else as JSON.
+ *
+ * This is also the one renderer for opaque custom-field values:
+ * `JSON.stringify` returns `undefined` for values it cannot represent, so those
+ * fall back to `String` instead of rendering as nothing.
+ */
 export function diagnosticText(entry: unknown): string {
 	if (typeof entry === 'string') return entry;
 	try {
-		return JSON.stringify(entry);
+		const json: unknown = JSON.stringify(entry);
+		return typeof json === 'string' ? json : String(entry);
 	} catch {
 		return String(entry);
 	}

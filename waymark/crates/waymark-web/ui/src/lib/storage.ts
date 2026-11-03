@@ -2,8 +2,8 @@
  * Browser-local preferences: the only state the Web view remembers.
  *
  * Everything here stays in `localStorage` on this origin. Nothing is written to
- * the project, sent to the service, or uploaded. Keys are namespaced by an
- * identifier derived from the normalized project-root path supplied by
+ * the project, sent to the service, or uploaded. Keys are namespaced by a
+ * [`ProjectId`] derived once from the normalized project-root path supplied by
  * `GET /api/health`, so two projects on one origin never share a preference.
  *
  * Storage is treated as optional. If it is unavailable (blocked, disabled, a
@@ -27,23 +27,31 @@ export function normalizeProjectRoot(root: string): string {
 	return value === '' ? '/' : value;
 }
 
+declare const projectIdBrand: unique symbol;
+
+/**
+ * The preference namespace for one project, derived once from the health
+ * payload's project root.
+ *
+ * This is a distinct type, not a plain string: a root path and a namespaced id
+ * cannot be confused, and [`preferenceKey`] accepts nothing else.
+ */
+export type ProjectId = string & { readonly [projectIdBrand]: 'ProjectId' };
+
 /** A stable, non-reversible identifier for a project root. */
-export function projectKey(root: string): string {
-	return `${STORAGE_PREFIX}:${hash53(normalizeProjectRoot(root)).toString(16)}`;
+export function projectIdFor(root: string): ProjectId {
+	return `${STORAGE_PREFIX}:${hash53(normalizeProjectRoot(root)).toString(16)}` as ProjectId;
 }
 
 /** The key for one preference of one view in one project. */
 export function preferenceKey(
-	rootOrProjectId: string,
+	projectId: ProjectId,
 	preference: 'view' | 'expanded' | 'dependencies' | 'scroll',
 	view?: ViewName
 ): string {
-	const namespace = rootOrProjectId.startsWith(`${STORAGE_PREFIX}:`)
-		? rootOrProjectId
-		: projectKey(rootOrProjectId);
 	return view === undefined
-		? `${namespace}:${preference}`
-		: `${namespace}:${preference}:${view}`;
+		? `${projectId}:${preference}`
+		: `${projectId}:${preference}:${view}`;
 }
 
 /** Access `localStorage` without letting a hostile/disabled store throw. */
@@ -78,14 +86,14 @@ function parseScroll(raw: string | null): number {
 
 /** The project-scoped preference store, tolerant of unavailable storage. */
 export class PreferenceStore {
-	readonly projectId: string;
+	readonly projectId: ProjectId;
 	/** True once any read/write failed or storage was unavailable. */
 	failed = false;
 	private readonly storage: Storage | null;
 
-	constructor(storage: Storage | null, projectRoot: string) {
+	constructor(storage: Storage | null, projectId: ProjectId) {
 		this.storage = storage;
-		this.projectId = projectKey(projectRoot);
+		this.projectId = projectId;
 		if (storage === null) {
 			this.failed = true;
 		}

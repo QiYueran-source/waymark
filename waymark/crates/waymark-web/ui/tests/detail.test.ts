@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
 import DetailPanel from '$lib/components/DetailPanel.svelte';
@@ -67,6 +67,19 @@ describe('item detail', () => {
 		expect(screen.getByTestId('detail-panel').textContent).toContain('kept as text');
 	});
 
+	it('renders opaque field values with the shared diagnostic renderer', () => {
+		renderDetail({
+			detail: {
+				...detail,
+				custom_fields: { Nested: { depth: 2 }, Tags: ['a', 'b'], Empty: null }
+			}
+		});
+		const panel = screen.getByTestId('detail-panel');
+		expect(panel.textContent).toContain('{"depth":2}');
+		expect(panel.textContent).toContain('["a","b"]');
+		expect(panel.textContent).toContain('null');
+	});
+
 	it('shows relationships and lets navigation select a related item', async () => {
 		const { onSelect } = renderDetail();
 		expect(screen.getByTestId('detail-panel').textContent).toContain('wm-task-child');
@@ -98,6 +111,48 @@ describe('item detail', () => {
 		const { onClose } = renderDetail();
 		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 		expect(onClose).toHaveBeenCalledTimes(1);
+	});
+
+	it('takes focus when it opens', async () => {
+		renderDetail();
+		const panel = screen.getByTestId('detail-panel');
+		expect(panel.getAttribute('tabindex')).toBe('-1');
+		await waitFor(() => expect(document.activeElement).toBe(panel));
+	});
+
+	it('closes on Escape from inside the panel, but not from outside it', async () => {
+		const { onClose } = renderDetail();
+		const panel = screen.getByTestId('detail-panel');
+		await waitFor(() => expect(document.activeElement).toBe(panel));
+
+		// A control outside the panel (a tree row) keeps its own Escape.
+		const outside = document.createElement('button');
+		document.body.appendChild(outside);
+		outside.focus();
+		await fireEvent.keyDown(outside, { key: 'Escape' });
+		expect(onClose).not.toHaveBeenCalled();
+
+		panel.focus();
+		await fireEvent.keyDown(panel, { key: 'Escape' });
+		expect(onClose).toHaveBeenCalledTimes(1);
+		outside.remove();
+	});
+
+	it('renders a failure through the shared read-failure block', () => {
+		renderDetail({
+			detail: null,
+			failure: { code: 'ITEM_NOT_FOUND', message: 'no item with that id', diagnostics: [] }
+		});
+		const alert = screen.getByTestId('detail-failure');
+		expect(alert.classList.contains('read-failure')).toBe(true);
+		expect(alert.getAttribute('role')).toBe('alert');
+		expect(screen.getByTestId('detail-failure-code').textContent).toContain('ITEM_NOT_FOUND');
+		expect(screen.getByTestId('detail-failure-message').textContent).toContain(
+			'no item with that id'
+		);
+		// The shared block explains the absence of diagnostics rather than going blank.
+		expect(alert.textContent).toContain('no further diagnostics');
+		expect(alert.querySelector('h3.failure-title')?.textContent).toBe('Could not load this item');
 	});
 
 	it('reports a detail read failure with its diagnostics', () => {

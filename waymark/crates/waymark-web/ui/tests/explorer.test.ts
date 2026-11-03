@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 
 import Explorer from '$lib/components/Explorer.svelte';
-import { projectKey } from '$lib/storage';
+import { projectIdFor } from '$lib/storage';
 import {
 	ROOT_A,
 	ROOT_B,
@@ -176,11 +176,11 @@ describe('browser-state persistence', () => {
 		expect(checked('Show dependency edges')).toBe(true);
 
 		const keys = Object.keys(localStorage);
-		expect(keys.some((key) => key.startsWith(projectKey(ROOT_A)))).toBe(true);
-		expect(keys.some((key) => key.startsWith(projectKey(ROOT_B)))).toBe(true);
-		expect(projectKey(ROOT_A)).not.toBe(projectKey(ROOT_B));
+		expect(keys.some((key) => key.startsWith(projectIdFor(ROOT_A)))).toBe(true);
+		expect(keys.some((key) => key.startsWith(projectIdFor(ROOT_B)))).toBe(true);
+		expect(projectIdFor(ROOT_A)).not.toBe(projectIdFor(ROOT_B));
 		const aOverlay = keys.find(
-			(key) => key.startsWith(projectKey(ROOT_A)) && key.endsWith(':dependencies:combined')
+			(key) => key.startsWith(projectIdFor(ROOT_A)) && key.endsWith(':dependencies:combined')
 		);
 		expect(aOverlay).toBeDefined();
 		expect(localStorage.getItem(aOverlay as string)).toBe('true');
@@ -221,6 +221,32 @@ describe('browser-state persistence', () => {
 		expect(checked('Show dependency edges')).toBe(true);
 		expect(screen.getByTestId('persistence-notice')).not.toBeNull();
 	});
+
+	it('raises the persistence notice once, however many writes fail', async () => {
+		let failedWrites = 0;
+		const failing = {
+			length: 0,
+			key: () => null,
+			getItem: () => null,
+			setItem: () => {
+				failedWrites += 1;
+				throw new Error('quota exceeded');
+			},
+			removeItem: () => {},
+			clear: () => {}
+		} as unknown as Storage;
+		const api = makeFetch({ trees: { combined: combinedTree } });
+		render(Explorer, { fetchImpl: api.fetchImpl, storage: failing });
+		await screen.findByTestId('node-wm-bug-login');
+
+		await fireEvent.click(screen.getByLabelText('Show dependency edges'));
+		await fireEvent.click(screen.getByTestId('toggle-wm-bug-login'));
+		await fireEvent.click(screen.getByRole('button', { name: 'Collapse all' }));
+
+		expect(failedWrites).toBeGreaterThan(1);
+		expect(screen.getAllByTestId('persistence-notice')).toHaveLength(1);
+		expect(screen.getByTestId('persistence-notice').getAttribute('role')).toBe('status');
+	});
 });
 
 describe('detail selection', () => {
@@ -240,5 +266,50 @@ describe('detail selection', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 		expect(screen.queryByTestId('detail-panel')).toBeNull();
+	});
+});
+
+describe('keyboard focus in the detail panel', () => {
+	it('moves focus into the panel, then back to the row that opened it', async () => {
+		await renderLoaded({
+			trees: { combined: combinedTree },
+			items: { 'wm-bug-login': detail }
+		});
+		const trigger = screen.getByTestId('select-wm-bug-login');
+		trigger.focus();
+		await fireEvent.click(trigger);
+
+		const panel = await screen.findByTestId('detail-panel');
+		expect(panel.getAttribute('tabindex')).toBe('-1');
+		await waitFor(() => expect(document.activeElement).toBe(panel));
+
+		// The panel is labelled by the item title, so it reads as the detail.
+		expect(panel.getAttribute('aria-labelledby')).toBe('detail-title');
+		await waitFor(() => {
+			expect(screen.getByTestId('detail-title').textContent).toBe('<b>Login</b> fails');
+		});
+
+		await fireEvent.keyDown(panel, { key: 'Escape' });
+		await waitFor(() => expect(screen.queryByTestId('detail-panel')).toBeNull());
+		await waitFor(() => expect(document.activeElement).toBe(trigger));
+	});
+
+	it('leaves Escape to the tree while focus is outside the panel', async () => {
+		await renderLoaded({
+			trees: { combined: combinedTree },
+			items: { 'wm-bug-login': detail }
+		});
+		await fireEvent.click(screen.getByTestId('select-wm-bug-login'));
+		const panel = await screen.findByTestId('detail-panel');
+		// Wait for the read to settle, so its content update cannot move focus.
+		await waitFor(() => expect(document.activeElement).toBe(panel));
+
+		const treeButton = screen.getByTestId('select-wm-task-ship');
+		treeButton.focus();
+		await fireEvent.keyDown(treeButton, { key: 'Escape' });
+
+		// Escape in the tree does not close the detail, and the row keeps focus.
+		expect(screen.getByTestId('detail-panel')).not.toBeNull();
+		expect(document.activeElement).toBe(treeButton);
 	});
 });

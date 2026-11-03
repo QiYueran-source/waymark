@@ -6,7 +6,7 @@
  * a root because the server says so; this module only walks `children`.
  */
 
-import type { CategoryGroup, TreeNode, ViewName } from './types';
+import type { Category, CategoryGroup, TreeData, TreeNode } from './types';
 
 /** One visible row: depth 0 is a root. */
 export interface TreeRow {
@@ -158,12 +158,56 @@ export function referencesByAnchor(references: ReferenceNode[]): Map<string, Ref
 	return byAnchor;
 }
 
-/** The visible root list for a tree payload, independent of view. */
-export function rootsFor(
-	data: { view: 'combined'; roots: TreeNode[] } | { view: 'grouped'; groups: CategoryGroup[] },
-	view: ViewName
-): CategoryGroup[] {
-	if (view === 'grouped' && 'groups' in data) return data.groups;
-	if ('roots' in data) return [{ category: { key: '*', name: '', shape: 0 }, roots: data.roots }];
-	return [];
+/**
+ * A top-level section of a tree view.
+ *
+ * The combined view is its own kind of section, not a category: it has no key
+ * and no category at all, so nothing here can collide with a real category key.
+ */
+export type TreeSection =
+	| { kind: 'combined'; roots: TreeNode[] }
+	| { kind: 'category'; category: Category; roots: TreeNode[] };
+
+/** The displayed sections of a tree payload, independent of view. */
+export function sectionsFor(data: TreeData): TreeSection[] {
+	if (data.view === 'combined') {
+		return [{ kind: 'combined', roots: data.roots }];
+	}
+	return data.groups.map((group) => ({ kind: 'category', category: group.category, roots: group.roots }));
+}
+
+/** Every displayed root, in section order. */
+export function visibleRoots(data: TreeData): TreeNode[] {
+	return sectionsFor(data).flatMap((section) => section.roots);
+}
+
+/** How much work is displayed, and how much of it is blocked. */
+export interface TreeCounts {
+	items: number;
+	blocked: number;
+}
+
+/** Count every displayed item, including nested children. */
+export function countNodes(nodes: TreeNode[]): TreeCounts {
+	let items = 0;
+	let blocked = 0;
+	const walk = (list: TreeNode[]): void => {
+		for (const node of list) {
+			items += 1;
+			if (node.state === 'blocked') blocked += 1;
+			walk(node.children);
+		}
+	};
+	walk(nodes);
+	return { items, blocked };
+}
+
+/** The screen's one finding: how much work there is and what is held up. */
+export function summarize(data: TreeData): string {
+	const { items, blocked } = countNodes(visibleRoots(data));
+	const parts = [`${items} item${items === 1 ? '' : 's'}`, `${blocked} blocked`];
+	if (data.unresolved.length > 0) {
+		parts.push(`${data.unresolved.length} unresolved`);
+	}
+	return parts.join(' · ');
 }

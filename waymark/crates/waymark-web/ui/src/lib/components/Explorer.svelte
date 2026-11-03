@@ -16,9 +16,9 @@
 	import UnresolvedList from './UnresolvedList.svelte';
 	import { ApiFailure, fetchHealth, fetchItem, fetchTree } from '$lib/api';
 	import type { Failure } from '$lib/failure';
-	import { allIds } from '$lib/tree';
-	import { browserStorage, PreferenceStore } from '$lib/storage';
-	import type { CategoryGroup, ItemDetail, TreeData, TreeNode, ViewName } from '$lib/types';
+	import { allIds, summarize, visibleRoots } from '$lib/tree';
+	import { browserStorage, PreferenceStore, projectIdFor } from '$lib/storage';
+	import type { CategoryGroup, ItemDetail, TreeData, ViewName } from '$lib/types';
 
 	let {
 		fetchImpl = globalThis.fetch,
@@ -47,6 +47,8 @@
 
 	let store: PreferenceStore | null = null;
 	let detailRequest = 0;
+	/** The tree button that opened the detail, so focus can return to it. */
+	let detailTrigger: HTMLElement | null = null;
 
 	const roots = $derived(treeData?.view === 'combined' ? treeData.roots : []);
 	const groups: CategoryGroup[] = $derived(treeData?.view === 'grouped' ? treeData.groups : []);
@@ -81,34 +83,16 @@
 		persistenceNotice = store?.failed ? PERSISTENCE_NOTICE : null;
 	}
 
-	function treeIds(data: TreeData): string[] {
-		return data.view === 'combined'
-			? allIds(data.roots)
-			: allIds(data.groups.flatMap((group) => group.roots));
-	}
-
-	function countNodes(nodes: TreeNode[]): { items: number; blocked: number } {
-		let items = 0;
-		let blocked = 0;
-		const walk = (list: TreeNode[]): void => {
-			for (const node of list) {
-				items += 1;
-				if (node.state === 'blocked') blocked += 1;
-				walk(node.children);
-			}
-		};
-		walk(nodes);
-		return { items, blocked };
-	}
-
-	function summarize(data: TreeData): string {
-		const rootsOf = data.view === 'combined' ? data.roots : data.groups.flatMap((g) => g.roots);
-		const { items, blocked } = countNodes(rootsOf);
-		const parts = [`${items} item${items === 1 ? '' : 's'}`, `${blocked} blocked`];
-		if (data.unresolved.length > 0) {
-			parts.push(`${data.unresolved.length} unresolved`);
-		}
-		return parts.join(' · ');
+	/**
+	 * Write one preference and report the store's state once.
+	 *
+	 * Every preference write goes through here, so the persistence notice is
+	 * raised in one place rather than after each of the nine writes.
+	 */
+	function persist(write: (store: PreferenceStore) => void): void {
+		if (store === null) return;
+		write(store);
+		syncNotice();
 	}
 
 	async function loadTree(next: ViewName): Promise<void> {
@@ -120,7 +104,7 @@
 			const data = await fetchTree(next, fetchImpl);
 			treeData = data;
 			const saved = store?.readExpanded(next) ?? null;
-			expanded = saved ?? treeIds(data);
+			expanded = saved ?? allIds(visibleRoots(data));
 			dependenciesVisible = store?.readDependencies(next) ?? false;
 			restoreToken += 1;
 			syncNotice();
@@ -135,7 +119,8 @@
 		try {
 			const health = await fetchHealth(fetchImpl);
 			projectRoot = health.project?.root ?? '';
-			store = new PreferenceStore(storage, projectRoot);
+			// The preference namespace is derived once, here, from the health payload.
+			store = new PreferenceStore(storage, projectIdFor(projectRoot));
 			syncNotice();
 			await loadTree(store.readView());
 		} catch (error) {
@@ -146,11 +131,9 @@
 
 	async function selectView(next: ViewName): Promise<void> {
 		if (next === view) return;
-		if (store && treePane) {
-			store.writeScroll(view, treePane.scrollTop);
-		}
-		store?.writeView(next);
-		syncNotice();
+		const offset = treePane?.scrollTop ?? 0;
+		persist((current) => current.writeScroll(view, offset));
+		persist((current) => current.writeView(next));
 		await loadTree(next);
 	}
 
@@ -158,30 +141,27 @@
 		expanded = expanded.includes(id)
 			? expanded.filter((entry) => entry !== id)
 			: [...expanded, id];
-		store?.writeExpanded(view, expanded);
-		syncNotice();
+		persist((current) => current.writeExpanded(view, expanded));
 	}
 
 	function expandAll(): void {
 		if (!treeData) return;
-		expanded = treeIds(treeData);
-		store?.writeExpanded(view, expanded);
-		syncNotice();
+		expanded = allIds(visibleRoots(treeData));
+		persist((current) => current.writeExpanded(view, expanded));
 	}
 
 	function collapseAll(): void {
 		expanded = [];
-		store?.writeExpanded(view, expanded);
-		syncNotice();
+		persist((current) => current.writeExpanded(view, expanded));
 	}
 
 	function toggleDependencies(): void {
 		dependenciesVisible = !dependenciesVisible;
-		store?.writeDependencies(view, dependenciesVisible);
-		syncNotice();
+		persist((current) => current.writeDependencies(view, dependenciesVisible));
 	}
 
-	async function selectItem(id: string): Promise<void> {
+	async function selectItem(id: string, trigger?: HTMLElement): Promise<void> {
+		if (trigger) detailTrigger = trigger;
 		const request = ++detailRequest;
 		selectedId = id;
 		detail = null;
@@ -199,18 +179,25 @@
 		}
 	}
 
+	/** Close the panel and return focus to the row that opened it. */
 	function closeDetail(): void {
 		detailRequest += 1;
 		selectedId = null;
 		detail = null;
 		detailFailure = null;
 		detailLoading = false;
+		const trigger = detailTrigger;
+		detailTrigger = null;
+		void tick().then(() => {
+			if (trigger?.isConnected) trigger.focus();
+			else treePane?.focus();
+		});
 	}
 
 	function handleScroll(): void {
-		if (!store || !treePane) return;
-		store.writeScroll(view, treePane.scrollTop);
-		syncNotice();
+		if (!treePane) return;
+		const offset = treePane.scrollTop;
+		persist((current) => current.writeScroll(view, offset));
 	}
 
 	$effect(() => {
@@ -296,6 +283,7 @@
 			onscroll={handleScroll}
 			aria-label="Work items"
 			aria-busy={loadingTree}
+			tabindex="-1"
 		>
 			{#if loadingTree}
 				<p class="status" role="status">Reading the project tree…</p>
@@ -318,7 +306,7 @@
 					{dependenciesVisible}
 					selectedId={selectedId}
 					onToggle={toggleNode}
-					onSelect={(id) => void selectItem(id)}
+					onSelect={(id, trigger) => void selectItem(id, trigger)}
 				/>
 				{#if unresolved.length > 0}
 					<UnresolvedList items={unresolved} />
