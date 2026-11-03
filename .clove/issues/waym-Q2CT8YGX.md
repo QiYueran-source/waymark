@@ -2,14 +2,16 @@
 schema: 1
 id: waym-Q2CT8YGX
 title: Define the replacement specification's shape
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-11-03T03:25:00.000Z
-updated: 2026-11-03T03:25:00.000Z
+updated: 2026-11-03T05:05:44.864Z
+closed: 2026-11-03T05:05:44.864Z
+assignee: DeepSeek Agent
 parent: waym-VS5Z5543
 labels: [wayfinder:grilling]
-deps: [waym-K4QMRT7A, waym-B6TW9KPD, waym-R8YF2NCE, waym-J3VX6HQS, waym-M9WL5DZB]
+deps: [waym-B6TW9KPD, waym-J3VX6HQS, waym-K4QMRT7A, waym-M9WL5DZB, waym-R8YF2NCE]
 relates: []
 duplicates: []
 supersedes: []

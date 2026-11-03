@@ -51,6 +51,8 @@ Produce a handoff-ready functional specification for Waymark, a general-purpose,
 - Core-field decisions are resolved: the complete persisted v1 field set, `closed_at`, ID/category-key formats, identity/time normalization, frontmatter archive metadata, and computed `blocked`/`ready`/`blocked_by` fields with dangling-dependency diagnostics. `blocked` is not a lifecycle status; `blocked_by` is a read-only computed field and is never persisted.
 - Index/cache decisions are resolved: documents are the sole authority; a complete in-process static frontmatter projection is derived from them; derived readiness and graph results are computed dynamically; local operations may use incomplete projections only when explicitly marked, while global queries and archive require completeness. A bounded LRU may cache body/details only, never evict relation nodes.
 - `touch` is an internal term for a Waymark-controlled frontmatter query, frontmatter mutation, or archive; it is not a timestamp update and does not mean arbitrary body access. Public interfaces use explicit read/write/archive/sync names.
+- [Define the replacement specification's shape](waym-Q2CT8YGX): The replacement is a `/to-spec`-shaped implementation brief that lives in Clove, absorbs the interface working document, restates settled decisions instead of linking them, and keeps undecided areas visibly undecided.
+
 ### Resolved archive semantics
 
 - Archive is an irreversible-through-Waymark logical deletion, not a lifecycle transition and not `closed`. It is allowed from `open`, `in_progress`, or `closed`; it does not change `status` or `closed_at`.
@@ -203,7 +205,7 @@ Codes with no exit class, used as warnings and findings: `OWNER_MISMATCH` (warni
 
 ## Not yet specified
 
-Only the terminal ticket remains: [Define the replacement specification's shape](waym-Q2CT8YGX) now waits on no decision ticket. Every earlier decision question is closed and indexed under Decisions so far, with the lock lifecycle under "Resolved write-lock lifecycle" and the taxonomy under "Resolved error taxonomy structure" and "Resolved error registry".
+The design tree is exhausted: every decision ticket is closed, indexed under Decisions so far, with the lock lifecycle under "Resolved write-lock lifecycle" and the taxonomy under "Resolved error taxonomy structure" and "Resolved error registry". What is left is mechanical, not exploratory — rewriting `waym-WMSPEC01` to the shape settled in "Resolved replacement-specification shape", absorbing the command and tool catalog, and retiring the interface working document. This map closes once that rewrite is accepted.
 
 What remains here is detail too fine to spend a decision ticket on, and which the replacement specification can settle directly:
 
