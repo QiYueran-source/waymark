@@ -80,6 +80,227 @@ pub fn replace_checked(
     write_atomic(path, bytes)
 }
 
+/// One document in an all-or-nothing batch.
+///
+/// `expected` is the fingerprint the caller read; `bytes` is the complete new
+/// document. A batch target never describes a partial change.
+#[derive(Debug, Clone, Copy)]
+pub struct BatchTarget<'a> {
+    /// The item the document belongs to. Only used to shape conflict errors.
+    pub id: &'a crate::id::WorkItemId,
+    /// The document to replace.
+    pub path: &'a Utf8Path,
+    /// The bytes that must currently be on disk.
+    pub expected: &'a Fingerprint,
+    /// The complete new document.
+    pub bytes: &'a [u8],
+}
+
+/// One document a batch replaced.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BatchApplied {
+    /// The item the document belongs to.
+    pub id: crate::id::WorkItemId,
+    /// The document that changed.
+    pub path: camino::Utf8PathBuf,
+    /// The fingerprint of the bytes now on disk.
+    pub fingerprint: Fingerprint,
+}
+
+/// Replace several documents as one application-level all-or-nothing batch.
+///
+/// # Contract
+///
+/// 1. **Prevalidate everything first.** Each target must be a regular file (a
+///    symlink or directory is refused), its current bytes must match `expected`,
+///    and no path may appear twice. Any violation fails before a byte is staged,
+///    so nothing is written.
+/// 2. **Stage everything.** Every new document is written and `fsync`ed to a
+///    temporary file in its destination directory before *any* target is
+///    replaced. A staging failure removes the staged files and leaves the store
+///    untouched.
+/// 3. **Replace in order.** Each target is replaced by renaming its staged
+///    temporary over the destination, so a reader sees old bytes or new bytes,
+///    never a blend.
+/// 4. **Roll back on failure.** If a replace fails, every already-replaced
+///    document is restored from the bytes captured during prevalidation. If a
+///    restore also fails the operation returns `ROLLBACK_FAILED` naming the
+///    applied, failed, and not-restored targets — it never claims success.
+///
+/// The caller must hold the project write lock for the whole call. The batch
+/// engine does not take it, because one operation may need to do more work
+/// (validation that reads the project, projection refresh) under the same lock.
+///
+/// This is not a filesystem multi-file transaction: a crash between two renames
+/// can still leave the new bytes of the earlier documents in place. The contract
+/// is about *reported* failure, which is what the spec pins.
+pub fn replace_batch(targets: &[BatchTarget<'_>]) -> Result<Vec<BatchApplied>, WaymarkError> {
+    if targets.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // 1. Prevalidate, and capture the bytes every rollback would restore.
+    let mut originals: Vec<(camino::Utf8PathBuf, Vec<u8>)> = Vec::with_capacity(targets.len());
+    let mut seen: std::collections::BTreeSet<&Utf8Path> = std::collections::BTreeSet::new();
+    for target in targets {
+        if !seen.insert(target.path) {
+            return Err(WaymarkError::internal(format!(
+                "the batch names {} twice; a document may be replaced only once per batch",
+                target.path
+            )));
+        }
+        validate_batch_target(target)?;
+        let original = fs::read(target.path)
+            .map_err(|source| WaymarkError::io(target.path.to_string(), "read", &source))?;
+        let actual = Fingerprint::of(&original);
+        if actual != *target.expected {
+            return Err(WaymarkError::write_conflict(
+                target.id,
+                target.path.to_string(),
+                target.expected.as_str(),
+                actual.as_str(),
+            ));
+        }
+        originals.push((target.path.to_path_buf(), original));
+    }
+
+    // 2. Stage every new document before touching a destination.
+    let mut temps: Vec<StagedTemp> = Vec::with_capacity(targets.len());
+    for target in targets {
+        match stage(target.path, target.bytes) {
+            Ok(temp) => temps.push(temp),
+            Err(error) => {
+                // Dropping a `NamedTempFile` removes it, so a staging failure
+                // leaves no debris behind.
+                drop(temps);
+                return Err(error);
+            }
+        }
+    }
+
+    // 3. Replace in order, remembering how far we got.
+    let mut applied: Vec<BatchApplied> = Vec::with_capacity(targets.len());
+    let mut failure: Option<(usize, WaymarkError)> = None;
+    for (index, (target, temp)) in targets.iter().zip(temps).enumerate() {
+        match persist(temp, target.path) {
+            Ok(()) => applied.push(BatchApplied {
+                id: target.id.clone(),
+                path: target.path.to_path_buf(),
+                fingerprint: Fingerprint::of(target.bytes),
+            }),
+            Err(error) => {
+                failure = Some((index, error));
+                break;
+            }
+        }
+    }
+
+    // 4. Roll back, or report the committed batch.
+    let Some((failed_index, error)) = failure else {
+        return Ok(applied);
+    };
+
+    // Only the documents replaced *before* the failure need restoring; the
+    // failing one was never renamed into place.
+    let rollback_failed = restore(&originals, failed_index);
+    if rollback_failed.is_empty() {
+        return Err(error);
+    }
+    Err(WaymarkError::rollback_failed(
+        applied.iter().map(|entry| entry.path.to_string()).collect(),
+        vec![targets[failed_index].path.to_string()],
+        rollback_failed,
+    ))
+}
+
+/// Put the first `replaced` captured documents back, and report the ones that
+/// could not be restored.
+///
+/// A restore itself goes through [`write_atomic`], so it inherits the same
+/// symlink and regular-file refusals: a document that vanished or became a
+/// directory after the batch started is reported, never silently skipped.
+fn restore(originals: &[(camino::Utf8PathBuf, Vec<u8>)], replaced: usize) -> Vec<String> {
+    let mut failed: Vec<String> = Vec::new();
+    for (path, original) in originals.iter().take(replaced) {
+        if write_atomic(path, original).is_err() {
+            failed.push(path.to_string());
+        }
+    }
+    failed
+}
+
+/// A new document already written and synced, not yet renamed into place.
+#[derive(Debug)]
+struct StagedTemp {
+    temp: tempfile::NamedTempFile,
+}
+
+/// Refuse targets that cannot be replaced safely.
+fn validate_batch_target(target: &BatchTarget<'_>) -> Result<(), WaymarkError> {
+    match fs::symlink_metadata(target.path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(WaymarkError::io(
+            target.path.to_string(),
+            "write",
+            &std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "the destination is a symbolic link",
+            ),
+        )),
+        Ok(metadata) if !metadata.is_file() => Err(WaymarkError::io(
+            target.path.to_string(),
+            "write",
+            &std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "the destination is not a regular file",
+            ),
+        )),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Err(WaymarkError::write_conflict(
+                target.id,
+                target.path.to_string(),
+                target.expected.as_str(),
+                "missing",
+            ))
+        }
+        Err(source) => Err(WaymarkError::io(target.path.to_string(), "read", &source)),
+    }
+}
+
+/// Write `bytes` to a temporary file beside `path` and sync it.
+fn stage(path: &Utf8Path, bytes: &[u8]) -> Result<StagedTemp, WaymarkError> {
+    let directory = path.parent().unwrap_or_else(|| Utf8Path::new("."));
+    let mut temp = tempfile::Builder::new()
+        .prefix(".waymark-batch")
+        .tempfile_in(directory)
+        .map_err(|source| {
+            WaymarkError::io(directory.to_string(), "create a temporary file in", &source)
+        })?;
+    temp.write_all(bytes)
+        .map_err(|source| WaymarkError::io(path.to_string(), "write", &source))?;
+    temp.flush()
+        .map_err(|source| WaymarkError::io(path.to_string(), "flush", &source))?;
+    temp.as_file()
+        .sync_all()
+        .map_err(|source| WaymarkError::io(path.to_string(), "fsync", &source))?;
+    set_mode(temp.path(), existing_mode(path).unwrap_or(0o644))?;
+    Ok(StagedTemp { temp })
+}
+
+/// Rename a staged document over its destination and sync the directory.
+fn persist(staged: StagedTemp, path: &Utf8Path) -> Result<(), WaymarkError> {
+    staged
+        .temp
+        .persist(path)
+        .map_err(|error| WaymarkError::io(path.to_string(), "replace", &error.error))?;
+    if let Some(directory) = path.parent() {
+        if let Ok(handle) = fs::File::open(directory) {
+            let _ = handle.sync_all();
+        }
+    }
+    Ok(())
+}
+
 /// Replace `path` with `bytes` through a temporary file in the same directory.
 ///
 /// The temporary file is created in the destination directory on purpose: a
@@ -500,6 +721,146 @@ mod tests {
         let error = replace_unchecked(&link, b"replacement\n").unwrap_err();
         assert_eq!(error.code(), crate::error::Code::IoError);
         assert_eq!(fs::read_to_string(&target).unwrap(), "original\n");
+    }
+
+    fn item_id() -> crate::id::WorkItemId {
+        crate::id::WorkItemId::parse("wm-000000000001").unwrap()
+    }
+
+    fn document_path(dir: &tempfile::TempDir, name: &str) -> Utf8PathBuf {
+        Utf8PathBuf::from_path_buf(dir.path().join(name)).unwrap()
+    }
+
+    #[test]
+    fn a_batch_replaces_every_target() {
+        let dir = scratch();
+        let first = document_path(&dir, "first.md");
+        let second = document_path(&dir, "second.md");
+        fs::write(&first, b"one\n").unwrap();
+        fs::write(&second, b"two\n").unwrap();
+        let id = item_id();
+
+        let applied = replace_batch(&[
+            BatchTarget {
+                id: &id,
+                path: &first,
+                expected: &Fingerprint::of(b"one\n"),
+                bytes: b"ONE\n",
+            },
+            BatchTarget {
+                id: &id,
+                path: &second,
+                expected: &Fingerprint::of(b"two\n"),
+                bytes: b"TWO\n",
+            },
+        ])
+        .expect("both documents are replaced");
+
+        assert_eq!(applied.len(), 2);
+        assert_eq!(applied[1].fingerprint, Fingerprint::of(b"TWO\n"));
+        assert_eq!(fs::read_to_string(&first).unwrap(), "ONE\n");
+        assert_eq!(fs::read_to_string(&second).unwrap(), "TWO\n");
+    }
+
+    #[test]
+    fn a_batch_with_a_stale_fingerprint_writes_nothing() {
+        let dir = scratch();
+        let first = document_path(&dir, "first.md");
+        let second = document_path(&dir, "second.md");
+        fs::write(&first, b"one\n").unwrap();
+        fs::write(&second, b"moved on\n").unwrap();
+        let id = item_id();
+
+        let error = replace_batch(&[
+            BatchTarget {
+                id: &id,
+                path: &first,
+                expected: &Fingerprint::of(b"one\n"),
+                bytes: b"ONE\n",
+            },
+            BatchTarget {
+                id: &id,
+                path: &second,
+                expected: &Fingerprint::of(b"two\n"),
+                bytes: b"TWO\n",
+            },
+        ])
+        .expect_err("the second target conflicts");
+
+        assert_eq!(error.code(), crate::error::Code::WriteConflict);
+        assert_eq!(
+            fs::read_to_string(&first).unwrap(),
+            "one\n",
+            "the first target was never touched"
+        );
+        assert_eq!(fs::read_to_string(&second).unwrap(), "moved on\n");
+    }
+
+    #[test]
+    fn a_mid_batch_failure_restores_the_documents_already_replaced() {
+        let dir = scratch();
+        let first = document_path(&dir, "first.md");
+        let second = document_path(&dir, "second.md");
+        fs::write(&first, b"one\n").unwrap();
+        // The second destination is a directory: the staged rename cannot replace
+        // it, so the batch fails after the first document has been replaced.
+        fs::create_dir(&second).unwrap();
+        let id = item_id();
+
+        let error = replace_batch(&[
+            BatchTarget {
+                id: &id,
+                path: &first,
+                expected: &Fingerprint::of(b"one\n"),
+                bytes: b"ONE\n",
+            },
+            BatchTarget {
+                id: &id,
+                path: &second,
+                expected: &Fingerprint::of(b"two\n"),
+                bytes: b"TWO\n",
+            },
+        ])
+        .expect_err("the directory cannot be replaced");
+
+        assert_ne!(error.code(), crate::error::Code::RollbackFailed);
+        assert_eq!(
+            fs::read_to_string(&first).unwrap(),
+            "one\n",
+            "the replaced document was rolled back"
+        );
+    }
+
+    #[test]
+    fn a_batch_may_not_name_a_document_twice() {
+        let dir = scratch();
+        let path = document_path(&dir, "item.md");
+        fs::write(&path, b"one\n").unwrap();
+        let id = item_id();
+
+        let error = replace_batch(&[
+            BatchTarget {
+                id: &id,
+                path: &path,
+                expected: &Fingerprint::of(b"one\n"),
+                bytes: b"ONE\n",
+            },
+            BatchTarget {
+                id: &id,
+                path: &path,
+                expected: &Fingerprint::of(b"ONE\n"),
+                bytes: b"again\n",
+            },
+        ])
+        .expect_err("the second entry would overwrite the first");
+
+        assert_eq!(error.code(), crate::error::Code::InternalError);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "one\n");
+    }
+
+    #[test]
+    fn an_empty_batch_is_a_successful_no_op() {
+        assert!(replace_batch(&[]).unwrap().is_empty());
     }
 
     #[test]
