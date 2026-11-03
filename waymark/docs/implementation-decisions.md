@@ -414,3 +414,112 @@ setting `operator` in `.waymark/config.toml` to a name that is not the item owne
 per-command override is a cross-cutting accountability decision, not part of this ticket; the domain
 operation already takes the override through `OpOptions`, so a later ticket can expose it without
 touching `ops::edit`.
+
+## Configuration surface (T3)
+
+### A configuration write compares content, not the revision counter
+
+**Choice:** every configuration write takes the project lock, re-reads `.waymark/config.toml` from disk
+*inside* the lock, and decides "changed" by comparing the canonical serialization of the document it
+would write against the canonical serialization of the document it read. The revision is incremented by
+exactly one only when those bytes differ; a hand edit that left the counter alone is still seen.
+
+**Why:** the spec makes the revision informational and fingerprint-based change detection authoritative.
+Comparing whole documents is the strictest form of that rule and needs no separate fingerprint file; it
+also makes a no-op write structurally impossible.
+
+**Open:** if configuration ever grows large enough that canonical serialization is expensive, the same
+rule can be restated as a fingerprint comparison without changing the outcome.
+
+### `CONFIG_INVALID` findings are produced from the same validator as the error path
+
+**Choice:** the parser was split into a `build` step that returns `(Config, Vec<ConfigIssue>)` and a
+public `Config::issues_in_file` / `Config::issues_at`. `Config::load` renders the issue list into the
+aggregate `CONFIG_INVALID` error it always did; `validate_config` turns one issue into one
+`CONFIG_INVALID` finding with a `config_key` location. A document that is not parseable TOML at all is
+one finding, not a per-key list.
+
+**Why:** the spec requires per-issue, locatable findings and the existing single aggregate error could
+not carry a location per key. One validator keeps the two representations from drifting, which is the
+failure mode a second hand-written checker would have.
+
+### `config validate` and `validate` exit 3 when findings are errors
+
+**Choice:** a validation run that finds `CONFIG_INVALID` issues returns the `CONFIG_INVALID` error, so
+the registry's invalid-input exit class (3) applies and `--json` prints the standard failure envelope.
+A clean run exits 0 with `{"valid": true, "findings": []}`. There is no `--strict` flag in this release.
+
+**Why:** a caller scripting `waymark config validate && …` must not see success on an invalid
+configuration. The spec's strict-mode switch belongs to the diagnostics ticket; until then, errors are
+errors and there is no way to run a non-failing check.
+
+**Open:** T14 may add `--strict` and a warning-only default; if it does, this entry is superseded.
+
+### `validate` covers configuration only, and says so
+
+**Choice:** `waymark validate` reports configuration findings today, and its human output and JSON
+`scope: ["configuration"]` state that work-item diagnostics are not part of this release. It is not a
+stub that silently reports "all good".
+
+**Why:** the spec's project-wide `validate` includes item-level diagnostics owned by the diagnostics
+ticket. Reporting a clean bill of health for checks that never ran would be worse than a partial answer
+that names its scope.
+
+### `config add category` creates the category directory
+
+**Choice:** after the configuration write succeeds, the category directory is created with
+`create_dir_all`. A dry run creates nothing, and an already existing directory is not an error.
+
+**Why:** `init` creates every configured category directory and `create` writes into it without creating
+it; without this, `config add category` would produce a configuration that cannot be used until someone
+runs `mkdir`. Creating a directory is not a work-item write, so the "configuration never touches work
+items" rule is untouched.
+
+**Open:** directory creation happens after the configuration replacement, so a failure there leaves a
+declared category without its directory. Creating it first would leave an orphan directory instead; the
+declaration is the authority, so the current order is the recoverable one.
+
+### `remove_category` refuses with `VALIDATION_ERROR`, not a new code
+
+**Choice:** a used category is refused with `VALIDATION_ERROR` whose `details.issues` has one entry per
+item found in the category, each naming the item's stable ID and path. No work-item file is opened for
+writing, and none is modified. No `CATEGORY_IN_USE` code was added.
+
+**Why:** the error registry is frozen for this ticket and the spec's registry has no in-use code.
+`VALIDATION_ERROR` with a typed per-issue list is the closest honest classification: the request is
+valid syntax but cannot be satisfied in the current state, and the caller is told exactly which items
+block it.
+
+### Field attributes: only `default`, and relaxing `required`
+
+**Choice:** `config set field` accepts `type`, `required`, and `default`, but `type` always fails with
+`ACTION_REQUIRES_MIGRATION`; `required true` on an optional field fails the same way; `required false`
+succeeds; `default null` clears the default and any other token is parsed against the declared type. An
+undeclared key is `VALIDATION_ERROR` (a rename is not a configuration operation — it is a removal plus an
+addition, and removal is a migration). `config add field --required` is refused as a migration too.
+
+**Why:** the spec puts type changes, renames, required-field addition, and optional→required in
+migration, and relaxing metadata in configuration. Accepting `type` as an argument and then refusing it
+gives a caller one consistent place to learn why, instead of an "unknown attribute" error that hides the
+migration answer.
+
+### The operator scalar is cleared by an empty value
+
+**Choice:** `config set operator ""` removes the `operator` key (and `--json` still reports
+`changed: true`); any other value is trimmed and written.
+
+**Why:** the parser rejects an empty operator when the key is present, so "unset" must be absence. There
+is no separate `config unset` in this release.
+
+### Field default and field value text parsing lives with the declared type
+
+**Choice:** `FieldType::parse_value` is the one textual parser: `integer` accepts `-?[0-9]+`,
+`boolean` accepts exactly `true`/`false`, `list:*` requires a JSON array checked element-wise, `string`
+takes the token verbatim. It mirrors the CLI's custom-field value parsing for the same types.
+
+**Why:** a configuration default and an item field value are the same kind of value against the same
+declared type. Keeping the parsing beside `accepts` means a new scalar type cannot be added to one
+without the other.
+
+**Open:** the CLI's `field --set` still owns its own equivalent parser for string tokens (JSON string
+literals are accepted there). Unifying them is a later cleanup; both agree on the scalar types today.
