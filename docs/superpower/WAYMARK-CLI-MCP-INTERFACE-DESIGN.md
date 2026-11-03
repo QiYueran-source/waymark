@@ -82,7 +82,7 @@ work_item_update_custom_fields
 - `id`、`creator`、`created_at`、`updated_at`、`closed_at`、`archived_at` 等系统/身份字段不能由普通编辑修改；
 - `ready`、`blocked`、`blocked_by` 等计算结果永远不可写。
 
-这三个编辑函数的参数、clear/unset 规则、CLI 编辑器行为和批量能力仍待细化。当前已确认的是：它们不是一个任意 frontmatter patch 函数。
+三个编辑函数当前已确定为：title 完整替换；body 完整替换并允许用空字符串清空；custom fields 使用显式 set/clear 并允许一次修改多个字段。每个函数只修改自己的数据区域，只有实际值变化时才更新 `updated_at`；失败时不产生部分写入。CLI 值解析、MCP schema、编辑器行为、返回值和批量范围仍待细化。它们不是任意 frontmatter patch 函数。
 
 ### 2.4 生命周期、责任与关系能力
 
@@ -159,11 +159,11 @@ waymark field update <id> --set <key=value>... --clear <key>...
 
 当前设计将三类普通编辑能力分别暴露：
 
-- `title set` 修改 title；
+- `title set` 完整替换 title；
 - `body replace` 完整替换或清空正文，`--body` 与 `--body-file` 互斥；
-- `field update` 一次更新一个工作项的多个自定义字段，支持设置和清除。
+- `field update` 一次更新一个工作项的多个自定义字段，使用显式 `--set` 和 `--clear`。
 
-是否恢复 Clove 风格的 CLI `$EDITOR`、是否提供人类友好的复合 `edit` 命令、以及跨领域复合编辑是否原子，仍待编辑契约确认。
+每个操作只修改自己的数据区域；请求没有实际变化时不写文件、不更新时间。是否恢复 Clove 风格的 CLI `$EDITOR`、是否提供人类友好的复合 `edit` 命令、以及跨领域复合编辑是否原子，仍待编辑契约确认。
 
 ### 3.4 专用核心操作
 
