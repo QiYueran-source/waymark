@@ -140,6 +140,10 @@ fn a_category_can_be_added_renamed_and_removed() {
     assert_eq!(added.config.categories[&key("bug")].name, "Bug");
     assert_eq!(added.config.categories[&key("bug")].path, "work/bugs");
     assert_eq!(added.revision, 1);
+    assert!(
+        project.root().join("work/bugs").is_dir(),
+        "adding a category also creates its directory"
+    );
 
     let renamed =
         config::set_category_name(&project, &key("bug"), "Bugs", &options()).expect("it renames");
@@ -149,6 +153,38 @@ fn a_category_can_be_added_renamed_and_removed() {
     let removed = config::remove_category(&project, &key("bug"), &options()).expect("it removes");
     assert!(!removed.config.categories.contains_key(&key("bug")));
     assert_eq!(removed.revision, 3);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_failed_configuration_write_rolls_back_the_category_directory() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (_dir, project) = fixtures::deterministic_project();
+    // Make sure the lock file and the ignore entry already exist: only the
+    // configuration replacement may fail, not lock acquisition.
+    config::set_scalar(&project, Scalar::Operator, "frank", &options()).expect("the scalar writes");
+    let config_before = read_config(&project);
+
+    let metadata_dir = project.root().join(".waymark");
+    let original = std::fs::metadata(&metadata_dir)
+        .expect("the metadata directory exists")
+        .permissions();
+    let mut read_only = original.clone();
+    read_only.set_mode(0o555);
+    std::fs::set_permissions(&metadata_dir, read_only).expect("the directory is made read-only");
+
+    let error = config::add_category(&project, &key("bug"), "work/bugs", None, &options())
+        .expect_err("the configuration cannot be replaced");
+
+    std::fs::set_permissions(&metadata_dir, original).expect("the directory is writable again");
+
+    assert_eq!(error.code(), Code::IoError);
+    assert!(
+        !project.root().join("work/bugs").exists(),
+        "the directory created before the failed replacement is rolled back"
+    );
+    assert_eq!(read_config(&project), config_before, "the config is untouched");
 }
 
 #[test]
