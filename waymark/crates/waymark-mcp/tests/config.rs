@@ -141,3 +141,188 @@ async fn doctor_includes_the_held_lock_probe() {
     release_tx.send(()).expect("the holder is released");
     holder.join().expect("the holder thread ends");
 }
+
+#[tokio::test]
+async fn config_set_writes_a_scalar_and_reports_the_revision() {
+    let fixture = common::fixture(&["one"]);
+    let before = fixture.project().config().version.revision;
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    let result = client
+        .call(
+            "waymark_config_set",
+            json!({"name": "operator", "value": "frank"}),
+        )
+        .await;
+    let envelope = common::envelope(&result);
+    assert_eq!(envelope["ok"], true);
+    assert_eq!(envelope["data"]["config"]["operator"], "frank");
+    assert_eq!(envelope["data"]["changed"], true);
+    assert_eq!(envelope["data"]["changed_keys"], json!(["operator"]));
+    assert_eq!(envelope["data"]["previous_revision"], json!(before));
+    assert_eq!(envelope["data"]["revision"], json!(before + 1));
+    assert_eq!(envelope["_meta"]["source"], "direct_file");
+
+    // The write is on disk, not only in the response.
+    let project = fixture.project();
+    assert_eq!(project.config().operator.as_deref(), Some("frank"));
+    assert_eq!(project.config().version.revision, before + 1);
+
+    // Repeating the same value is a true no-op: no revision move, no write.
+    let result = client
+        .call(
+            "waymark_config_set",
+            json!({"name": "operator", "value": "frank"}),
+        )
+        .await;
+    let envelope = common::envelope(&result);
+    assert_eq!(envelope["data"]["changed"], false);
+    assert_eq!(envelope["data"]["changed_keys"], json!([]));
+    assert_eq!(envelope["data"]["revision"], json!(before + 1));
+
+    client.shutdown().await;
+}
+
+#[tokio::test]
+async fn config_category_and_field_writes_use_the_domain() {
+    let fixture = common::fixture(&["one"]);
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    let result = client
+        .call(
+            "waymark_config_add_category",
+            json!({"key": "bug", "path": "work/bugs", "name": "Bugs"}),
+        )
+        .await;
+    let envelope = common::envelope(&result);
+    assert_eq!(envelope["ok"], true);
+    assert_eq!(
+        envelope["data"]["config"]["categories"]["bug"]["path"],
+        "work/bugs"
+    );
+    assert_eq!(
+        envelope["data"]["config"]["categories"]["bug"]["name"],
+        "Bugs"
+    );
+    assert!(
+        fixture.root.join("work/bugs").is_dir(),
+        "a real add creates the category directory"
+    );
+
+    let result = client
+        .call(
+            "waymark_config_update_category",
+            json!({"key": "bug", "name": "Defects"}),
+        )
+        .await;
+    let envelope = common::envelope(&result);
+    assert_eq!(
+        envelope["data"]["config"]["categories"]["bug"]["name"],
+        "Defects"
+    );
+    assert_eq!(
+        envelope["data"]["changed_keys"],
+        json!(["categories.bug.name"])
+    );
+
+    let result = client
+        .call(
+            "waymark_config_add_field",
+            json!({"key": "points", "type": "integer", "default": "0"}),
+        )
+        .await;
+    let envelope = common::envelope(&result);
+    assert_eq!(
+        envelope["data"]["config"]["fields"]["points"]["type"],
+        "integer"
+    );
+    assert_eq!(
+        envelope["data"]["config"]["fields"]["points"]["required"],
+        false
+    );
+    assert_eq!(envelope["data"]["config"]["fields"]["points"]["default"], 0);
+
+    let result = client
+        .call(
+            "waymark_config_update_field",
+            json!({"key": "points", "attribute": "default", "value": "5"}),
+        )
+        .await;
+    let envelope = common::envelope(&result);
+    assert_eq!(envelope["data"]["config"]["fields"]["points"]["default"], 5);
+    assert_eq!(envelope["data"]["changed"], true);
+
+    // Relaxing an already-optional field changes no key and writes nothing.
+    let result = client
+        .call(
+            "waymark_config_update_field",
+            json!({"key": "points", "attribute": "required", "value": "false"}),
+        )
+        .await;
+    let envelope = common::envelope(&result);
+    assert_eq!(envelope["data"]["changed"], false);
+
+    let result = client
+        .call("waymark_config_remove_category", json!({"key": "bug"}))
+        .await;
+    let envelope = common::envelope(&result);
+    assert_eq!(envelope["ok"], true);
+    assert!(envelope["data"]["config"]["categories"]["bug"].is_null());
+    assert_eq!(envelope["data"]["changed_keys"], json!(["categories.bug"]));
+
+    client.shutdown().await;
+}
+
+#[tokio::test]
+async fn config_writes_reuse_the_shared_codes() {
+    let fixture = common::fixture(&["one"]);
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    // A required field is migration territory, not a configuration write.
+    let result = client
+        .call(
+            "waymark_config_add_field",
+            json!({"key": "points", "type": "integer", "required": true}),
+        )
+        .await;
+    let error = common::business_error(&result);
+    assert_eq!(error["code"], "ACTION_REQUIRES_MIGRATION");
+    assert!(common::is_registered_code(&error["code"]));
+
+    // The same for changing a declared type.
+    client
+        .call(
+            "waymark_config_add_field",
+            json!({"key": "note", "type": "string"}),
+        )
+        .await;
+    let result = client
+        .call(
+            "waymark_config_update_field",
+            json!({"key": "note", "attribute": "type", "value": "integer"}),
+        )
+        .await;
+    let error = common::business_error(&result);
+    assert_eq!(error["code"], "ACTION_REQUIRES_MIGRATION");
+
+    // A category that is still in use is refused with the shared validation
+    // error naming every item that uses it.
+    let result = client
+        .call("waymark_config_remove_category", json!({"key": "task"}))
+        .await;
+    let error = common::business_error(&result);
+    assert_eq!(error["code"], "VALIDATION_ERROR");
+    assert!(error["details"]["issues"].is_array());
+
+    // An undeclared category is `CATEGORY_NOT_FOUND`.
+    let result = client
+        .call(
+            "waymark_config_update_category",
+            json!({"key": "nope", "name": "Nope"}),
+        )
+        .await;
+    let error = common::business_error(&result);
+    assert_eq!(error["code"], "CATEGORY_NOT_FOUND");
+
+    client.shutdown().await;
+}

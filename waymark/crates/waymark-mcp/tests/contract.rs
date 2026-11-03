@@ -43,17 +43,29 @@ fn assert_success_envelope(envelope: &Value, tool: &str) {
 }
 
 #[tokio::test]
-async fn the_catalog_exposes_the_phase_a_capabilities() {
+async fn the_catalog_exposes_the_advertised_capabilities() {
     let fixture = common::fixture(&["one"]);
     let client = common::Client::connect(fixture.root.clone()).await;
     let tools = client.tools().await;
 
     let names: BTreeSet<String> = tools.iter().map(|tool| tool.name.to_string()).collect();
-    let expected: BTreeSet<String> = waymark_mcp::PHASE_A_TOOLS
+    let expected: BTreeSet<String> = waymark_mcp::TOOLS
         .iter()
         .map(|name| (*name).to_owned())
         .collect();
-    assert_eq!(names, expected, "the catalog is exactly the phase-A list");
+    assert_eq!(
+        names, expected,
+        "the catalog is exactly the advertised list"
+    );
+    assert_eq!(
+        tools.len(),
+        waymark_mcp::TOOLS.len(),
+        "no tool is served twice or left out"
+    );
+    assert!(
+        waymark_mcp::TOOLS.starts_with(waymark_mcp::PHASE_A_TOOLS),
+        "phase A's tools keep their places in the catalog"
+    );
 
     for tool in &tools {
         let description = tool

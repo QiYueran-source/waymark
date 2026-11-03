@@ -7,14 +7,112 @@
 //! projected field names by [`FieldName::parse`]. No rule is re-implemented
 //! here; a bad value is a domain `VALIDATION_ERROR`, not a protocol error.
 
+use std::collections::BTreeMap;
+
 use serde_json::Value;
+use waymark_core::config::FieldType;
 use waymark_core::error::{ValidationIssue, WaymarkError};
+use waymark_core::model::{CategoryKey, FieldKey, FieldValue};
+use waymark_core::ops::edit::FieldChangeEntry;
+use waymark_core::ops::OpOptions;
 use waymark_core::query::{
     ArchiveRange, FieldName, Filters, Projection, Query, Sort, SortField, Window, MCP_DEFAULT_LIMIT,
 };
 
 /// The MCP collection default, quoted in every collection tool's description.
 pub const DEFAULT_LIMIT: usize = MCP_DEFAULT_LIMIT;
+
+/// The production operation options, with the dry-run flag a tool asked for.
+///
+/// The clock, the lock-wait policy, and the effective operator are the core
+/// defaults: MCP has no per-call override, and `OWNER_MISMATCH` is computed
+/// against the configured operator exactly as the CLI computes it.
+pub fn options(dry_run: bool) -> OpOptions {
+    let options = OpOptions::new();
+    if dry_run {
+        options.dry_run()
+    } else {
+        options
+    }
+}
+
+/// A `VALIDATION_ERROR` about one adapter argument, in the shared shape.
+///
+/// The adapter performs the same checks the CLI performs before a domain call
+/// (key grammars, type literals). It reuses the registry code and issue shape;
+/// no rule or second taxonomy is introduced.
+pub fn validation(field: &str, message: impl Into<String>) -> WaymarkError {
+    WaymarkError::validation(field, vec![ValidationIssue::new(field, message.into())])
+        .at_field(field)
+}
+
+/// Parse a category key from an adapter argument.
+pub fn category_key(literal: &str) -> Result<CategoryKey, WaymarkError> {
+    CategoryKey::parse(literal).map_err(|error| validation("category", error.to_string()))
+}
+
+/// Parse a custom-field key from an adapter argument.
+pub fn field_key(literal: &str) -> Result<FieldKey, WaymarkError> {
+    FieldKey::parse(literal).map_err(|error| validation("key", error.to_string()))
+}
+
+/// Parse a custom-field type from an adapter argument.
+pub fn field_type(literal: &str) -> Result<FieldType, WaymarkError> {
+    FieldType::parse(literal).map_err(|reason| validation("type", reason))
+}
+
+/// Translate a structured `set`/`clear` map into the core's change sequence.
+///
+/// The adapter does not decide whether a value fits the declaration: every
+/// well-formed JSON value is handed to [`waymark_core::ops::edit`], which owns
+/// the type check, the null rejection, the duplicate and conflict rules, and
+/// the required-field rule. Only values JSON cannot express as a Waymark field
+/// value (a float, an object) are refused here, because the core type has no
+/// representation for them.
+pub fn field_changes(
+    set: &BTreeMap<String, Value>,
+    clear: &[String],
+) -> Result<Vec<FieldChangeEntry>, WaymarkError> {
+    let mut changes = Vec::with_capacity(set.len() + clear.len());
+    let mut issues = Vec::new();
+    for (key, value) in set {
+        if value.is_null() {
+            // Preserved so the domain reports the explicit null itself.
+            changes.push(FieldChangeEntry::null(key.clone()));
+            continue;
+        }
+        match field_value(value) {
+            Ok(value) => changes.push(FieldChangeEntry::set(key.clone(), value)),
+            Err(reason) => issues.push(ValidationIssue::new(format!("fields.{key}"), reason)),
+        }
+    }
+    for key in clear {
+        changes.push(FieldChangeEntry::clear(key.clone()));
+    }
+    if !issues.is_empty() {
+        return Err(WaymarkError::validation("custom fields", issues).at_field("custom_fields"));
+    }
+    Ok(changes)
+}
+
+/// Convert one JSON value into a Waymark custom-field value.
+fn field_value(value: &Value) -> Result<FieldValue, String> {
+    match value {
+        Value::String(text) => Ok(FieldValue::String(text.clone())),
+        Value::Bool(flag) => Ok(FieldValue::Boolean(*flag)),
+        Value::Number(number) => number
+            .as_i64()
+            .map(FieldValue::Integer)
+            .ok_or_else(|| format!("expected a 64-bit integer, found {number}")),
+        Value::Array(items) => items
+            .iter()
+            .map(field_value)
+            .collect::<Result<Vec<_>, _>>()
+            .map(FieldValue::List),
+        Value::Null => Err("null is not a value; use `clear` to remove a field".to_owned()),
+        Value::Object(_) => Err("expected a scalar or a list of scalars".to_owned()),
+    }
+}
 
 /// Build the shared query from the pieces a collection tool accepts.
 ///

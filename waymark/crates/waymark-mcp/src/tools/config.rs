@@ -7,17 +7,124 @@
 //! business failure.
 
 use camino::Utf8Path;
+use rmcp::handler::server::wrapper::Parameters;
 use rmcp::tool;
 use rmcp::tool_router;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use serde_json::{json, Value};
 use waymark_core::envelope::Meta;
 use waymark_core::error::{Code, WaymarkError};
-use waymark_core::ops::config;
+use waymark_core::ops::config::{self, ConfigOutcome, FieldAttribute, Scalar};
 use waymark_core::ops::doctor::{self, DoctorOptions, Report};
 use waymark_core::{Config, Project};
 
 use crate::envelope::{self, ToolResult};
 use crate::server::WaymarkServer;
+use crate::tools::params;
+
+/// Inputs of `waymark_config_set`.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ConfigSetArgs {
+    /// Scalar name: `operator`, `timezone`, `cache.enabled`, or `cache.capacity`.
+    pub name: String,
+
+    /// New value, in the scalar's literal form (`frank`, `Europe/Berlin`,
+    /// `true`, `50`). An empty `operator` clears the key.
+    pub value: String,
+
+    /// Validate and report the change without writing.
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// Inputs of `waymark_config_add_category`.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ConfigAddCategoryArgs {
+    /// Category key, for example `bug`.
+    pub key: String,
+
+    /// Repository-relative directory, for example `work/bugs`.
+    pub path: String,
+
+    /// Display name. Defaults to the key's conventional name.
+    #[serde(default)]
+    pub name: Option<String>,
+
+    /// Validate and report the change without writing.
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// Inputs of `waymark_config_update_category`.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ConfigUpdateCategoryArgs {
+    /// Category key to change.
+    pub key: String,
+
+    /// New display name. The directory and the items are untouched; moving a
+    /// category directory is a storage migration.
+    pub name: String,
+
+    /// Validate and report the change without writing.
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// Inputs of `waymark_config_remove_category`.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ConfigRemoveCategoryArgs {
+    /// Category key to remove. Refused while any active or archived item uses
+    /// it.
+    pub key: String,
+
+    /// Validate and report the change without writing.
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// Inputs of `waymark_config_add_field`.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ConfigAddFieldArgs {
+    /// Custom-field key.
+    pub key: String,
+
+    /// Declared value shape: `string`, `integer`, `boolean`, `list:string`,
+    /// `list:integer`, or `list:boolean`.
+    #[serde(rename = "type")]
+    pub ty: String,
+
+    /// Declare the field as required. Refused by the ordinary configuration
+    /// surface with `ACTION_REQUIRES_MIGRATION`; use the schema migration.
+    #[serde(default)]
+    pub required: bool,
+
+    /// Static default, in the declared type's literal form.
+    #[serde(default)]
+    pub default: Option<String>,
+
+    /// Validate and report the change without writing.
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// Inputs of `waymark_config_update_field`.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ConfigUpdateFieldArgs {
+    /// Declared custom-field key.
+    pub key: String,
+
+    /// Attribute to change: `required` or `default`. `type` is a schema
+    /// migration; declaring `required` is one too.
+    pub attribute: String,
+
+    /// New attribute value, in its literal form (`false`, `42`, `null`).
+    pub value: String,
+
+    /// Validate and report the change without writing.
+    #[serde(default)]
+    pub dry_run: bool,
+}
 
 #[tool_router(router = config_router, vis = "pub(crate)")]
 impl WaymarkServer {
@@ -79,6 +186,187 @@ impl WaymarkServer {
     async fn waymark_doctor(&self) -> ToolResult {
         envelope::respond(|| Ok(report_result(diagnose(self.start())?)))
     }
+
+    /// Set one configuration scalar: `operator`, `timezone`, `cache.enabled`,
+    /// or `cache.capacity`. Takes the shared write lock, bumps the revision,
+    /// and returns the updated configuration. An empty `operator` clears it.
+    /// `dry_run` performs every check and writes nothing.
+    #[tool(
+        name = "waymark_config_set",
+        annotations(
+            title = "Set a configuration scalar",
+            destructive_hint = true,
+            idempotent_hint = false
+        )
+    )]
+    async fn waymark_config_set(&self, Parameters(args): Parameters<ConfigSetArgs>) -> ToolResult {
+        envelope::respond(|| {
+            let scalar = Scalar::parse(&args.name)?;
+            let project = self.project()?;
+            let outcome = config::set_scalar(
+                &project,
+                scalar,
+                &args.value,
+                &params::options(args.dry_run),
+            )?;
+            Ok(config_result(&outcome))
+        })
+    }
+
+    /// Declare a new category. The directory is created on a real run; a dry
+    /// run validates the path and creates nothing.
+    #[tool(
+        name = "waymark_config_add_category",
+        annotations(
+            title = "Add a category",
+            destructive_hint = true,
+            idempotent_hint = false
+        )
+    )]
+    async fn waymark_config_add_category(
+        &self,
+        Parameters(args): Parameters<ConfigAddCategoryArgs>,
+    ) -> ToolResult {
+        envelope::respond(|| {
+            let key = params::category_key(&args.key)?;
+            let project = self.project()?;
+            let outcome = config::add_category(
+                &project,
+                &key,
+                &args.path,
+                args.name.as_deref(),
+                &params::options(args.dry_run),
+            )?;
+            Ok(config_result(&outcome))
+        })
+    }
+
+    /// Change a category's display name. Items and directories are untouched;
+    /// a directory move is a storage migration.
+    #[tool(
+        name = "waymark_config_update_category",
+        annotations(
+            title = "Rename a category",
+            destructive_hint = true,
+            idempotent_hint = true
+        )
+    )]
+    async fn waymark_config_update_category(
+        &self,
+        Parameters(args): Parameters<ConfigUpdateCategoryArgs>,
+    ) -> ToolResult {
+        envelope::respond(|| {
+            let key = params::category_key(&args.key)?;
+            let project = self.project()?;
+            let outcome = config::set_category_name(
+                &project,
+                &key,
+                &args.name,
+                &params::options(args.dry_run),
+            )?;
+            Ok(config_result(&outcome))
+        })
+    }
+
+    /// Remove a category that no work item uses, active or archived. The
+    /// refusal names every item that still uses it.
+    #[tool(
+        name = "waymark_config_remove_category",
+        annotations(
+            title = "Remove a category",
+            destructive_hint = true,
+            idempotent_hint = false
+        )
+    )]
+    async fn waymark_config_remove_category(
+        &self,
+        Parameters(args): Parameters<ConfigRemoveCategoryArgs>,
+    ) -> ToolResult {
+        envelope::respond(|| {
+            let key = params::category_key(&args.key)?;
+            let project = self.project()?;
+            let outcome = config::remove_category(&project, &key, &params::options(args.dry_run))?;
+            Ok(config_result(&outcome))
+        })
+    }
+
+    /// Declare an optional custom field. A required declaration is a schema
+    /// migration and is refused with `ACTION_REQUIRES_MIGRATION`.
+    #[tool(
+        name = "waymark_config_add_field",
+        annotations(
+            title = "Declare a custom field",
+            destructive_hint = true,
+            idempotent_hint = false
+        )
+    )]
+    async fn waymark_config_add_field(
+        &self,
+        Parameters(args): Parameters<ConfigAddFieldArgs>,
+    ) -> ToolResult {
+        envelope::respond(|| {
+            let key = params::field_key(&args.key)?;
+            let ty = params::field_type(&args.ty)?;
+            let project = self.project()?;
+            let outcome = config::add_field(
+                &project,
+                &key,
+                ty,
+                args.required,
+                args.default.as_deref(),
+                &params::options(args.dry_run),
+            )?;
+            Ok(config_result(&outcome))
+        })
+    }
+
+    /// Change one metadata attribute of a declared custom field: relax
+    /// `required` to false, or set/clear the `default`. A type change and
+    /// making a field required are migrations and are refused with
+    /// `ACTION_REQUIRES_MIGRATION`.
+    #[tool(
+        name = "waymark_config_update_field",
+        annotations(
+            title = "Change a custom-field declaration",
+            destructive_hint = true,
+            idempotent_hint = true
+        )
+    )]
+    async fn waymark_config_update_field(
+        &self,
+        Parameters(args): Parameters<ConfigUpdateFieldArgs>,
+    ) -> ToolResult {
+        envelope::respond(|| {
+            let key = params::field_key(&args.key)?;
+            let attribute = FieldAttribute::parse(&args.attribute)?;
+            let project = self.project()?;
+            let outcome = config::set_field(
+                &project,
+                &key,
+                attribute,
+                &args.value,
+                &params::options(args.dry_run),
+            )?;
+            Ok(config_result(&outcome))
+        })
+    }
+}
+
+/// One configuration write as a successful tool result.
+///
+/// The shape matches the CLI's `--json` outcome: the effective configuration
+/// plus what the write changed and the revision it moved from and to.
+fn config_result(outcome: &ConfigOutcome) -> ToolResult {
+    envelope::success(
+        json!({
+            "config": config_json(&outcome.config),
+            "changed": outcome.changed,
+            "changed_keys": outcome.changed_keys,
+            "previous_revision": outcome.previous_revision,
+            "revision": outcome.revision,
+        }),
+        Meta::direct_file_scoped(),
+    )
 }
 
 /// Emit a diagnostic report as a successful tool result.
