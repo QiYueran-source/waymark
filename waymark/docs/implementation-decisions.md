@@ -2107,3 +2107,107 @@ document/configuration rewrites (a category-key migration's value rewrites can r
 - **`create.rs::commit` is now `write_new_item`.** The old name collided with
   the spec's document "commit" vocabulary; the new one names the whole write
   half (inventory, ID, graph checks, one create-and-partner batch).
+
+# Review fixes — core infrastructure
+
+Provisional decisions made while fixing the core review findings (branch `waymark/fixcore2`). They
+record the behaviour the fixes pin; a later agent may adopt `view` in the adapters without changing
+these rules.
+
+## One atomic staging path, one destination check
+
+**Choice:** `write::stage_into(path, bytes, prefix)` is the only temp-create/write/flush/fsync/mode
+body. The batch engine calls it through `stage` (prefix `.waymark-batch`) and `write_atomic` calls it
+directly (prefix `.waymark-tmp`); both then rename through the shared `persist`. `destination_state`
+is the only existence/type check: it returns `Absent` or `File` and refuses a symlink or non-regular
+file with the same `WRITE_CONFLICT`/I/O shapes as before. `validate_batch_target` maps `Absent` to
+the batch's `expected: "missing"` conflict; `write_atomic` accepts both states.
+
+**Why:** the two paths had already drifted in maintenance, and only the symlink/regular-file refusal
+separated "safe to replace" from "safe to create". Behaviour, temporary-file names, and error shapes
+are unchanged; the existing batch, rollback, mode, and symlink tests are the safety net.
+
+## Item-shaped inventory uncertainty makes the projection scoped
+
+**Choice:** `Projection` is `complete` only when every document parsed **and** no inventory problem
+concerns a work-item-shaped path. A path concerns a document when its file stem parses as a
+`WorkItemId` (`ops::doctor`'s existing distinction) and it is not a symbolic link. A problem on such
+a path makes the projection `scoped`, appears in `diagnostics()` naming the path (`DUPLICATE_ID` for
+a case variant of a live ID, `PARSE_ERROR` for a non-lowercase stem with no live counterpart,
+otherwise `INCOMPLETE_PROJECTION`), and is listed by `incomplete_paths()`.
+
+Non-item noise stays out: a stray `README.md`, a malformed name like `wm-short.md`, and a `.txt`
+note never made the projection partial, because Waymark would never read them. A symlink is
+excluded even with a stable-ID stem: the store deliberately does not follow links, so the problem is
+the refusal itself and a link in place of a document remains a local `ITEM_NOT_FOUND`, not a global
+incompleteness.
+
+**Why:** an uppercase/case-variant document claims an ID the projection may already hold, and a
+global read over a world that has not accounted for every claim is not complete. `list`, `tree`,
+`stats`, readiness, archive, migrations, and cross-file relationship writes all go through
+`require_complete`, so they now refuse instead of publishing a partial graph.
+
+**Supersedes:** `### Only unreadable, unparseable, or duplicate *work-item* documents make a
+projection incomplete`, which said uppercase stems remain inventory problems and do not by
+themselves mark the projection scoped.
+
+## The structured filter document has one spelling per concept
+
+**Choice:** `Filters::from_json` accepts the documented keys `archive`, `category`, `creator`,
+`dependencies`, `field`, `leaves`, `owner`, `parent`, `parent_present`, `readiness`, `status`, and
+`text` (`FILTER_KEYS`). `readiness` takes the string values `ready` and `blocked`. The boolean
+`ready`/`blocked` keys remain accepted as deprecated synonyms (`DEPRECATED_FILTER_KEYS`) because the
+earlier MCP tool description documented them; the `fields` alias for `field` is dropped (it was never
+documented), and `leaves` remains the only leaf spelling. The unknown-key `VALIDATION_ERROR` lists
+the accepted set and the deprecated aliases.
+
+**Why:** the implementation decisions already pinned `readiness`, and accepting only the boolean
+aliases made the documented key a usage error. Keeping the alias documented (rather than deleting
+it outright) avoids breaking the adapter surface that advertised it; dropping the undocumented
+`fields` spelling removes a second way to say the same thing.
+
+## Reserved field names derive from the query column vocabulary
+
+**Choice:** `model::RESERVED_FIELD_NAMES` is computed at compile time from `query::FieldName::ALL`
+minus `NeedsMigration`, in the established order. The value is byte-identical to the previous
+21-name list, and a unit test pins it. `FieldName::as_str` is a `const fn` so the derivation stays a
+`const`.
+
+**Why:** the list was a third copy of the frontmatter and query vocabularies, so adding a persisted
+or computed name required three edits. `needs_migration` stays excluded because it is a derived read
+column, not a name a custom field can shadow; the test makes that exclusion deliberate.
+
+## Move outcomes are stated by two constructors
+
+**Choice:** `MoveOutcome::unchanged` (same category: `changed: false`, `written: false`,
+`fingerprint: None`, path unchanged) and `MoveOutcome::changed` (`changed: true`, `written:
+fingerprint.is_some()`) are the only places the eight fields are assembled. `move_item` passes the
+in-place commit's `Option<Fingerprint>`, the dry run's `None`, or the relocation's `Some(fingerprint)`
+to the same constructor.
+
+**Why:** the four copies had already drifted (`written: false` vs `written: fingerprint.is_some()`).
+Deriving `written` structurally makes the invariant impossible to miss, and an integration test
+drives a no-op, a dry run, a committed relocation, and an in-place rewrite asserting
+`written == fingerprint.is_some()` for each.
+
+## Dead public API removed
+
+**Choice:** `WorkItem::is_from_the_future` and `lock::with_project_lock_at` are deleted. Neither had
+a caller in `src` or in any test (checked with a repository-wide grep); `needs_migration` and
+`with_project_lock` are the live spellings.
+
+## One shared JSON renderer module
+
+**Choice:** `waymark_core::view` owns the dependency-free machine payloads the CLI and MCP adapters
+publish: `item_fields`, `item_json`, `tree_node_json`, `dependency_row_json`, `row_json`,
+`read_json`, `config_json`, `listing_summary_json`, `listing_json`, `write_result_json`, and
+`write_result_json_with`. The shapes are copied from the adapters, not redesigned; the CLI tests
+remain the contract. The module only reads domain types and returns `serde_json::Value` — no file
+access, lock, or policy. The adapters are not edited here; a later agent adopts the module and
+deletes its private copies.
+
+**Why:** the two adapters carried byte-identical renderers for the item, tree, dependency row,
+configuration, and show payloads, so a payload change had to be made twice and could drift. Keeping
+the renderers in core also keeps "what the machine form is" out of the transport crates. `listing_json`
+takes the `ArchiveRange` and `Projection` explicitly because those are caller choices, not facts the
+`Listing` carries.

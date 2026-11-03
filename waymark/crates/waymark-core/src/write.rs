@@ -402,11 +402,26 @@ struct StagedTemp {
     temp: tempfile::NamedTempFile,
 }
 
-/// Refuse targets that cannot be replaced safely.
-fn validate_batch_target(target: &RawTarget<'_>) -> Result<(), WaymarkError> {
-    match fs::symlink_metadata(target.path) {
+/// What currently occupies a destination path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Destination {
+    /// Nothing exists there, so a create may claim it.
+    Absent,
+    /// A plain regular file exists there, so it may be replaced.
+    File,
+}
+
+/// Classify a destination, refusing anything that cannot be replaced safely.
+///
+/// A symbolic link would replace the link target (which is how a project
+/// escapes its own root), and a directory or other special file is not a
+/// document. This is the single existence/type check every writer shares: a
+/// batch target turns [`Destination::Absent`] into a conflict, while
+/// [`write_atomic`] accepts both states.
+fn destination_state(path: &Utf8Path) -> Result<Destination, WaymarkError> {
+    match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => Err(WaymarkError::io(
-            target.path.to_string(),
+            path.to_string(),
             "write",
             &std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -414,18 +429,24 @@ fn validate_batch_target(target: &RawTarget<'_>) -> Result<(), WaymarkError> {
             ),
         )),
         Ok(metadata) if !metadata.is_file() => Err(WaymarkError::io(
-            target.path.to_string(),
+            path.to_string(),
             "write",
             &std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "the destination is not a regular file",
             ),
         )),
-        Ok(_) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            Err(conflict(target, "missing"))
-        }
-        Err(source) => Err(WaymarkError::io(target.path.to_string(), "read", &source)),
+        Ok(_) => Ok(Destination::File),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Destination::Absent),
+        Err(source) => Err(WaymarkError::io(path.to_string(), "read", &source)),
+    }
+}
+
+/// Refuse targets that cannot be replaced safely.
+fn validate_batch_target(target: &RawTarget<'_>) -> Result<(), WaymarkError> {
+    match destination_state(target.path)? {
+        Destination::File => Ok(()),
+        Destination::Absent => Err(conflict(target, "missing")),
     }
 }
 
@@ -442,11 +463,22 @@ fn validate_batch_create(target: &RawTarget<'_>) -> Result<(), WaymarkError> {
     }
 }
 
-/// Write `bytes` to a temporary file beside `path` and sync it.
+/// Stage one document for a batch, with the batch's temporary-file prefix.
 fn stage(path: &Utf8Path, bytes: &[u8]) -> Result<StagedTemp, WaymarkError> {
+    stage_into(path, bytes, ".waymark-batch")
+}
+
+/// Write `bytes` to a temporary file beside `path`, sync it, and apply the
+/// destination's mode.
+///
+/// `prefix` only names the temporary file; the directory, write, flush, fsync,
+/// and mode steps are the single implementation shared by the batch engine and
+/// [`write_atomic`]. The caller still owns the rename ([`persist`]) because a
+/// batch delays every rename until every target is staged.
+fn stage_into(path: &Utf8Path, bytes: &[u8], prefix: &str) -> Result<StagedTemp, WaymarkError> {
     let directory = path.parent().unwrap_or_else(|| Utf8Path::new("."));
     let mut temp = tempfile::Builder::new()
-        .prefix(".waymark-batch")
+        .prefix(prefix)
         .tempfile_in(directory)
         .map_err(|source| {
             WaymarkError::io(directory.to_string(), "create a temporary file in", &source)
@@ -483,60 +515,12 @@ fn persist(staged: StagedTemp, path: &Utf8Path) -> Result<(), WaymarkError> {
 /// filesystem. The file mode is inherited from an existing target, else
 /// `0644`.
 fn write_atomic(path: &Utf8Path, bytes: &[u8]) -> Result<Fingerprint, WaymarkError> {
-    let directory = path.parent().unwrap_or_else(|| Utf8Path::new("."));
-    if let Ok(metadata) = fs::symlink_metadata(path) {
-        if metadata.file_type().is_symlink() {
-            // Writing through a symlink would replace the link target, which is
-            // how a project escapes its own root. Refuse instead.
-            return Err(WaymarkError::io(
-                path.to_string(),
-                "write",
-                &std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "the destination is a symbolic link",
-                ),
-            ));
-        }
-        if !metadata.is_file() {
-            return Err(WaymarkError::io(
-                path.to_string(),
-                "write",
-                &std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "the destination is not a regular file",
-                ),
-            ));
-        }
-    }
+    // The destination must be absent or a plain regular file; the same check a
+    // batch target gets, so the two writers cannot disagree about what is safe.
+    let _ = destination_state(path)?;
 
-    let mut temp = tempfile::Builder::new()
-        .prefix(".waymark-tmp")
-        .tempfile_in(directory)
-        .map_err(|source| {
-            WaymarkError::io(directory.to_string(), "create a temporary file in", &source)
-        })?;
-
-    temp.write_all(bytes)
-        .map_err(|source| WaymarkError::io(path.to_string(), "write", &source))?;
-    temp.flush()
-        .map_err(|source| WaymarkError::io(path.to_string(), "flush", &source))?;
-    temp.as_file()
-        .sync_all()
-        .map_err(|source| WaymarkError::io(path.to_string(), "fsync", &source))?;
-
-    let mode = existing_mode(path).unwrap_or(0o644);
-    set_mode(temp.path(), mode)?;
-
-    temp.persist(path)
-        .map_err(|error| WaymarkError::io(path.to_string(), "replace", &error.error))?;
-
-    // The rename is durable once the directory entry is synced. Failure to sync
-    // the directory does not undo a committed write, so this is best-effort: a
-    // filesystem that cannot sync a directory (some network mounts) still keeps
-    // the rename.
-    if let Ok(handle) = fs::File::open(directory) {
-        let _ = handle.sync_all();
-    }
+    let staged = stage_into(path, bytes, ".waymark-tmp")?;
+    persist(staged, path)?;
 
     Ok(Fingerprint::of(bytes))
 }

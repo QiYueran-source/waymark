@@ -32,31 +32,54 @@ pub fn readable_generations() -> String {
     }
 }
 
+/// How many reserved names the query vocabulary yields.
+///
+/// Every [`FieldName`](crate::query::FieldName) except `needs_migration`, which
+/// is a derived read column rather than a persisted or relationship name.
+const RESERVED_NAME_COUNT: usize = {
+    let mut count = 0;
+    let mut index = 0;
+    while index < crate::query::FieldName::ALL.len() {
+        if !matches!(
+            crate::query::FieldName::ALL[index],
+            crate::query::FieldName::NeedsMigration
+        ) {
+            count += 1;
+        }
+        index += 1;
+    }
+    count
+};
+
+/// Build the reserved-name list from the query column vocabulary.
+///
+/// This is the single source: a column added to
+/// [`FieldName::ALL`](crate::query::FieldName::ALL) becomes reserved without a
+/// third list to edit.
+const fn reserved_field_names() -> [&'static str; RESERVED_NAME_COUNT] {
+    let mut names = [""; RESERVED_NAME_COUNT];
+    let mut index = 0;
+    let mut next = 0;
+    while index < crate::query::FieldName::ALL.len() {
+        let field = crate::query::FieldName::ALL[index];
+        if !matches!(field, crate::query::FieldName::NeedsMigration) {
+            names[next] = field.as_str();
+            next += 1;
+        }
+        index += 1;
+    }
+    names
+}
+
 /// Frontmatter keys a custom field may not shadow: the persisted v1 fields plus
 /// the values computed from the projection.
-pub const RESERVED_FIELD_NAMES: &[&str] = &[
-    "schema",
-    "id",
-    "title",
-    "category",
-    "status",
-    "owner",
-    "creator",
-    "created_at",
-    "updated_at",
-    "closed_at",
-    "parent",
-    "dependencies",
-    "soft_links",
-    "custom_fields",
-    "archived_at",
-    "archive_reason",
-    "ready",
-    "blocked",
-    "blocked_by",
-    "children",
-    "dependents",
-];
+///
+/// Derived from [`FieldName::ALL`](crate::query::FieldName::ALL) so the
+/// reserved vocabulary cannot drift from the query column vocabulary. The
+/// historical order and the exact value are preserved; `needs_migration` is
+/// deliberately excluded because it is a derived read column, not a name a
+/// custom field could shadow.
+pub const RESERVED_FIELD_NAMES: &[&str] = &reserved_field_names();
 
 /// The lifecycle states a work item can be in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -174,11 +197,6 @@ impl WorkItem {
     /// planner compares against the target generation.
     pub fn needs_migration_from(&self, generation: u32) -> bool {
         self.schema < generation
-    }
-
-    /// Whether this document's generation is newer than this release reads.
-    pub fn is_from_the_future(&self) -> bool {
-        self.schema > FORMAT_GENERATION
     }
 }
 
@@ -398,5 +416,40 @@ impl FieldValue {
             Self::Boolean(_) => "boolean",
             Self::List(_) => "list",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RESERVED_FIELD_NAMES;
+
+    #[test]
+    fn the_reserved_names_are_the_historical_value_in_order() {
+        assert_eq!(
+            RESERVED_FIELD_NAMES,
+            &[
+                "schema",
+                "id",
+                "title",
+                "category",
+                "status",
+                "owner",
+                "creator",
+                "created_at",
+                "updated_at",
+                "closed_at",
+                "parent",
+                "dependencies",
+                "soft_links",
+                "custom_fields",
+                "archived_at",
+                "archive_reason",
+                "ready",
+                "blocked",
+                "blocked_by",
+                "children",
+                "dependents",
+            ]
+        );
     }
 }

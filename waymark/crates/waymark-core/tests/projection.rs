@@ -381,3 +381,96 @@ fn a_projection_loaded_with_a_configured_cache_uses_that_capacity() {
     // The defaulted load policy retries a bounded number of times.
     assert_eq!(LoadOptions::default().max_attempts, 3);
 }
+
+#[test]
+fn a_case_variant_document_makes_the_projection_scoped_and_names_the_path() {
+    let (_dir, project) = project();
+    let item = make(&project, "case");
+    let lowercase = task_path(&project, &item);
+    let uppercase = lowercase.with_file_name(format!("{}.md", item.to_uppercase()));
+    std::fs::copy(&lowercase, &uppercase).unwrap();
+
+    // The inventory cannot classify the case variant as a document, but it names
+    // an ID the projection also holds. That is an ambiguity, not noise.
+    let projection = Projection::load(&project).unwrap();
+    assert_eq!(projection.completeness(), Completeness::Scoped);
+    assert!(!projection.is_complete());
+    assert!(projection
+        .problems()
+        .iter()
+        .any(|problem| problem.path == uppercase));
+    assert!(projection
+        .incomplete_paths()
+        .iter()
+        .any(|path| *path == uppercase.as_path()));
+
+    let error = projection.require_complete().unwrap_err();
+    assert_eq!(error.code(), Code::IncompleteProjection);
+    let diagnostics = error.details()["diagnostics"].as_array().unwrap();
+    assert!(
+        diagnostics.iter().any(|finding| {
+            finding["code"] == serde_json::json!("DUPLICATE_ID")
+                && finding["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains(uppercase.as_str()))
+        }),
+        "the diagnostic must name the case-variant path: {diagnostics:?}"
+    );
+
+    // Every global read refuses the partial world instead of publishing it.
+    let error = waymark_core::ops::list::list(&project, &waymark_core::query::Query::new())
+        .expect_err("a global read requires a complete projection");
+    assert_eq!(error.code(), Code::IncompleteProjection);
+
+    // The lowercase document is still locally readable: a scoped read names the
+    // item it was asked for and does not choose between the two files.
+    let scoped = projection.scoped_read(&id(&item)).unwrap();
+    assert_eq!(scoped.item.id, id(&item));
+    assert_eq!(scoped.meta.completeness, Completeness::Scoped);
+}
+
+#[test]
+fn an_uppercase_stem_without_a_live_document_is_scoped() {
+    let (_dir, project) = project();
+    let item = make(&project, "upper");
+    let lowercase = task_path(&project, &item);
+    let uppercase = lowercase.with_file_name(format!("{}.md", item.to_uppercase()));
+    std::fs::rename(&lowercase, &uppercase).unwrap();
+
+    let projection = Projection::load(&project).unwrap();
+    assert_eq!(projection.completeness(), Completeness::Scoped);
+    assert_eq!(projection.items().count(), 0);
+    assert!(projection.diagnostics().iter().any(|finding| {
+        finding.code == Code::ParseError && finding.message.contains(uppercase.as_str())
+    }));
+}
+
+#[test]
+fn a_stray_readme_is_inventory_noise_not_an_incomplete_projection() {
+    let (_dir, project) = project();
+    make(&project, "one");
+    std::fs::write(
+        project.root().join("work/task/README.md"),
+        "project notes, not a work item\n",
+    )
+    .unwrap();
+
+    let projection = Projection::load(&project).unwrap();
+    assert_eq!(
+        projection.completeness(),
+        Completeness::Complete,
+        "a non-item file must not make the world partial"
+    );
+    assert!(projection.is_complete());
+    assert!(projection.require_complete().is_ok());
+    assert!(projection.diagnostics().is_empty());
+    assert!(projection.incomplete_paths().is_empty());
+    assert!(projection
+        .problems()
+        .iter()
+        .any(|problem| problem.path.ends_with("README.md")));
+
+    let listing =
+        waymark_core::ops::list::list(&project, &waymark_core::query::Query::new()).unwrap();
+    assert_eq!(listing.len(), 1, "the real document is still listed");
+}
