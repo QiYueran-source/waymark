@@ -502,3 +502,73 @@ fn a_closed_item_never_reports_ready_or_blocked() {
     assert_eq!(envelope["data"]["blocked"], serde_json::json!(false));
     assert_eq!(envelope["data"]["blocked_by"], serde_json::json!([]));
 }
+
+#[test]
+fn show_still_reads_one_document_when_a_sibling_cannot_be_parsed() {
+    let (_dir, root) = project();
+    let id = create(&root, "readable");
+    let broken = create(&root, "broken");
+
+    // An external edit that no operation would make: the frontmatter no longer
+    // closes. The document is unreadable, but it is not the one being shown.
+    std::fs::write(
+        root.join("work/task").join(format!("{broken}.md")),
+        "---\nid: not even close\n",
+    )
+    .unwrap();
+
+    let result = run(waymark()
+        .arg("--json")
+        .arg("--project")
+        .arg(&root)
+        .arg("show")
+        .arg(&id));
+    assert_eq!(
+        result.status(),
+        0,
+        "a broken sibling must not block a direct-file read: {}",
+        result.stderr()
+    );
+    let envelope = result.json();
+    assert_eq!(envelope["data"]["id"], serde_json::json!(id));
+    assert!(envelope["data"]["ready"].is_null());
+    assert!(envelope["data"]["blocked"].is_null());
+    assert_eq!(
+        envelope["_meta"]["diagnostics"][0]["code"],
+        serde_json::json!("INCOMPLETE_PROJECTION")
+    );
+    assert_eq!(
+        envelope["_meta"]["completeness"],
+        serde_json::json!("scoped")
+    );
+}
+
+#[test]
+fn a_global_graph_read_fails_explicitly_rather_than_returning_a_partial_page() {
+    let (_dir, root) = project();
+    create(&root, "readable");
+    let broken = create(&root, "broken");
+    std::fs::write(
+        root.join("work/task").join(format!("{broken}.md")),
+        "---\nid: not even close\n",
+    )
+    .unwrap();
+
+    for command in ["list", "ready", "blocked"] {
+        let mut invocation = waymark();
+        invocation
+            .arg("--json")
+            .arg("--project")
+            .arg(&root)
+            .arg(command);
+        let result = run(&mut invocation);
+        assert_ne!(result.status(), 0, "{command} returned a partial page");
+        let envelope = result.json();
+        assert_eq!(envelope["ok"], serde_json::json!(false), "{command}");
+        assert_eq!(
+            envelope["error"]["code"],
+            serde_json::json!("PARSE_ERROR"),
+            "{command}"
+        );
+    }
+}
