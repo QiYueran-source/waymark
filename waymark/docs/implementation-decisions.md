@@ -1541,7 +1541,11 @@ document/configuration rewrites (a category-key migration's value rewrites can r
   without a flag; the CLI test was updated.
 - Strict mode still emits the success envelope: the report is the answer, and
   the exit class is attached to it rather than replacing it with a failure
-  envelope.
+  envelope. This supersedes the earlier
+  `### config validate and validate exit 3 when findings are errors` and
+  `### validate covers configuration only, and says so` entries: `config
+  validate` still fails on errors, while the project-wide `validate` follows the
+  strict contract.
 
 ## What is diagnosed, and under which existing code
 
