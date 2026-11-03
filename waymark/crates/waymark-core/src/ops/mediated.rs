@@ -62,14 +62,24 @@ pub fn load_entry(
     entry: InventoryEntry,
     operation: &str,
 ) -> Result<Loaded, WaymarkError> {
+    let loaded = load_entry_any(project, entry)?;
+    if loaded.item.is_archived() {
+        return Err(WaymarkError::item_archived(&loaded.item.id, operation));
+    }
+    Ok(loaded)
+}
+
+/// Read an already-located item **without** the archived rejection.
+///
+/// This exists for archive alone: every other mediated write must refuse an
+/// archived item, while archive has to see the marker to answer
+/// `ALREADY_ARCHIVED` instead of a generic refusal.
+pub fn load_entry_any(project: &Project, entry: InventoryEntry) -> Result<Loaded, WaymarkError> {
     let bytes = project.read_bytes(&entry.path)?;
     let item = crate::parse::parse_item_file(&entry.path)?;
     if item.id != entry.id {
         let stem = entry.path.file_stem().unwrap_or_default();
         return Err(WaymarkError::id_path_mismatch(&item.id, &entry.path, stem));
-    }
-    if item.is_archived() {
-        return Err(WaymarkError::item_archived(&item.id, operation));
     }
     Ok(Loaded {
         item,

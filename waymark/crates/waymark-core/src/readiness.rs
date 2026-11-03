@@ -72,7 +72,7 @@ impl Readiness {
 #[derive(Debug, Clone, Default)]
 pub struct Graph {
     items: BTreeMap<WorkItemId, WorkItem>,
-    archived: BTreeSet<WorkItemId>,
+    archived: BTreeMap<WorkItemId, WorkItem>,
     children: BTreeMap<WorkItemId, Vec<WorkItemId>>,
     dependents: BTreeMap<WorkItemId, Vec<WorkItemId>>,
 }
@@ -87,7 +87,7 @@ impl Graph {
         let mut graph = Self::default();
         for item in items {
             if item.is_archived() {
-                graph.archived.insert(item.id.clone());
+                graph.archived.insert(item.id.clone(), item.clone());
             } else {
                 graph.items.insert(item.id.clone(), item.clone());
             }
@@ -219,7 +219,7 @@ impl Graph {
     /// anything, and nothing waits on it. Reporting it as "unknown" would be
     /// wrong — the graph knows exactly what an archived item is.
     pub fn readiness_any(&self, id: &WorkItemId) -> Option<Readiness> {
-        if self.archived.contains(id) {
+        if self.archived.contains_key(id) {
             return Some(Readiness::closed());
         }
         self.readiness(id)
@@ -227,7 +227,16 @@ impl Graph {
 
     /// Whether `id` names an archived document in this project.
     pub fn is_archived(&self, id: &WorkItemId) -> bool {
-        self.archived.contains(id)
+        self.archived.contains_key(id)
+    }
+
+    /// Every archived item, in stable-ID order.
+    ///
+    /// Archived items are not graph nodes: this is a lookup table for the one
+    /// read that asks for them deliberately (the archived-only list range), not
+    /// a population any active query may walk.
+    pub fn archived_items(&self) -> impl Iterator<Item = &WorkItem> {
+        self.archived.values()
     }
 
     /// Whether every dependency of `id` is closed and `id` itself is not.
@@ -311,7 +320,7 @@ impl Graph {
 
     /// Whether `id` exists at all, active or archived.
     fn known(&self, id: &WorkItemId) -> bool {
-        self.items.contains_key(id) || self.archived.contains(id)
+        self.items.contains_key(id) || self.archived.contains_key(id)
     }
 
     fn cycle_findings(&self) -> Vec<Finding> {

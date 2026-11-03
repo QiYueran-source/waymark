@@ -8,6 +8,16 @@
 //! - `blocked` — active, not closed, and at least one dependency target
 //!   unfinished or missing.
 //!
+//! # The archive range
+//!
+//! [`Filters::archive`] is the one deliberate way to look at retired work. The
+//! default is [`ArchiveRange::Active`], so an existing call keeps its meaning and
+//! archived items never leak into an active answer. [`ArchiveRange::Archived`]
+//! selects the archived population *instead* — never mixed in — and reports each
+//! row with [`Readiness::closed()`], because archived is neither ready nor
+//! blocked. `ready` and `blocked` with that range are empty by construction:
+//! their selection is about readiness, and an archived item has none.
+//!
 //! All three scan the whole project, so every one of them reports
 //! `completeness: complete` and `source: memory_projection`. Readiness is
 //! computed on the fly and never persisted.
@@ -30,6 +40,21 @@ pub struct Filters {
     pub status: Option<Status>,
     /// Only items in this category.
     pub category: Option<CategoryKey>,
+    /// Which archive population to read; active by default.
+    pub archive: ArchiveRange,
+}
+
+/// Which side of the archive line a collection read covers.
+///
+/// The two ranges are exclusive: an archived item is never mixed into an active
+/// answer, and an archived-only answer never includes active work.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ArchiveRange {
+    /// Only items without an archive marker. The default.
+    #[default]
+    Active,
+    /// Only items with an archive marker.
+    Archived,
 }
 
 impl Filters {
@@ -47,6 +72,18 @@ impl Filters {
     /// Only `category`.
     pub fn with_category(mut self, category: CategoryKey) -> Self {
         self.category = Some(category);
+        self
+    }
+
+    /// Read the archived-only range.
+    pub fn with_archived(mut self) -> Self {
+        self.archive = ArchiveRange::Archived;
+        self
+    }
+
+    /// Read the default, active-only range.
+    pub fn with_active(mut self) -> Self {
+        self.archive = ArchiveRange::Active;
         self
     }
 
@@ -138,11 +175,18 @@ fn read(
 ) -> Result<Listing, WaymarkError> {
     let graph = Graph::from_project(project)?;
     let mut items = Vec::new();
-    for item in graph.items() {
+    let population: Vec<&WorkItem> = match filters.archive {
+        ArchiveRange::Active => graph.items().collect(),
+        ArchiveRange::Archived => graph.archived_items().collect(),
+    };
+    for item in population {
         if !filters.matches(item) {
             continue;
         }
-        let Some(readiness) = graph.readiness(&item.id) else {
+        // An archived item is not a graph node, so it has no readiness either:
+        // `closed()` is the truthful "neither ready nor blocked" answer, and it
+        // is what excludes it from `ready`/`blocked` without a second rule.
+        let Some(readiness) = graph.readiness_any(&item.id) else {
             continue;
         };
         if !keep(&readiness) {
