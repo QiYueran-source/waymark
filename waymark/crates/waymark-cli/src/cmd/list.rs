@@ -97,6 +97,22 @@ pub struct ListArgs {
     #[arg(long, value_name = "active|archived|all", default_value = "active")]
     pub archive: String,
 
+    /// Read the archived-only range; the short form of `--archive archived`.
+    #[arg(long)]
+    pub archived: bool,
+
+    /// Ordering, window, and projection.
+    #[command(flatten)]
+    pub view: ViewArgs,
+}
+
+/// The ordering, window, and projection flags every collection read shares.
+///
+/// They are a separate struct because `query` takes them without the filter
+/// flags: the structured document is `query`'s only filter input, so a flag
+/// cannot silently contradict it.
+#[derive(Debug, Args)]
+pub struct ViewArgs {
     /// Primary ordering: rank, created_at, updated_at, title, status, or
     /// `field:<key>`.
     #[arg(long, value_name = "FIELD", default_value = "rank")]
@@ -121,10 +137,6 @@ pub struct ListArgs {
     /// Identity columns only.
     #[arg(long)]
     pub compact: bool,
-
-    /// Read the archived-only range; the short form of `--archive archived`.
-    #[arg(long)]
-    pub archived: bool,
 }
 
 impl ListArgs {
@@ -228,17 +240,33 @@ impl ListArgs {
 
     /// Translate the flags into a complete query: filters, ordering, window.
     pub fn query(&self) -> Result<Query, WaymarkError> {
+        let (sort, window) = self.view.sort_and_window()?;
         Ok(Query {
             filters: self.filters()?,
-            sort: Sort {
+            sort,
+            window,
+        })
+    }
+
+    /// The projection the flags ask for.
+    pub fn projection(&self) -> Result<Projection, WaymarkError> {
+        self.view.projection()
+    }
+}
+
+impl ViewArgs {
+    /// Translate the ordering and window flags.
+    pub fn sort_and_window(&self) -> Result<(Sort, Window), WaymarkError> {
+        Ok((
+            Sort {
                 field: SortField::parse(&self.sort)?,
                 descending: self.desc,
             },
-            window: Window {
+            Window {
                 limit: self.limit,
                 offset: self.offset,
             },
-        })
+        ))
     }
 
     /// The projection the flags ask for.
@@ -385,17 +413,9 @@ pub fn run(
     which: Which,
     json: bool,
 ) -> Result<(), WaymarkError> {
-    let listing = run_query(project, args, which)?;
-    render(&listing, args, json)
-}
-
-/// Execute the shared query for one population.
-pub fn run_query(
-    project: &Project,
-    args: &ListArgs,
-    which: Which,
-) -> Result<Listing, WaymarkError> {
-    run_with_query(project, &args.query()?, which)
+    let query = args.query()?;
+    let listing = run_with_query(project, &query, which)?;
+    render(&listing, &args.projection()?, query.filters.archive, json)
 }
 
 /// Execute an already-built query — the path `query` takes, where the filter
@@ -413,11 +433,15 @@ pub fn run_with_query(
 }
 
 /// Render a listing in the mode the caller asked for.
-pub fn render(listing: &Listing, args: &ListArgs, json: bool) -> Result<(), WaymarkError> {
-    let projection = args.projection()?;
+pub fn render(
+    listing: &Listing,
+    projection: &Projection,
+    archive: ArchiveRange,
+    json: bool,
+) -> Result<(), WaymarkError> {
     if json {
         emit(&success_envelope(
-            waymark_core::view::listing_json(listing, &projection, args.archive_range()?),
+            waymark_core::view::listing_json(listing, projection, archive),
             listing.meta.clone(),
         ))?;
         return Ok(());

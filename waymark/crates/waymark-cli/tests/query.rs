@@ -446,3 +446,99 @@ fn a_human_invocation_writes_the_answer_to_stderr_only() {
         assert!(!result.stderr().is_empty(), "{arguments:?} said nothing");
     }
 }
+
+/// `query` takes its filters from the document only. A filter flag is a usage
+/// error, not a second, silently discarded filter input.
+#[test]
+fn query_has_no_filter_flags_to_contradict_the_document() {
+    let (_dir, root) = project();
+    create(&root, "open item");
+
+    let result = run(waymark()
+        .arg("--json")
+        .arg("--project")
+        .arg(&root)
+        .arg("query")
+        .arg("--filter")
+        .arg("{}")
+        .arg("--status")
+        .arg("closed"));
+    assert_eq!(result.status(), 1, "stderr: {}", result.stderr());
+    assert_eq!(
+        result.json()["error"]["code"],
+        serde_json::json!("USAGE_ERROR")
+    );
+}
+
+/// The document owns the filters and the archive range, and the rendered
+/// metadata reports the range that was actually read.
+#[test]
+fn query_reads_and_reports_the_document_filter() {
+    let (_dir, root) = project();
+    let open = create(&root, "open item");
+    let archived = create(&root, "archived item");
+
+    let archived_result = run(waymark()
+        .arg("--json")
+        .arg("--project")
+        .arg(&root)
+        .arg("archive")
+        .arg(&archived));
+    assert_eq!(
+        archived_result.status(),
+        0,
+        "stderr: {}",
+        archived_result.stderr()
+    );
+
+    // A status filter in the document excludes the open item.
+    let filtered = run(waymark()
+        .arg("--json")
+        .arg("--project")
+        .arg(&root)
+        .arg("query")
+        .arg("--filter")
+        .arg(r#"{"status":"closed"}"#));
+    assert_eq!(filtered.status(), 0, "stderr: {}", filtered.stderr());
+    let data = &filtered.json()["data"];
+    assert_eq!(data["count"], 0, "{data}");
+    assert_eq!(data["archive"], "active", "{data}");
+
+    // The document's archive range is both what is read and what is reported.
+    let archived_only = run(waymark()
+        .arg("--json")
+        .arg("--project")
+        .arg(&root)
+        .arg("query")
+        .arg("--filter")
+        .arg(r#"{"archive":"archived"}"#));
+    assert_eq!(
+        archived_only.status(),
+        0,
+        "stderr: {}",
+        archived_only.stderr()
+    );
+    let data = &archived_only.json()["data"];
+    assert_eq!(data["archive"], "archived", "{data}");
+    assert_eq!(data["count"], 1, "{data}");
+    assert_eq!(
+        data["items"][0]["id"],
+        serde_json::json!(archived),
+        "{data}"
+    );
+    assert_ne!(data["items"][0]["id"], serde_json::json!(open), "{data}");
+
+    // An empty document means "no filters" over the active range.
+    let unfiltered = run(waymark()
+        .arg("--json")
+        .arg("--project")
+        .arg(&root)
+        .arg("query")
+        .arg("--filter")
+        .arg("{}"));
+    assert_eq!(unfiltered.status(), 0, "stderr: {}", unfiltered.stderr());
+    let data = &unfiltered.json()["data"];
+    assert_eq!(data["archive"], "active", "{data}");
+    assert_eq!(data["count"], 1, "{data}");
+    assert_eq!(data["items"][0]["id"], serde_json::json!(open), "{data}");
+}
