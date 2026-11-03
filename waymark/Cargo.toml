@@ -4,6 +4,7 @@ members = [
     "crates/waymark-core",
     "crates/waymark-cli",
     "crates/waymark-web",
+    "crates/waymark-mcp",
 ]
 
 [workspace.package]
@@ -35,6 +36,8 @@ ammonia = "4"
 
 waymark-core = { path = "crates/waymark-core" }
 waymark-web = { path = "crates/waymark-web" }
+rmcp = { version = "0.8", features = ["transport-io"] }
+schemars = "1"
 
 [profile.release]
 lto = "thin"
