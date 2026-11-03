@@ -209,8 +209,9 @@ Codes with no exit class, used as warnings and findings: `OWNER_MISMATCH` (warni
 
 The following decisions extend the accepted specification; the specification and implementation tickets have not yet been synchronized with them.
 
-- Use existing frameworks for the Web HTTP service and for MCP, rather than implementing HTTP or the MCP protocol by hand. Clove is technical prior art, not a requirement to copy its product scope or response contracts. The exact frameworks and versions remain open.
-- The basic distribution includes CLI, the shared core, and MCP; Web is optional. A Web-enabled build or installation is separate from the basic one. Compiling in Web is not a promise that it can be added dynamically to an already installed executable.
+- Use existing frameworks for the Web HTTP service and for MCP, rather than implementing HTTP or the MCP protocol by hand. Clove is technical prior art, not a requirement to copy its product scope or response contracts. The MCP framework and version remain open pending investigation.
+- The Web backend uses Axum and Tokio; the Web frontend uses SvelteKit, Svelte, TypeScript, and Vite. Select compatible versions after validating the complete dependency graph against the project's declared Rust version; report incompatibilities rather than silently raising that version. Web remains strictly read-only and does not acquire Clove's other product features by virtue of this stack choice.
+- The basic distribution includes CLI, the shared core, and MCP; Web is optional. A build-time feature selects Web: the default build is the basic version, while a Web-enabled build includes Web. Adding Web to an installed basic executable requires rebuilding or installing a Web-enabled replacement, not dynamically attaching a module. The exact prebuilt release artifacts remain open.
 - A Web-enabled build must obtain complete frontend assets. Missing assets or a frontend build failure must produce a clear build failure, rather than silently shipping a placeholder or stale frontend as a successful Web build.
 - A prebuilt Web-enabled binary includes its frontend assets; an end user running it does not need Rust, Node.js, or npm. To build the frontend from source, the developer needs Node.js and npm unless verified prebuilt assets are supplied instead.
 
@@ -218,8 +219,8 @@ The following decisions extend the accepted specification; the specification and
 
 ### Web, MCP, and distribution follow-up
 
-- Which HTTP, MCP, and frontend frameworks and versions should be selected, and whether they meet the supported Rust version.
-- The exact feature and artifact layout, frontend asset verification and provenance, and the ownership of integration work across the Web and MCP tickets.
+- The MCP framework, transport and version, and the exact compatible versions of the selected Web stack; verify the resolved Rust dependency graph against the supported Rust version.
+- The exact feature and prebuilt-artifact layout, frontend asset verification and provenance, and the ownership of integration work across the Web and MCP tickets.
 
 Before the Web, MCP, and distribution follow-up above, every original decision ticket had been closed and indexed under Decisions so far. The replacement `waym-WMSPEC01` was accepted with 130 user stories, the absorbed command and tool catalog, and the frozen error registry; the interface working document was retired to `.inbox/superpower/`. The map remains the decision record and implementation tickets are cut from the specification, not from this map. The new follow-up decisions above are not yet reflected in that specification.
 
