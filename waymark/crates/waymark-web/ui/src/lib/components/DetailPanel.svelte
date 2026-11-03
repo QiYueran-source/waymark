@@ -62,13 +62,13 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<aside class="detail" aria-label="Item detail" data-testid="detail-panel">
+<aside class="detail" aria-labelledby="detail-title" data-testid="detail-panel">
 	<div class="detail-header">
 		<div class="detail-heading">
 			{#if detail}
-				<h2 data-testid="detail-title">{detail.title}</h2>
+				<h2 id="detail-title" data-testid="detail-title">{detail.title}</h2>
 			{:else}
-				<h2 data-testid="detail-title">{id}</h2>
+				<h2 id="detail-title" data-testid="detail-title">{id}</h2>
 			{/if}
 			<p class="detail-id">{id}</p>
 		</div>
