@@ -198,11 +198,6 @@ impl WorkItem {
     pub fn needs_migration_from(&self, generation: u32) -> bool {
         self.schema < generation
     }
-
-    /// Whether this document's generation is newer than this release reads.
-    pub fn is_from_the_future(&self) -> bool {
-        self.schema > FORMAT_GENERATION
-    }
 }
 
 /// A validated category key: lowercase ASCII, starting with a letter and
