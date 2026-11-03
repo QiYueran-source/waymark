@@ -82,7 +82,7 @@ work_item_update_custom_fields
 - `id`、`creator`、`created_at`、`updated_at`、`closed_at`、`archived_at` 等系统/身份字段不能由普通编辑修改；
 - `ready`、`blocked`、`blocked_by` 等计算结果永远不可写。
 
-三个编辑函数当前已确定为：title 完整替换；body 完整替换并允许用空字符串清空；custom fields 使用显式 set/clear 并允许一次修改多个字段。每个函数只修改自己的数据区域，只有实际值变化时才更新 `updated_at`；失败时不产生部分写入。CLI custom-field 值按 schema 解析：复杂值使用 canonical JSON literal，简单 string/integer/boolean 值可使用无歧义简写；同一次 `field update` 可混合重复 `--set` 与 `--clear`，但重复或冲突 key 被拒绝。CLI body 只接受 `--body` 或 `--body-file` 直接替换，不提供交互式 editor；MCP 使用结构化 `changes` map 和显式 set/clear。三个编辑 tool 返回完整 work item 与 `changed`，字段 tool 额外返回 `changed_fields`。它们不是任意 frontmatter patch 函数。
+三个编辑函数当前已确定为：title 完整替换；body 完整替换并允许用空字符串清空；custom fields 使用显式 set/clear 并允许一次修改多个字段。每个函数只修改自己的数据区域，只有实际值变化时才更新 `updated_at`；失败时不产生部分写入。CLI custom-field 值按 schema 解析：复杂值使用 canonical JSON literal，简单 string/integer/boolean 值可使用无歧义简写；同一次 `field update` 可混合重复 `--set` 与 `--clear`，但重复或冲突 key 被拒绝。CLI body 只接受 `--body` 或 `--body-file` 直接替换，不提供交互式 editor；MCP 使用结构化 `changes` map 和显式 set/clear。三个编辑 tool 返回完整 work item 与 `changed`，字段 tool 额外返回 `changed_fields`。三者都检查 operator/owner、拒绝 archived item、执行 fingerprint 冲突检测；每个目标一次原子文档替换，未变化不写入。它们不是任意 frontmatter patch 函数。
 
 ### 2.4 生命周期、责任与关系能力
 
@@ -257,7 +257,7 @@ CLI 和 MCP 共享以下约束：
 - archived item 拒绝普通写入；
 - 写入使用 fingerprint 冲突检测；
 - 单文件更新经过校验后原子替换；
-- 批量操作先整体预校验，按操作类型执行，默认 all-or-nothing；
+- 批量操作先整体预校验，按操作类型执行，默认 all-or-nothing；编辑能力支持显式的操作类型批量，不通过命令重复 ID 隐式批量，也不接受任意混合操作数组；
 - 归档、迁移和配置变更使用其专属完整性和恢复规则；
 - 系统时间由 Waymark 生成，普通请求不能伪造；
 - 机器响应使用版本化 envelope；
