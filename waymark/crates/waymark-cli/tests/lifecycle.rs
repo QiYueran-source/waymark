@@ -590,7 +590,7 @@ fn a_global_graph_read_fails_explicitly_rather_than_returning_a_partial_page() {
         assert_eq!(envelope["ok"], serde_json::json!(false), "{command}");
         assert_eq!(
             envelope["error"]["code"],
-            serde_json::json!("PARSE_ERROR"),
+            serde_json::json!("INCOMPLETE_PROJECTION"),
             "{command}"
         );
     }
