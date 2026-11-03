@@ -53,7 +53,7 @@ use crate::location::Location;
 use crate::model::{FieldKey, Status, WorkItem, FORMAT_GENERATION};
 use crate::ops::config::validate_config;
 use crate::projection::Projection;
-use crate::store::{Fingerprint, Inventory, Project};
+use crate::store::{Fingerprint, Project};
 
 /// The parts of the project a full run reviews.
 pub const SCOPE: &[&str] = &[
@@ -209,8 +209,13 @@ impl DoctorOptions {
     }
 
     /// Return the invalid-data class while error findings remain.
-    pub fn strict(mut self) -> Self {
-        self.strict = true;
+    pub fn strict(self) -> Self {
+        self.with_strict(true)
+    }
+
+    /// Set strict mode explicitly.
+    pub fn with_strict(mut self, strict: bool) -> Self {
+        self.strict = strict;
         self
     }
 }
@@ -284,19 +289,22 @@ fn run(
     // The lock probe is deliberately non-blocking: `is_store_locked` opens the
     // lock file and tries the write lock once. It never waits and never learns
     // who holds it.
-    if crate::lock::is_store_locked(project.root())? {
+    // A probe never creates the lock file: if it does not exist, no process can
+    // be holding it, and a diagnostic run must not add a file to the project it
+    // is only supposed to read.
+    let lock_path = project.lock_path();
+    if lock_path.exists() && crate::lock::is_store_locked(project.root())? {
         findings.push(Finding::from_error(&WaymarkError::lock_held(
-            project.lock_path().to_string(),
+            lock_path.to_string(),
         )));
     }
 
-    let inventory = project.inventory()?;
     let projection = Projection::load(project)?;
 
     findings.extend(projection_findings(&projection));
-    findings.extend(inventory_problem_findings(&inventory));
+    findings.extend(inventory_problem_findings(&projection));
 
-    let complete = projection.is_complete() && inventory.problems.is_empty();
+    let complete = projection.is_complete() && projection.problems().is_empty();
     if complete {
         let graph = projection.graph();
         findings.extend(graph.diagnostics());
@@ -368,13 +376,13 @@ fn projection_findings(projection: &Projection) -> Vec<Finding> {
 }
 
 /// Findings from the inventory walk: skipped files and case variants.
-fn inventory_problem_findings(inventory: &Inventory) -> Vec<Finding> {
+fn inventory_problem_findings(projection: &Projection) -> Vec<Finding> {
     let mut findings = Vec::new();
-    for problem in &inventory.problems {
+    for problem in projection.problems() {
         let stem = problem.path.file_stem().unwrap_or_default();
         if let Ok(id) = WorkItemId::parse(stem) {
             if id.as_str() != stem {
-                if let Some(entry) = inventory.entry(&id) {
+                if let Some(entry) = projection.entry(&id) {
                     findings.push(
                         Finding::new(
                             Code::DuplicateId,

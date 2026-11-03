@@ -128,6 +128,16 @@ fn a_clean_project_reports_nothing_and_only_rebuilds_in_memory_state() {
 }
 
 #[test]
+fn a_run_does_not_create_a_lock_file_just_by_probing() {
+    let (_dir, project) = project();
+    let before = snapshot(project.root());
+    doctor::diagnose(&project).unwrap();
+    let after = snapshot(project.root());
+    assert_eq!(before, after, "a read-only diagnostic run wrote a file");
+    assert!(!project.lock_path().exists());
+}
+
+#[test]
 fn every_finding_uses_the_registry_shape() {
     let (_dir, project) = project();
     let id = create_item(&project, "dangling");
