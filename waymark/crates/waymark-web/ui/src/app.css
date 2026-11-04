@@ -1145,6 +1145,18 @@ button.graph-text-title:hover {
 	font-size: 0.82rem;
 }
 
+/*
+ * An unplaceable item is marked by the notice rule, not by a colour the reader
+ * must interpret: the reason sentence is the point, and the rule only groups
+ * the entries. It is styled here rather than borrowing `.unresolved`, which is
+ * the tree's own panel.
+ */
+.graph-text-unresolved {
+	margin-top: 0.7rem;
+	padding-left: 0.75rem;
+	border-left: 3px solid var(--notice-line);
+}
+
 /* Unresolved -------------------------------------------------------------- */
 
 .unresolved {

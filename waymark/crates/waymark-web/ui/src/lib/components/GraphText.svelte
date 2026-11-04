@@ -147,7 +147,7 @@
 			{#each unresolved as entry (entry.id)}
 				{#if entry.kind === 'unresolved'}
 					<li
-						class="graph-text-item unresolved"
+						class="graph-text-item graph-text-unresolved"
 						data-testid={`graph-text-unresolved-${entry.id}`}
 						data-node-id={entry.id}
 					>
