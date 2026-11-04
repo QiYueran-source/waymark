@@ -10,11 +10,13 @@
     "test": "vitest run"
   },
   "devDependencies": {
+    "@dagrejs/dagre": "3.1.3",
     "@sveltejs/adapter-static": "3.0.10",
     "@sveltejs/kit": "2.70.3",
     "@sveltejs/vite-plugin-svelte": "7.3.1",
     "@testing-library/dom": "10.4.2",
     "@testing-library/svelte": "5.4.2",
+    "@xyflow/svelte": "1.7.1",
     "jsdom": "30.1.3",
     "svelte": "5.57.3",
     "svelte-check": "4.7.8",
