@@ -2587,3 +2587,30 @@ geometry makes the drawing deterministic and lets the suite assert real edge ele
   `data-legend-kind` hook: `Solid line: parent-child` and
   `Dashed line: dependency; the arrow points at the depended-on item`. The dashed swatch draws a dash
   pattern and an arrowhead so the meaning does not rest on the wording alone.
+
+## The graph's structured text alternative
+
+- **One model, two readings.** `graphOutline(graph: WorkGraph): OutlineEntry[]` in `graph.ts` turns
+  the *same* `WorkGraph` the drawing renders into an ordered outline, and
+  `GraphText.svelte` renders it without the graph library. Category scope, collapse, and the
+  dependency overlay therefore cannot diverge between the two views: there is nothing to keep in
+  step. `Explorer` reuses its single `workGraph` derivation for both and only builds the outline while
+  the alternative is on.
+- **Relations are words, not geometry.** Each item entry carries `parent` (`"Parent: …"`, or
+  `"Parent: none; this is a top-level item."`), `children` (`"Child: <title> (<id>)."`),
+  `dependencies` (`"Depends on <title> (<id>)."`) and `dependents` (`"<title> (<id>) depends on this
+  item."`). Nothing is implied by indentation or by an arrowhead, and `graphOutline` never emits a
+  dependency sentence while `graph.dependencies` is empty — the model owns the toggle.
+- **Unresolved items are part of the outline.** `graph.unresolved` becomes trailing
+  `kind: 'unresolved'` entries with the same reason wording as `UnresolvedList` (now shared through
+  `unresolvedReason`). While the alternative is showing, the separate unresolved area is hidden so a
+  reader meets each item once; the tree and the drawing keep it.
+- **Selection is the existing path.** Each entry's title is a real `<button
+  data-testid="graph-text-select-<id>">` with `aria-current` while selected and an accessible name of
+  `"<title> — <category>, <state>"`; it passes itself to `Explorer.selectItem`, so the same detail
+  panel opens and `closeDetail` returns focus to the same button. Collapse/expand remains a drawing
+  control; the alternative follows the collapsed model rather than offering a second collapse UI.
+- **Persistence.** The choice is one boolean per project, on its own key
+  (`<projectId>:graphAlternative`), so it cannot collide with `presentation`, the graph collapse set,
+  or the viewport. It is offered only while the graph is the presentation, and the drawing is the
+  default because the alternative is an explicit choice.

@@ -48,6 +48,11 @@ describe('project identifier', () => {
 		// The category scope belongs to the project, not to one tree view: the
 		// grouped tree and the graph filter by the same selection.
 		expect(preferenceKey(namespace, 'categories')).toBe(`${namespace}:categories`);
+		// The graph's text alternative is one choice per project too, on its own
+		// key so it cannot collide with the graph's collapse or viewport state.
+		expect(preferenceKey(namespace, 'graphAlternative')).toBe(
+			`${namespace}:graphAlternative`
+		);
 	});
 
 	it('refuses a raw project root where a project id is required', () => {
@@ -69,6 +74,7 @@ describe('PreferenceStore', () => {
 		expect(store.readDependencies('combined')).toBe(false);
 		expect(store.readScroll('combined')).toBe(0);
 		expect(store.readCategories()).toBeNull();
+		expect(store.readGraphAlternative()).toBe(false);
 		expect(store.failed).toBe(false);
 	});
 
@@ -92,6 +98,27 @@ describe('PreferenceStore', () => {
 		expect(reopened.readScroll('combined')).toBe(322);
 		expect(reopened.readCategories()).toEqual(['bug', 'task']);
 		expect(reopened.failed).toBe(false);
+	});
+
+	it('round-trips the graph text alternative, and defaults to the drawing', () => {
+		const storage = memoryStorage();
+		const store = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+		store.writeGraphAlternative(true);
+		const reopened = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+		expect(reopened.readGraphAlternative()).toBe(true);
+		expect(storage.getItem(preferenceKey(store.projectId, 'graphAlternative'))).toBe('true');
+
+		reopened.writeGraphAlternative(false);
+		expect(new PreferenceStore(storage, projectIdFor('/projects/alpha')).readGraphAlternative()).toBe(
+			false
+		);
+	});
+
+	it('ignores an unreadable stored text-alternative choice', () => {
+		const storage = memoryStorage();
+		const store = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+		storage.setItem(preferenceKey(store.projectId, 'graphAlternative'), 'sideways');
+		expect(store.readGraphAlternative()).toBe(false);
 	});
 
 	it('keeps the presentation independent of the tree view', () => {
@@ -132,6 +159,7 @@ describe('PreferenceStore', () => {
 		expect(beta.readPresentation()).toBe('tree');
 		expect(beta.readDependencies('combined')).toBe(false);
 		expect(beta.readCategories()).toBeNull();
+		expect(beta.readGraphAlternative()).toBe(false);
 		expect(alpha.projectId).not.toBe(beta.projectId);
 	});
 
@@ -168,6 +196,8 @@ describe('PreferenceStore', () => {
 		expect(() => store.writeView('grouped')).not.toThrow();
 		expect(() => store.writePresentation('graph')).not.toThrow();
 		expect(() => store.writeCategories(['bug'])).not.toThrow();
+		expect(() => store.writeGraphAlternative(true)).not.toThrow();
+		expect(store.readGraphAlternative()).toBe(false);
 		expect(store.readView()).toBe('combined');
 		expect(store.readCategories()).toBeNull();
 	});
