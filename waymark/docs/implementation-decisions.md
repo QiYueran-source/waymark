@@ -2301,3 +2301,38 @@ takes the `ArchiveRange` and `Projection` explicitly because those are caller ch
   rule. `blocked_by` remains the CLI/JSON fact, and the Web derives
   `blocked_reason` from the same helper rather than owning the prose.
 
+
+# By-category filtering
+
+- **The category scope is stored per project, not per view, and an absent value
+  is not an empty selection.** Two tree shapes (`grouped`, and the dependency
+  graph a later ticket adds) filter by the same "which categories am I looking
+  at" question, so it lives at `waymark.web.v1:<hash>:categories` and is a JSON
+  array of category keys. A missing key means "every configured category", which
+  is the default a reader meets; `[]` means the reader cleared them all, which
+  must survive a reload. Collapsing the two (for example, storing the
+  complement, or treating an empty array as unset) would make "clear all" undo
+  itself on reload.
+- **Stale keys are ignored where the scope meets the payload, not when it is
+  read.** `resolveCategoryScope` takes the payload's `categories` and drops keys
+  the project no longer configures; `PreferenceStore.readCategories` stays a
+  faithful read of what was written. That keeps the resolution testable without
+  a browser and lets a project whose categories were renamed be re-added without
+  a migration.
+- **The control is built from the payload's `categories`, never its `groups`.**
+  `groups` only carries categories that have roots, so building the control from
+  it would hide a configured-but-quiet category and make it unselectable. The
+  cost is that selecting such a category shows no group, which is why the
+  grouped view has its own "nothing in the selected categories" state distinct
+  from the project-wide "no active work items" state.
+- **Filtering the grouped tree does not promote or splice nodes.** Work items
+  outside the scope take their whole subtree with them; a node in scope whose
+  parent's category is out of scope disappears rather than becoming a root,
+  because inventing a root would falsify parentage. Keeping such an ancestor as
+  marked temporary context is a later ticket; `filterGroups` already returns
+  counts separately from the groups, so that ticket can add context rows without
+  changing its signature or its call sites.
+- **The filter lives in `ui/src/lib/tree.ts`, not in the component.** The scope
+  resolution, the group filtering and the count wording are pure functions with
+  their own unit tests, so the graph ticket reuses the same semantics rather
+  than a second copy in another component.

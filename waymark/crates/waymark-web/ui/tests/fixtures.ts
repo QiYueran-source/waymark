@@ -18,6 +18,8 @@ import type {
 
 export const BUG: Category = { key: 'bug', name: 'Bugs', shape: 0 };
 export const TASK: Category = { key: 'task', name: 'Tasks', shape: 1 };
+/** Configured, but no active work item in it: the control must still offer it. */
+export const DOCS: Category = { key: 'docs', name: 'Docs', shape: 2 };
 
 export const ROOT_A = '/projects/alpha';
 export const ROOT_B = '/projects/beta';
@@ -79,6 +81,16 @@ export const groupedTree: GroupedTree = {
 	],
 	unresolved: [],
 	categories: [BUG, TASK]
+};
+
+/**
+ * The grouped payload's `categories` lists every configured category, including
+ * one with no active work in this read; `groups` only lists categories that have
+ * roots. The selection control is built from the former.
+ */
+export const groupedTreeWithEmptyCategory: GroupedTree = {
+	...groupedTree,
+	categories: [BUG, DOCS, TASK]
 };
 
 export const emptyTree: CombinedTree = {
