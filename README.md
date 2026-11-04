@@ -3,8 +3,8 @@
 Waymark is a local-first, Git-friendly work-item tracker. Every work item is a
 Markdown document with YAML frontmatter stored under the project's storage root
 (`work/` by default), and the project's configuration and metadata live in
-`.waymark/`. There is no database and no service to run: the documents are the
-source of truth and Git is the history.
+`.waymark/`. There is no database and no background daemon: the documents are
+the source of truth and Git is the history.
 
 Waymark ships as two prebuilt variants built from the same tag:
 
@@ -314,7 +314,9 @@ The Web build also needs the generated `assets-manifest.json` beside that tree;
 the embedding build fails with instructions naming the missing file rather
 than shipping an empty or stale frontend. The release workflow builds the
 frontend once, generates the manifest, and reuses that tree for every Web
-artifact.
+artifact. It sets `WAYMARK_SKIP_UI_BUILD=1` so later jobs reuse that tree; the
+tree and manifest are still required, and the variable never substitutes a
+placeholder.
 
 Then build the CLI with the off-by-default `web` feature:
 
