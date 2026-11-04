@@ -20,8 +20,10 @@
 		selected = false,
 		collapsed = false,
 		graphY,
+		height,
 		onSelect,
-		onToggle
+		onToggle,
+		onMeasure
 	}: {
 		node: GraphNode;
 		selected?: boolean;
@@ -29,16 +31,47 @@
 		collapsed?: boolean;
 		/** The top edge of this node's row in the drawing. */
 		graphY: number;
+		/** The height the layout used for this card. */
+		height: number;
 		/** The node button passes itself, so focus can return to it later. */
 		onSelect: (id: string, trigger?: HTMLElement) => void;
 		/** Collapse or expand this node's children. */
 		onToggle: (id: string) => void;
+		/** Report this card's rendered height back to the layout. */
+		onMeasure: (id: string, height: number) => void;
 	} = $props();
 
 	const stateWord = $derived(stateLabel(node.state));
-	const state: WorkState = $derived(node.state);
+	const workState: WorkState = $derived(node.state);
 	/** The tree's own phrase, so both presentations mark context the same way. */
 	const context = $derived(node.context);
+
+	/** The card element; observed so the layout learns its real height. */
+	let card: HTMLDivElement | undefined = $state();
+
+	/**
+	 * Report the card's own border-box height.
+	 *
+	 * The card is content-sized, so only the browser knows how many lines a long
+	 * title, blocked reason, or badge really took. It observes itself rather than
+	 * being measured by the parent, so no layout query happens in the view and a
+	 * resize or font change re-reports naturally. Before the first report the
+	 * layout uses the deterministic estimate; a zero-sized box (an unrendered
+	 * subtree) reports nothing.
+	 */
+	$effect(() => {
+		const element = card;
+		if (element === undefined || typeof ResizeObserver !== 'function') return;
+		const observer = new ResizeObserver((entries) => {
+			for (const entry of entries) {
+				if (entry.target !== element) continue;
+				const measured = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
+				if (measured > 0) onMeasure(node.id, measured);
+			}
+		});
+		observer.observe(element);
+		return () => observer.disconnect();
+	});
 
 	/**
 	 * Activate the node from the keyboard.
@@ -61,29 +94,23 @@
 	class="graph-node"
 	class:selected
 	class:context
+	bind:this={card}
 	data-testid={`graph-node-${node.id}`}
 	data-node-id={node.id}
 	data-state={node.state}
 	data-depth={node.depth}
 	data-parent-id={node.parentId ?? ''}
 	data-graph-y={Math.round(graphY)}
+	data-graph-height={Math.round(height)}
 	data-collapsed={collapsed ? 'true' : 'false'}
 	data-context={context ? 'true' : undefined}
+	data-context-treatment={context ? 'outline' : undefined}
 >
 	<div class="graph-node-line">
 		<span class="category">
 			<Shape shape={node.shape} label={`${node.category.name} category`} size={12} />
 			<span class="category-name">{node.category.name}</span>
 		</span>
-		{#if context}
-			<!-- Visible text, so the marking survives greyscale and a screenshot;
-			     hidden from assistive technology because the title's name says it. -->
-			<span
-				class="context-marker"
-				data-testid={`graph-context-marker-${node.id}`}
-				aria-hidden="true">Context — outside the selection</span
-			>
-		{/if}
 		<span class="lifecycle-status">{statusLabel(node.status)}</span>
 	</div>
 
@@ -124,10 +151,22 @@
 	</div>
 
 	<div class="graph-node-line">
-		<span class="state state-{state}" data-testid={`graph-state-${node.id}`}>
+		<span class="state state-{workState}" data-testid={`graph-state-${node.id}`}>
 			{stateWord}
 		</span>
 	</div>
+
+	{#if context}
+		<!-- Visible text, so the marking survives greyscale and a screenshot;
+		     hidden from assistive technology because the title's name says it.
+		     It is a line of the card, so it wraps and grows with the rest. -->
+		<p
+			class="context-marker graph-node-context"
+			data-testid={`graph-context-marker-${node.id}`}
+			data-context-badge="inside"
+			aria-hidden="true">Context — outside the selection</p
+		>
+	{/if}
 
 	{#if node.state === 'blocked' && node.blockedReason}
 		<p class="blocked-reason" data-testid={`graph-blocked-reason-${node.id}`}>
