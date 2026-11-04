@@ -8,6 +8,7 @@ use waymark_core::readiness::Readiness;
 use waymark_core::view::{display_state, DisplayState};
 use waymark_core::{Project, WorkItem};
 
+use super::colour::Palette;
 use super::{emit, err_line, render_field_value};
 
 /// Arguments of `waymark show`.
@@ -28,13 +29,14 @@ pub struct ShowArgs {
 /// only maps it onto the CLI's long-standing vocabulary: an archived item is
 /// `archived`, and an unblocked in-progress item still says `ready` here
 /// because the lifecycle `status` line above already says `in_progress`.
-fn readiness_lines(readiness: &Readiness, item: &WorkItem) -> Vec<String> {
-    let label = match display_state(readiness, item) {
+fn readiness_lines(readiness: &Readiness, item: &WorkItem, colour: Palette) -> Vec<String> {
+    let state = display_state(readiness, item);
+    let label = match state {
         DisplayState::Closed if item.is_archived() => "archived",
         DisplayState::InProgress => "ready",
         other => other.as_str(),
     };
-    let mut lines = vec![format!("  state       {label}")];
+    let mut lines = vec![format!("  state       {}", colour.paint(state, label))];
     if !readiness.blocked_by.is_empty() {
         let ids: Vec<&str> = readiness.blocked_by.iter().map(|id| id.as_str()).collect();
         lines.push(format!("  blocked by  {}", ids.join(", ")));
@@ -43,7 +45,12 @@ fn readiness_lines(readiness: &Readiness, item: &WorkItem) -> Vec<String> {
 }
 
 /// Run `waymark show`.
-pub fn run(project: &Project, args: &ShowArgs, json: bool) -> Result<(), WaymarkError> {
+pub fn run(
+    project: &Project,
+    args: &ShowArgs,
+    json: bool,
+    colour: Palette,
+) -> Result<(), WaymarkError> {
     // A scoped local read: one item plus its direct relationships. A broken
     // sibling does not make `show` fail; the answer says it is scoped and why.
     let read = read::read_scoped(project, &args.id)?;
@@ -98,7 +105,7 @@ pub fn run(project: &Project, args: &ShowArgs, json: bool) -> Result<(), Waymark
             err_line(&format!("  soft links  {}{historical}", ids.join(", ")));
         }
         if let Some(readiness) = &read.readiness {
-            for line in readiness_lines(readiness, &read.item) {
+            for line in readiness_lines(readiness, &read.item, colour) {
                 err_line(&line);
             }
         } else {
@@ -156,7 +163,7 @@ mod tests {
     fn a_blocked_item_keeps_its_state_and_blocked_by_lines() {
         let (item, readiness) = blocked_item();
         assert_eq!(
-            readiness_lines(&readiness, &item),
+            readiness_lines(&readiness, &item, Palette::Plain),
             vec![
                 "  state       blocked".to_owned(),
                 "  blocked by  wm-000000000002".to_owned(),

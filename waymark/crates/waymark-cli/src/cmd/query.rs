@@ -21,6 +21,7 @@ use waymark_core::search::{self, SearchRequest};
 use waymark_core::stats::{self, statistics_json, StatsRequest};
 use waymark_core::Project;
 
+use super::colour::Palette;
 use super::list::{self as list_cmd, ListArgs, ViewArgs};
 use super::{emit, err_line};
 
@@ -91,7 +92,12 @@ fn read_filter(source: &str) -> Result<Value, WaymarkError> {
 }
 
 /// Run `query`.
-pub fn run_query(project: &Project, args: &QueryArgs, json: bool) -> Result<(), WaymarkError> {
+pub fn run_query(
+    project: &Project,
+    args: &QueryArgs,
+    json: bool,
+    colour: Palette,
+) -> Result<(), WaymarkError> {
     // The structured document is the only filter input; the flags own sort,
     // window, and projection, and an empty document means "no filters at all".
     let filters = Filters::from_json(&read_filter(&args.filter)?)?;
@@ -109,6 +115,7 @@ pub fn run_query(project: &Project, args: &QueryArgs, json: bool) -> Result<(), 
         &args.view.projection()?,
         query.filters.archive,
         json,
+        colour,
     )
 }
 

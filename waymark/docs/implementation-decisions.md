@@ -2336,6 +2336,37 @@ takes the `ArchiveRange` and `Projection` explicitly because those are caller ch
   rule. `blocked_by` remains the CLI/JSON fact, and the Web derives
   `blocked_reason` from the same helper rather than owning the prose.
 
+# CLI work-state colour
+
+- **One global flag, resolved once in the adapter.** `--color=auto|always|never`
+  is a global flag with `auto` as the default, and `cmd::colour` resolves it to a
+  `Palette` (`Plain` or `Ansi`) in `main`. Commands that render a derived state
+  receive the palette; every other command ignores it. The shared core still
+  owns `DisplayState`; the palette only maps it to an escape sequence.
+- **An explicit `always` or `never` beats `NO_COLOR`; only `auto` consults it.**
+  `never` is always plain. `always` always colours, including through a pipe,
+  and deliberately overrides `NO_COLOR`. `auto` colours only when the human
+  stream is a terminal and `NO_COLOR` is absent or empty (the no-color.org
+  convention: a present but empty variable does not disable colour).
+- **The human stream is stderr, so `auto` asks about stderr.** Human prose goes
+  to stderr; stdout carries JSON, `show --raw` documents, and raw `git diff`
+  patches. Only those stderr lines call the palette, so JSON envelopes, raw
+  documents, and raw patches are never coloured even with `--color=always`.
+- **The colour follows `DisplayState`, not the rendered label.** The CLI keeps
+  its older labels (`ready` for an unblocked in-progress item, `archived` for
+  an archived item, `-` for a closed `list` row), and the painter wraps the
+  state cell/line according to the derived state: ready green (`32`),
+  in-progress blue (`34`), blocked red (`31`), closed grey (`90`). The Web's
+  hex values are not shared; SGR is the CLI's own approximation.
+- **Only the derived-state cell and the `show` state line are painted.** The
+  lifecycle `status` column stays uncoloured, matching the Web's muted
+  lifecycle label; `needs migration`, `blocked by …`, warnings, and findings
+  stay plain. Colour never replaces the state word or the blocked marker.
+- **Paint after padding.** The padded state cell is formatted first and then
+  wrapped, so removing ANSI recovers the exact previous bytes, including the
+  column alignment. With `--color=never` or a non-terminal `auto`, no escape is
+  ever constructed and the output is byte-identical to before this change.
+
 
 # By-category filtering
 

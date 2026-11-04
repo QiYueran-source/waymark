@@ -25,6 +25,7 @@ use waymark_core::query::{
 use waymark_core::view::{display_state, DisplayState};
 use waymark_core::{CategoryKey, FieldValue, Project, WorkItemId};
 
+use super::colour::Palette;
 use super::{emit, err_line};
 
 /// Which question a list command asks.
@@ -413,10 +414,17 @@ pub fn run(
     args: &ListArgs,
     which: Which,
     json: bool,
+    colour: Palette,
 ) -> Result<(), WaymarkError> {
     let query = args.query()?;
     let listing = run_with_query(project, &query, which)?;
-    render(&listing, &args.projection()?, query.filters.archive, json)
+    render(
+        &listing,
+        &args.projection()?,
+        query.filters.archive,
+        json,
+        colour,
+    )
 }
 
 /// Execute an already-built query — the path `query` takes, where the filter
@@ -439,22 +447,28 @@ pub fn run_with_query(
 /// onto the CLI's long-standing column vocabulary. `ready` covers an unblocked
 /// in-progress row (the `status` column already distinguishes it), an archived
 /// row says `archived`, and an active closed row has no readiness state to show.
-fn state_column(row: &ListedItem) -> &'static str {
-    match display_state(&row.readiness, &row.item) {
+fn state_column(row: &ListedItem) -> (DisplayState, &'static str) {
+    let state = display_state(&row.readiness, &row.item);
+    let label = match state {
         DisplayState::Closed if row.item.is_archived() => "archived",
         DisplayState::Closed => "-",
         DisplayState::InProgress => "ready",
         other => other.as_str(),
-    }
+    };
+    (state, label)
 }
 
 /// Every line one human listing row renders.
-fn row_lines(row: &ListedItem) -> Vec<String> {
+fn row_lines(row: &ListedItem, colour: Palette) -> Vec<String> {
+    let (state, label) = state_column(row);
+    // Paint the padded cell, not the label, so stripping ANSI recovers the
+    // exact plain layout, padding included.
+    let state_cell = colour.paint(state, &format!("{label:<8}"));
     let mut lines = vec![format!(
-        "{}  {:<12} {:<8} {}",
+        "{}  {:<12} {} {}",
         row.item.id,
         row.item.status.as_str(),
-        state_column(row),
+        state_cell,
         row.item.title
     )];
     if row.needs_migration {
@@ -478,6 +492,7 @@ pub fn render(
     projection: &Projection,
     archive: ArchiveRange,
     json: bool,
+    colour: Palette,
 ) -> Result<(), WaymarkError> {
     if json {
         emit(&success_envelope(
@@ -491,7 +506,7 @@ pub fn render(
         err_line("no items");
     }
     for row in &listing.items {
-        for line in row_lines(row) {
+        for line in row_lines(row, colour) {
             err_line(&line);
         }
     }
@@ -535,9 +550,9 @@ mod tests {
             needs_migration: false,
         };
 
-        assert_eq!(state_column(&row), "blocked");
+        assert_eq!(state_column(&row), (DisplayState::Blocked, "blocked"));
         assert_eq!(
-            row_lines(&row),
+            row_lines(&row, Palette::Plain),
             vec![
                 "wm-000000000001  open         blocked  Dependent".to_owned(),
                 "    blocked by wm-000000000002".to_owned(),
