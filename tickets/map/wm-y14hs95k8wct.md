@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-04T01:36:18Z
+updated_at: 2026-11-04T01:47:16Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -204,6 +204,7 @@ Codes with no exit class, used as warnings and findings: `OWNER_MISMATCH` (warni
 ### DSH sidebar integration
 
 - The DSH sidebar plugin reuses the existing Waymark Web logic and remains strictly read-only; it must not offer work-item mutations. Confirmed by the user on 2026-11-04.
+- The integration effort includes MCP integration, building on Waymark's existing MCP capability. Deliver the DSH plugin first; do not provide a VS Code plugin initially. The status and timing of Cursor integration and the exact MCP integration package remain to be clarified. Confirmed by the user on 2026-11-04.
 
 ### Reopened decisions: Web, MCP, and distribution
 
