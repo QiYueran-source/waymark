@@ -87,6 +87,9 @@ jobs:
             waymark/crates/waymark-web/ui/build
             waymark/crates/waymark-web/ui/assets-manifest.json
           if-no-files-found: error
+          # The manifest hashes every file in the tree; dropping a dotfile here
+          # would make the downloaded tree disagree with it.
+          include-hidden-files: true
           retention-days: 7
       - name: Upload the packed frontend tree
         uses: actions/upload-artifact@v4
