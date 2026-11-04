@@ -2,14 +2,15 @@ import { render, screen, within } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 
 import TreeView from '$lib/components/TreeView.svelte';
-import { allIds } from '$lib/tree';
-import { combinedTree, groupedTree, taskRoot } from './fixtures';
+import { allIds, filterGroups } from '$lib/tree';
+import { combinedTree, deepGroupedTree, groupedTree, taskRoot } from './fixtures';
 
 function renderCombined(overrides: Record<string, unknown> = {}) {
 	return render(TreeView, {
 		view: 'combined',
 		roots: combinedTree.roots,
 		groups: [],
+		contextIds: new Set<string>(),
 		expanded: allIds(combinedTree.roots),
 		dependenciesVisible: false,
 		selectedId: null,
@@ -24,6 +25,7 @@ function renderGrouped(overrides: Record<string, unknown> = {}) {
 		view: 'grouped',
 		roots: [],
 		groups: groupedTree.groups,
+		contextIds: new Set<string>(),
 		expanded: allIds(groupedTree.groups.flatMap((group) => group.roots)),
 		dependenciesVisible: false,
 		selectedId: null,
@@ -109,6 +111,103 @@ describe('grouped tree', () => {
 		renderGrouped({ groups: groupedTree.groups.filter((group) => group.category.key === 'bug') });
 		expect(screen.queryByTestId('group-bug')).not.toBeNull();
 		expect(screen.queryByTestId('group-task')).toBeNull();
+	});
+});
+
+describe('context rows', () => {
+	/** Render the grouped view filtered to Tasks, as the Explorer would. */
+	function renderTaskScope(groups = groupedTree.groups) {
+		const filtered = filterGroups(groups, new Set(['task']));
+		return render(TreeView, {
+			view: 'grouped',
+			roots: [],
+			groups: filtered.groups,
+			contextIds: filtered.contextIds,
+			expanded: allIds(filtered.groups.flatMap((group) => group.roots)),
+			dependenciesVisible: false,
+			selectedId: null,
+			onToggle: () => {},
+			onSelect: () => {}
+		});
+	}
+
+	it('keeps a selected item under its real parent instead of promoting it to a root', () => {
+		const { container } = renderTaskScope();
+		// The bug is out of scope but stays, because the task's real parent is a bug.
+		expect(renderedIds(container)).toEqual([
+			'wm-bug-login',
+			'wm-task-child',
+			'wm-task-ship'
+		]);
+		expect(screen.getByTestId('node-wm-task-child').getAttribute('data-depth')).toBe('1');
+		expect(renderedIds(screen.getByTestId('group-task'))).toEqual(['wm-task-ship']);
+	});
+
+	it('keeps the whole ancestor chain when several levels are out of scope', () => {
+		const { container } = renderTaskScope(deepGroupedTree.groups);
+		expect(renderedIds(container)).toEqual([
+			'wm-docs-umbrella',
+			'wm-bug-mid',
+			'wm-task-leaf',
+			'wm-task-ship'
+		]);
+		expect(screen.getByTestId('node-wm-bug-mid').getAttribute('data-depth')).toBe('1');
+		expect(screen.getByTestId('node-wm-task-leaf').getAttribute('data-depth')).toBe('2');
+	});
+
+	it('marks a context row in its accessible name and in visible text', () => {
+		renderTaskScope();
+		const row = screen.getByTestId('node-wm-bug-login');
+		expect(row.getAttribute('data-context')).toBe('true');
+		// The row's own control says it, so the marking survives a screen reader:
+		// focusing the title announces the item and why it is on screen.
+		const title = screen.getByTestId('select-wm-bug-login');
+		expect(title.getAttribute('aria-label')).toBe(
+			'Login fails — context, outside the selection'
+		);
+		// And the marker is visible text, not colour or an icon alone. It is
+		// hidden from assistive technology because the name above already says it.
+		const marker = within(row).getByTestId('context-marker-wm-bug-login');
+		expect(marker.getAttribute('aria-hidden')).toBe('true');
+		expect(text(marker)).toBe('Context — outside the selection');
+		// A selected row carries neither.
+		const selectedRow = screen.getByTestId('node-wm-task-child');
+		expect(selectedRow.getAttribute('data-context')).toBeNull();
+		expect(screen.getByTestId('select-wm-task-child').getAttribute('aria-label')).toBeNull();
+		expect(within(selectedRow).queryByTestId('context-marker-wm-task-child')).toBeNull();
+	});
+
+	it('gives a context ancestor with kept descendants a working toggle', () => {
+		renderTaskScope();
+		const toggle = screen.getByTestId('toggle-wm-bug-login');
+		expect(toggle.getAttribute('aria-expanded')).toBe('true');
+		expect(toggle.getAttribute('aria-label')).toBe(
+			'Collapse Login fails, context, outside the selection'
+		);
+	});
+
+	it('keeps a context ancestor collapsed like any other node', () => {
+		const filtered = filterGroups(groupedTree.groups, new Set(['task']));
+		const { container } = render(TreeView, {
+			view: 'grouped',
+			roots: [],
+			groups: filtered.groups,
+			contextIds: filtered.contextIds,
+			expanded: allIds([taskRoot]),
+			dependenciesVisible: false,
+			selectedId: null,
+			onToggle: () => {},
+			onSelect: () => {}
+		});
+		// Collapsed: the context ancestor is visible, its kept child is not.
+		expect(renderedIds(container)).toEqual(['wm-bug-login', 'wm-task-ship']);
+		expect(screen.getByTestId('toggle-wm-bug-login').getAttribute('aria-expanded')).toBe('false');
+	});
+
+	it('leaves the combined view unmarked, since it filters nothing', () => {
+		const { container } = renderCombined({ contextIds: new Set(['wm-bug-login']) });
+		expect(container.querySelectorAll('[data-context]')).toHaveLength(0);
+		expect(screen.getByTestId('select-wm-bug-login').getAttribute('aria-label')).toBeNull();
 	});
 });
 

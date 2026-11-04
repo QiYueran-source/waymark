@@ -6,7 +6,9 @@ import { preferenceKey, projectIdFor } from '$lib/storage';
 import {
 	ROOT_A,
 	ROOT_B,
+	TASK,
 	combinedTree,
+	deepGroupedTree,
 	detail,
 	emptyTree,
 	failure,
@@ -504,7 +506,7 @@ describe('category selection', () => {
 		expect(screen.getByRole('group', { name: 'Categories' })).not.toBeNull();
 	});
 
-	it('filters to one category, then to several, without promoting a nested item', async () => {
+	it('filters to one category, then to several, keeping a required ancestor as context', async () => {
 		await renderGrouped({ trees: bothViews });
 		// Off: the category's group and its work items leave.
 		await fireEvent.click(screen.getByTestId('category-option-task'));
@@ -517,15 +519,17 @@ describe('category selection', () => {
 		await fireEvent.click(screen.getByTestId('category-option-task'));
 		await fireEvent.click(screen.getByTestId('category-option-bug'));
 		await fireEvent.click(screen.getByTestId('category-option-docs'));
-		expect(screen.queryByTestId('group-bug')).toBeNull();
+		// The bug group stays as context: `wm-task-child`'s real parent is a bug,
+		// and promoting the task to a root would falsify its parentage.
 		expect(screen.queryByTestId('group-docs')).toBeNull();
 		expect(screen.getByTestId('group-task')).not.toBeNull();
+		expect(screen.getByTestId('group-bug')).not.toBeNull();
 		expect(screen.getByTestId('node-wm-task-ship')).not.toBeNull();
-		// `wm-task-child` is a task nested under a bug: a task-only scope does not
-		// invent it as a root. Keeping it under a marked context ancestor is
-		// wm-gpjeb92dgz4w's work, not this ticket's.
-		expect(screen.queryByTestId('node-wm-task-child')).toBeNull();
-		expect(screen.getByTestId('tree-summary').textContent).toBe('1 item · 0 blocked');
+		expect(screen.getByTestId('node-wm-task-child')).not.toBeNull();
+		expect(screen.getByTestId('node-wm-bug-login').getAttribute('data-context')).toBe('true');
+		// The context ancestor is not selected work: two tasks are counted, and
+		// the blocked bug above them does not inflate the blocked count.
+		expect(screen.getByTestId('tree-summary').textContent).toBe('2 items · 0 blocked');
 
 		// Two categories selected at once: work items from both are shown.
 		await fireEvent.click(screen.getByTestId('category-option-bug'));
@@ -534,7 +538,74 @@ describe('category selection', () => {
 		expect(screen.getByTestId('group-bug')).not.toBeNull();
 		expect(screen.getByTestId('group-task')).not.toBeNull();
 		expect(screen.getByTestId('node-wm-task-ship')).not.toBeNull();
+		expect(screen.getByTestId('node-wm-bug-login').getAttribute('data-context')).toBeNull();
 		expect(screen.getByTestId('tree-summary').textContent).toBe('3 items · 1 blocked');
+	});
+
+	it('keeps a whole unselected ancestor chain as context without its siblings', async () => {
+		await renderLoaded({ trees: { combined: combinedTree, grouped: deepGroupedTree } });
+		await fireEvent.click(screen.getByLabelText('By category'));
+		await screen.findByTestId('group-docs');
+		await fireEvent.click(screen.getByTestId('category-option-bug'));
+		await fireEvent.click(screen.getByTestId('category-option-docs'));
+
+		// Docs and Bugs are out of scope; both survive only as the chain down to
+		// the task, and their unrelated children do not come along.
+		expect(screen.getByTestId('node-wm-docs-umbrella').getAttribute('data-context')).toBe('true');
+		expect(screen.getByTestId('node-wm-bug-mid').getAttribute('data-context')).toBe('true');
+		expect(screen.getByTestId('node-wm-task-leaf')).not.toBeNull();
+		expect(screen.queryByTestId('node-wm-docs-sibling')).toBeNull();
+		expect(screen.queryByTestId('node-wm-bug-sibling')).toBeNull();
+		expect(screen.getByTestId('tree-summary').textContent).toBe('2 items · 0 blocked');
+
+		// A selected context ancestor collapses like any other node, and its kept
+		// descendant goes with it until it is expanded again.
+		await fireEvent.click(screen.getByTestId('toggle-wm-docs-umbrella'));
+		expect(screen.queryByTestId('node-wm-bug-mid')).toBeNull();
+		await fireEvent.click(screen.getByTestId('toggle-wm-docs-umbrella'));
+		expect(screen.getByTestId('node-wm-bug-mid')).not.toBeNull();
+	});
+
+	it('keeps context rows out of the unresolved-relations area', async () => {
+		// A genuine parent problem (an item whose parent is missing) is reported
+		// there; a context ancestor is only outside the selection, not broken.
+		const withUnresolved = {
+			...deepGroupedTree,
+			unresolved: [
+				{
+					id: 'wm-orphan',
+					title: 'Orphaned work',
+					category: TASK,
+					parent: 'wm-missing',
+					reason: 'parent_missing' as const
+				}
+			]
+		};
+		await renderLoaded({ trees: { combined: combinedTree, grouped: withUnresolved } });
+		await fireEvent.click(screen.getByLabelText('By category'));
+		await screen.findByTestId('group-docs');
+		await fireEvent.click(screen.getByTestId('category-option-bug'));
+		await fireEvent.click(screen.getByTestId('category-option-docs'));
+
+		expect(screen.getByTestId('node-wm-docs-umbrella').getAttribute('data-context')).toBe('true');
+		const unresolved = screen.getByTestId('unresolved');
+		expect(unresolved.textContent).toContain('Orphaned work');
+		// The context ancestors are inside the tree, not listed as problems.
+		expect(unresolved.textContent).not.toContain('Documentation umbrella');
+		expect(unresolved.textContent).not.toContain('Middle bug');
+		expect(screen.getByTestId('tree-summary').textContent).toBe('2 items · 0 blocked · 1 unresolved');
+	});
+
+	it('marks no row in the combined view, which filters nothing', async () => {
+		localStorage.setItem(
+			preferenceKey(projectIdFor(ROOT_A), 'categories'),
+			JSON.stringify(['task'])
+		);
+		const api = makeFetch({ trees: bothViews });
+		const { container } = render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await screen.findByTestId('node-wm-bug-login');
+		expect(container.querySelectorAll('[data-context]')).toHaveLength(0);
+		expect(container.querySelectorAll('[data-testid^="context-marker-"]')).toHaveLength(0);
 	});
 
 	it('selects all and clears all with real buttons', async () => {
@@ -590,7 +661,9 @@ describe('category selection', () => {
 	it('remembers the scope per project across a reload', async () => {
 		const first = await renderGrouped({ trees: bothViews });
 		await fireEvent.click(screen.getByTestId('category-option-bug'));
-		expect(screen.queryByTestId('group-bug')).toBeNull();
+		// The bug group stays as context for the task nested under it, but no bug
+		// is selected work any more.
+		expect(screen.getByTestId('node-wm-bug-login').getAttribute('data-context')).toBe('true');
 		first.unmount();
 
 		const second = makeFetch({ trees: bothViews });
@@ -600,7 +673,7 @@ describe('category selection', () => {
 		expect(pressed('bug')).toBe('false');
 		expect(pressed('task')).toBe('true');
 		expect(pressed('docs')).toBe('true');
-		expect(screen.queryByTestId('group-bug')).toBeNull();
+		expect(screen.getByTestId('node-wm-bug-login').getAttribute('data-context')).toBe('true');
 		expect(
 			localStorage.getItem(preferenceKey(projectIdFor(ROOT_A), 'categories'))
 		).toBe(JSON.stringify(['docs', 'task']));

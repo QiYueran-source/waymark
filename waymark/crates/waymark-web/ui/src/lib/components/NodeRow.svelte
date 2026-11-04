@@ -10,6 +10,7 @@
 		expanded,
 		hasChildren,
 		selected,
+		context = false,
 		dependenciesVisible,
 		edges,
 		references,
@@ -21,6 +22,12 @@
 		expanded: boolean;
 		hasChildren: boolean;
 		selected: boolean;
+		/**
+		 * Kept only to preserve parentage: the node's category is outside the
+		 * reader's selection, and work in scope sits below it. It is not selected
+		 * work, so its row says so in visible text and in the accessible names.
+		 */
+		context?: boolean;
 		dependenciesVisible: boolean;
 		edges: DependencyEdge[];
 		references: ReferenceNode[];
@@ -30,14 +37,17 @@
 	} = $props();
 
 	const shape = $derived(shapeFor(node.category));
+	const CONTEXT_NOTE = 'context, outside the selection';
 </script>
 
 <li
 	class="node"
 	class:selected
+	class:context
 	data-testid={`node-${node.id}`}
 	data-depth={depth}
 	data-state={node.state}
+	data-context={context ? 'true' : undefined}
 	style:--depth={depth}
 >
 	<div class="node-row">
@@ -50,7 +60,9 @@
 				class="toggle"
 				type="button"
 				aria-expanded={expanded}
-				aria-label={`${expanded ? 'Collapse' : 'Expand'} ${node.title}`}
+				aria-label={`${expanded ? 'Collapse' : 'Expand'} ${node.title}${context
+					? `, ${CONTEXT_NOTE}`
+					: ''}`}
 				data-testid={`toggle-${node.id}`}
 				onclick={() => onToggle(node.id)}
 			>
@@ -77,12 +89,21 @@
 					<span class="category-name">{node.category.name}</span>
 				</span>
 
+				{#if context}
+					<span
+						class="context-marker"
+						data-testid={`context-marker-${node.id}`}
+						aria-hidden="true">Context — outside the selection</span
+					>
+				{/if}
+
 				<button
 					class="node-title"
 					class:selected
 					type="button"
 					data-testid={`select-${node.id}`}
 					aria-current={selected ? 'true' : undefined}
+					aria-label={context ? `${node.title} — ${CONTEXT_NOTE}` : undefined}
 					onclick={(event) => onSelect(node.id, event.currentTarget)}
 				>
 					{node.title}

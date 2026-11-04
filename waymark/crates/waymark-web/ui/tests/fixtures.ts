@@ -66,6 +66,88 @@ export const taskRoot: TreeNode = {
 	children: []
 };
 
+/** A tree node with neutral defaults, so a fixture states only what it means. */
+export function treeNode(
+	overrides: Pick<TreeNode, 'id' | 'title' | 'category'> & Partial<TreeNode>
+): TreeNode {
+	return {
+		status: 'open',
+		state: 'ready',
+		ready: true,
+		blocked: false,
+		blocked_reason: null,
+		parent: null,
+		dependencies: [],
+		children: [],
+		...overrides
+	};
+}
+
+/**
+ * A three-level chain whose middle levels are in categories a reader can filter
+ * out: a Docs root holds a Bug child, which holds Tasks and another Bug. The
+ * chain is nested exactly as the server nests cross-category children (the
+ * subtree is built before grouping), so filtering must keep the chain rather
+ * than promote a Task to a root.
+ */
+export const docsSibling = treeNode({
+	id: 'wm-docs-sibling',
+	title: 'Rewrite the guide',
+	category: DOCS,
+	parent: 'wm-docs-umbrella'
+});
+
+export const bugSibling = treeNode({
+	id: 'wm-bug-sibling',
+	title: 'Crash on startup',
+	category: BUG,
+	parent: 'wm-bug-mid'
+});
+
+export const taskLeaf = treeNode({
+	id: 'wm-task-leaf',
+	title: 'Polish the leaf',
+	category: TASK,
+	parent: 'wm-bug-mid',
+	status: 'in_progress',
+	state: 'in_progress',
+	ready: false
+});
+
+export const bugMid = treeNode({
+	id: 'wm-bug-mid',
+	title: 'Middle bug',
+	category: BUG,
+	parent: 'wm-docs-umbrella',
+	status: 'in_progress',
+	state: 'blocked',
+	blocked: true,
+	blocked_reason: 'waiting on wm-docs-umbrella (unfinished)',
+	children: [taskLeaf, bugSibling]
+});
+
+export const docsRoot = treeNode({
+	id: 'wm-docs-umbrella',
+	title: 'Documentation umbrella',
+	category: DOCS,
+	children: [bugMid, docsSibling]
+});
+
+/**
+ * The grouped payload for the deep chain: only Docs and Tasks are groups, so a
+ * Task-only scope has to reach through unselected Docs and Bugs levels to keep
+ * `wm-task-leaf` under its real parents.
+ */
+export const deepGroupedTree: GroupedTree = {
+	view: 'grouped',
+	groups: [
+		{ category: DOCS, roots: [docsRoot] },
+		{ category: TASK, roots: [taskRoot] }
+	],
+	unresolved: [],
+	categories: [BUG, DOCS, TASK]
+};
+
 export const combinedTree: CombinedTree = {
 	view: 'combined',
 	roots: [bugRoot, taskRoot],

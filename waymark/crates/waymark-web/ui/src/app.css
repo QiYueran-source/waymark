@@ -508,6 +508,28 @@ code {
 	background: var(--accent-soft);
 }
 
+/*
+ * A context row is not selected work: it is an ancestor kept only so the item
+ * below it keeps its real parent. It is marked three ways — a hatched ground, a
+ * dashed state stripe, and a text badge — so the difference survives greyscale,
+ * colour-blindness, and a screenshot taken without hovering.
+ */
+.node.context > .node-row {
+	border-left-style: dashed;
+	border-left-color: var(--dash);
+	background: repeating-linear-gradient(135deg, var(--panel-2) 0 6px, var(--panel) 6px 12px);
+}
+
+/* Opening a context row's detail must still read as selected, so keep the hatch
+   and swap its paper for the selection tint rather than dropping either cue. */
+.node.context.selected > .node-row {
+	background: repeating-linear-gradient(135deg, var(--accent-soft) 0 6px, var(--panel) 6px 12px);
+}
+
+.node.context .node-title {
+	color: var(--muted);
+}
+
 .guide {
 	position: relative;
 	flex: none;
@@ -610,6 +632,20 @@ code {
 	max-width: 8.5rem;
 	overflow: hidden;
 	text-overflow: ellipsis;
+}
+
+/* The context badge: the part of the marking that is words, not treatment. */
+.context-marker {
+	flex: none;
+	padding: 0.02rem 0.34rem;
+	border: 1px dashed var(--notice-line);
+	border-radius: 2px;
+	background: var(--notice-bg);
+	color: var(--notice-ink);
+	font-size: 0.74rem;
+	font-weight: 650;
+	letter-spacing: 0.015em;
+	white-space: nowrap;
 }
 
 .node-title {

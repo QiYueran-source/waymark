@@ -58,6 +58,15 @@ the two cases stay distinguishable. Keys for categories this project no longer
 configures are ignored when the scope meets the payload's `categories`, which
 also lists configured categories that have no active work yet.
 
+Filtering never rewrites parentage. When a work item in scope has a parent in a
+category the reader turned off, that ancestor — and every unselected level above
+it — stays in the tree and is drawn as a context row: a hatched ground, a dashed
+state stripe, and the visible text `Context — outside the selection`, which also
+enters the row's accessible name. Context rows are presentation only: they are
+excluded from the summary counts, never enter the unresolved-relations area, and
+they keep only the chain down to work in scope — an out-of-scope sibling of the
+chain is not dragged in.
+
 ## Layout
 
 - `src/lib/components/` — `Explorer` (data loading and state), `CategoryFilter`,
@@ -66,7 +75,8 @@ also lists configured categories that have no active work yet.
 - `src/lib/api.ts` — GET-only envelope client and failure types.
 - `src/lib/storage.ts` — project-scoped browser preferences.
 - `src/lib/tree.ts` — pure rows, dependency edges, grouped reference nodes, and
-  the category scope and filtering used by the by-category tree.
+  the category scope and filtering used by the by-category tree, including the
+  context rows kept to preserve parentage.
 - `src/app.css` — the whole visual system in plain CSS (tokens, tree, detail,
   states, responsive); there is no UI framework and no icon package.
 - `tests/` — vitest suites for combined/grouped rendering, overlay toggling and
