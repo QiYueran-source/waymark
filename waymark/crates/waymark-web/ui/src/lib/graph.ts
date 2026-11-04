@@ -18,6 +18,8 @@ import { sectionsFor } from './tree';
 import {
 	shapeFor,
 	stateLabel,
+	statusLabel,
+	unresolvedReason,
 	type Category,
 	type ShapeName,
 	type TreeData,
@@ -54,6 +56,11 @@ export interface GraphNode {
 	 * resolved here: a target that is not drawn yields no edge at all.
 	 */
 	dependencies: string[];
+	/**
+	 * True when the reader has collapsed this node, so its children are not
+	 * drawn. Set by [`collapseGraph`]; a complete graph has none collapsed.
+	 */
+	collapsed?: boolean;
 }
 
 /** A solid parent-child edge. */
@@ -254,4 +261,177 @@ export function edgeLabel(graph: WorkGraph, edge: AnyGraphEdge): string {
 		return `Dependency: ${from?.title ?? edge.from} → ${edge.toTitle} (depends on)`;
 	}
 	return `Parent-child: ${from?.title ?? edge.from} → ${to?.title ?? edge.to}`;
+}
+
+/**
+ * One entry of the graph's structured text alternative.
+ *
+ * A drawn item carries its place in the hierarchy and every relation it takes
+ * part in, each one as a sentence: a reader who never sees an edge still gets
+ * the parent and the children, and — while dependency visibility is on — which
+ * item depends on which. An unresolved item carries the reason it cannot be
+ * placed, so the alternative accounts for everything the graph knows about.
+ *
+ * The values are already words, not model values: the component that renders
+ * this only has to put them in a list. That keeps the plain-text reading in
+ * one testable place and off colour and shape.
+ */
+export interface OutlineItemEntry {
+	kind: 'item';
+	id: string;
+	title: string;
+	/** The category name, written out. */
+	category: string;
+	state: string;
+	status: string;
+	parentId: string | null;
+	depth: number;
+	/** "Parent: …" — stated even for a root, so no relation is implied. */
+	parent: string;
+	/** "Child: …" for each child, so parentage never rests on indentation. */
+	children: string[];
+	/** "Depends on …" for each edge, only while dependency visibility is on. */
+	dependencies: string[];
+	/** "… depends on this item." for each edge that points here. */
+	dependents: string[];
+	blockedReason: string | null;
+	/**
+	 * True when the item is only kept to preserve parentage under the current
+	 * category scope. The outline says so in words, exactly as the card and the
+	 * tree row do, so the filter's context rule survives without a badge.
+	 */
+	context: boolean;
+	/** "Context: …" when `context` is true, otherwise null. */
+	contextNote: string | null;
+}
+
+/** One unresolved item, with the reason its parent cannot be reached. */
+export interface OutlineUnresolvedEntry {
+	kind: 'unresolved';
+	id: string;
+	title: string;
+	category: string;
+	reason: string;
+}
+
+export type OutlineEntry = OutlineItemEntry | OutlineUnresolvedEntry;
+
+/**
+ * The graph with the reader's collapsed nodes applied.
+ *
+ * Collapsing is presentation only: the returned model is a new value, so the
+ * complete one survives for anything that still needs it. A node that is itself
+ * collapsed stays and is marked `collapsed`; every descendant below it is left
+ * out, along with any edge whose far end went with it. Ids in `collapsed` that
+ * this drawing does not contain are ignored, which is what lets a stored
+ * collapse set survive project changes.
+ *
+ * This is the density seam: the drawing and the structured text alternative are
+ * both built from the result, so a collapsed branch is absent from both rather
+ * than from one of them.
+ */
+export function collapseGraph(graph: WorkGraph, collapsed: ReadonlySet<string>): WorkGraph {
+	if (collapsed.size === 0) return graph;
+
+	// `graph.nodes` lists a parent before its children, so one pass suffices: a
+	// node below a hidden or collapsed parent is hidden in turn.
+	const hidden = new Set<string>();
+	const kept: GraphNode[] = [];
+	for (const node of graph.nodes) {
+		if (node.parentId !== null && hidden.has(node.parentId)) {
+			hidden.add(node.id);
+			continue;
+		}
+		if (collapsed.has(node.id)) {
+			hidden.add(node.id);
+			kept.push({ ...node, collapsed: true });
+			continue;
+		}
+		kept.push(node);
+	}
+
+	const drawn = new Set(kept.map((node) => node.id));
+	const keepBoth = (edge: { from: string; to: string }): boolean =>
+		drawn.has(edge.from) && drawn.has(edge.to);
+
+	return {
+		nodes: kept,
+		edges: graph.edges.filter(keepBoth),
+		dependencies: graph.dependencies.filter(keepBoth),
+		roots: graph.roots.filter((id) => drawn.has(id)),
+		unresolved: graph.unresolved
+	};
+}
+
+/**
+ * The structured text alternative to the graph, as a flat, ordered outline.
+ *
+ * It walks `graph.nodes` — the *drawn* items, so a filtered or collapsed graph
+ * yields a correspondingly shorter outline — and appends `graph.unresolved`
+ * last. Dependency sentences come from `graph.dependencies`, which is empty
+ * while the overlay is off, so the alternative cannot silently show a relation
+ * the graph is not showing, and vice versa: both read one model.
+ */
+export function graphOutline(graph: WorkGraph): OutlineEntry[] {
+	const byId = new Map(graph.nodes.map((node) => [node.id, node]));
+
+	const childrenOf = new Map<string, GraphNode[]>();
+	for (const node of graph.nodes) {
+		if (node.parentId === null) continue;
+		const siblings = childrenOf.get(node.parentId);
+		if (siblings === undefined) childrenOf.set(node.parentId, [node]);
+		else siblings.push(node);
+	}
+
+	const dependentsOf = new Map<string, GraphDependencyEdge[]>();
+	for (const edge of graph.dependencies) {
+		const list = dependentsOf.get(edge.to);
+		if (list === undefined) dependentsOf.set(edge.to, [edge]);
+		else list.push(edge);
+	}
+
+	const entries: OutlineEntry[] = graph.nodes.map((node) => {
+		const parent = node.parentId === null ? null : (byId.get(node.parentId) ?? null);
+		return {
+			kind: 'item',
+			id: node.id,
+			title: node.title,
+			category: node.category.name,
+			state: stateLabel(node.state),
+			status: statusLabel(node.status),
+			parentId: node.parentId,
+			depth: node.depth,
+			parent:
+				parent === null
+					? 'Parent: none; this is a top-level item.'
+					: `Parent: ${parent.title} (${parent.id}).`,
+			children: (childrenOf.get(node.id) ?? []).map(
+				(child) => `Child: ${child.title} (${child.id}).`
+			),
+			dependencies: graph.dependencies
+				.filter((edge) => edge.from === node.id)
+				.map((edge) => `Depends on ${edge.toTitle} (${edge.to}).`),
+			dependents: (dependentsOf.get(node.id) ?? []).map((edge) => {
+				const dependent = byId.get(edge.from);
+				return `${dependent?.title ?? edge.from} (${edge.from}) depends on this item.`;
+			}),
+			blockedReason: node.blocked ? node.blockedReason : null,
+			context: node.context,
+			contextNote: node.context
+				? `Context: outside the category selection (${CONTEXT_NOTE}).`
+				: null
+		};
+	});
+
+	for (const item of graph.unresolved) {
+		entries.push({
+			kind: 'unresolved',
+			id: item.id,
+			title: item.title,
+			category: item.category.name,
+			reason: unresolvedReason(item)
+		});
+	}
+
+	return entries;
 }

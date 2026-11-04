@@ -2588,6 +2588,37 @@ geometry makes the drawing deterministic and lets the suite assert real edge ele
   `Dashed line: dependency; the arrow points at the depended-on item`. The dashed swatch draws a dash
   pattern and an arrowhead so the meaning does not rest on the wording alone.
 
+## The graph's structured text alternative
+
+- **One model, two readings.** `graphOutline(graph: WorkGraph): OutlineEntry[]` in `graph.ts` turns
+  the *same* `WorkGraph` the drawing renders into an ordered outline, and
+  `GraphText.svelte` renders it without the graph library. Category scope, collapse, and the
+  dependency overlay therefore cannot diverge between the two views: there is nothing to keep in
+  step. `Explorer` derives one `visibleGraph` — the filtered model today, and the filtered *and
+  collapsed* model once the graph's density control lands — and hands the same value to `GraphView`
+  and `graphOutline`; `collapseGraph(graph, collapsed)` is the pure helper that view applies. The
+  outline is only built while the alternative is on, and the alternative has no collapse control of
+  its own: it follows the drawing's.
+- **Relations are words, not geometry.** Each item entry carries `parent` (`"Parent: …"`, or
+  `"Parent: none; this is a top-level item."`), `children` (`"Child: <title> (<id>)."`),
+  `dependencies` (`"Depends on <title> (<id>)."`) and `dependents` (`"<title> (<id>) depends on this
+  item."`). Nothing is implied by indentation or by an arrowhead, and `graphOutline` never emits a
+  dependency sentence while `graph.dependencies` is empty — the model owns the toggle.
+- **Unresolved items are part of the outline.** `graph.unresolved` becomes trailing
+  `kind: 'unresolved'` entries with the same reason wording as `UnresolvedList` (now shared through
+  `unresolvedReason`). While the alternative is showing, the separate unresolved area is hidden so a
+  reader meets each item once; the tree and the drawing keep it.
+- **Selection is the existing path.** Each entry's title is a real `<button
+  data-testid="graph-text-select-<id>">` with `aria-current` while selected and an accessible name of
+  `"<title> — <category>, <state>"`; it passes itself to `Explorer.selectItem`, so the same detail
+  panel opens and `closeDetail` returns focus to the same button. A context ancestor — kept only to
+  preserve parentage under the category scope — says so in words (`Context: outside the category
+  selection …`), from `GraphNode.context`, so the filter's rule survives without a badge.
+- **Persistence.** The choice is one boolean per project, on its own key
+  (`<projectId>:graphAlternative`), so it cannot collide with `presentation`, the graph collapse set,
+  or the viewport. It is offered only while the graph is the presentation, and the drawing is the
+  default because the alternative is an explicit choice.
+
 ## Category context in the graph, beside the tree's own rule
 
 - **One filter, two renderers.** `Explorer` still derives the grouped payload once via `filterGroups`

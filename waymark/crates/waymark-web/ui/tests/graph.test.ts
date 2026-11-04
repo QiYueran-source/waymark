@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildGraph, edgeLabel, graphNodeLabel } from '$lib/graph';
+import { buildGraph, collapseGraph, edgeLabel, graphNodeLabel, graphOutline } from '$lib/graph';
+import type { OutlineEntry, OutlineItemEntry } from '$lib/graph';
 import { allIds, filterGroups, visibleRoots } from '$lib/tree';
 import {
 	BUG,
@@ -16,6 +17,13 @@ import {
 } from './fixtures';
 
 const WITH_DEPENDENCIES = { dependenciesVisible: true } as const;
+
+/** The outline entry for one drawn item, narrowed from the union. */
+function drawn(outline: OutlineEntry[], id: string): OutlineItemEntry {
+	const entry = outline.find((candidate) => candidate.id === id);
+	expect(entry?.kind).toBe('item');
+	return entry as OutlineItemEntry;
+}
 
 describe('graph model', () => {
 	it('places every displayed item exactly once, parents before children', () => {
@@ -160,6 +168,126 @@ describe('dependency edges in the graph model', () => {
 		expect(edgeLabel(graph, edge)).toBe(
 			'Dependency: Fix the login form → Login fails (depends on)'
 		);
+	});
+});
+
+describe('the structured text outline', () => {
+	it('lists every drawn item once, in drawing order, with its category and state in words', () => {
+		const graph = buildGraph(hierarchyTree);
+		const outline = graphOutline(graph);
+		expect(outline.map((entry) => entry.kind)).toEqual(['item', 'item', 'item', 'item']);
+		expect(outline.map((entry) => entry.id)).toEqual(graph.nodes.map((node) => node.id));
+		expect(outline[0]).toMatchObject({
+			kind: 'item',
+			id: 'wm-h-root',
+			title: 'Crashes on start',
+			category: 'Bugs',
+			state: 'Blocked',
+			status: 'In progress'
+		});
+		expect(outline[3]).toMatchObject({ id: 'wm-h-second-root', category: 'Tasks', state: 'Ready' });
+	});
+
+	it('states each parent-child relation in words instead of leaving it to indentation', () => {
+		const outline = graphOutline(buildGraph(hierarchyTree));
+		expect(drawn(outline, 'wm-h-root')).toMatchObject({
+			parent: 'Parent: none; this is a top-level item.',
+			children: ['Child: Reproduce the crash (wm-h-child).']
+		});
+		expect(drawn(outline, 'wm-h-child')).toMatchObject({
+			parent: 'Parent: Crashes on start (wm-h-root).',
+			children: ['Child: Verify the fix (wm-h-grandchild).']
+		});
+		expect(drawn(outline, 'wm-h-grandchild')).toMatchObject({
+			parent: 'Parent: Reproduce the crash (wm-h-child).',
+			children: []
+		});
+	});
+
+	it('leaves dependency relations out while dependency visibility is off', () => {
+		const outline = graphOutline(buildGraph(dependencyTree));
+		for (const entry of outline) {
+			if (entry.kind !== 'item') continue;
+			expect(entry.dependencies).toEqual([]);
+			expect(entry.dependents).toEqual([]);
+		}
+		expect(JSON.stringify(outline)).not.toContain('depends on');
+	});
+
+	it('states the direction of every dependency relation', () => {
+		const outline = graphOutline(buildGraph(dependencyTree, WITH_DEPENDENCIES));
+		expect(drawn(outline, 'wm-dep-fix')).toMatchObject({
+			dependencies: ['Depends on Login fails (wm-dep-bug).'],
+			dependents: []
+		});
+		expect(drawn(outline, 'wm-dep-bug')).toMatchObject({
+			dependencies: [],
+			// Both dependents are named, and the sentence says who depends on whom.
+			dependents: [
+				'Fix the login form (wm-dep-fix) depends on this item.',
+				'Ship the release (wm-dep-ship) depends on this item.'
+			]
+		});
+		// The dropped target (`wm-dep-archived`) yields no sentence at all.
+		expect(drawn(outline, 'wm-dep-ship').dependencies).toEqual([
+			'Depends on Login fails (wm-dep-bug).'
+		]);
+	});
+
+	it('ends with the unresolved items and the reason each one cannot be placed', () => {
+		const outline = graphOutline(buildGraph(unresolvedTree));
+		expect(outline.filter((entry) => entry.kind === 'unresolved')).toEqual([
+			{
+				kind: 'unresolved',
+				id: 'wm-orphan',
+				title: 'Orphaned work',
+				category: 'Tasks',
+				reason: 'its parent wm-missing is missing'
+			}
+		]);
+		// Two drawn items (the orphan is not one), then the unresolved entry.
+		expect(outline.map((entry) => entry.kind)).toEqual(['item', 'item', 'unresolved']);
+	});
+
+	it('words the filter’s context rule, so a kept ancestor is not mistaken for selected work', () => {
+		const filtered = filterGroups(deepGroupedTree.groups, new Set(['task']));
+		const outline = graphOutline(
+			buildGraph(
+				{ ...deepGroupedTree, groups: filtered.groups },
+				{ contextIds: filtered.contextIds }
+			)
+		);
+		expect(drawn(outline, 'wm-docs-umbrella').contextNote).toBe(
+			'Context: outside the category selection (context, outside the selection).'
+		);
+		expect(drawn(outline, 'wm-bug-mid').context).toBe(true);
+		expect(drawn(outline, 'wm-task-leaf')).toMatchObject({
+			context: false,
+			contextNote: null
+		});
+	});
+
+	it('drops a collapsed branch from the outline exactly as it drops it from the drawing', () => {
+		const graph = buildGraph(hierarchyTree);
+		const collapsed = collapseGraph(graph, new Set(['wm-h-child']));
+		const outline = graphOutline(collapsed);
+		// The collapsed node stays and keeps its own sentence; its child is gone
+		// from the outline, so the two readings list the same items.
+		expect(outline.map((entry) => entry.id)).toEqual(collapsed.nodes.map((node) => node.id));
+		expect(outline.map((entry) => entry.id)).not.toContain('wm-h-grandchild');
+		expect(drawn(outline, 'wm-h-child').children).toEqual([]);
+		// Nothing else moves: the sibling root and its relation are untouched.
+		expect(drawn(outline, 'wm-h-second-root').parent).toBe(
+			'Parent: none; this is a top-level item.'
+		);
+	});
+
+	it('carries the server’s blocked reason in prose', () => {
+		const outline = graphOutline(buildGraph(hierarchyTree));
+		const root = outline.find((entry) => entry.id === 'wm-h-root');
+		expect(root).toMatchObject({ blockedReason: 'waiting on wm-h-child (unfinished)' });
+		const ready = outline.find((entry) => entry.id === 'wm-h-second-root');
+		expect(ready).toMatchObject({ blockedReason: null });
 	});
 });
 
