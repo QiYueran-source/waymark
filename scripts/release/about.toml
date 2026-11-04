@@ -1,0 +1,38 @@
+# cargo-about configuration for the Waymark release archives.
+#
+# This is deliberately a closed list: a dependency whose licence is not accepted
+# here fails the licence-inventory step instead of shipping without a reviewed
+# licence. Add a licence only after reading the dependency's terms.
+
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "MPL-2.0",
+    "CDLA-Permissive-2.0",
+    "Unlicense",
+    "CC0-1.0",
+    "0BSD",
+    "BSL-1.0",
+    "OpenSSL",
+]
+
+# The release supports Linux x86_64 and macOS arm64/x86_64. Listing the targets
+# filters out dependencies that can only ever apply to a platform Waymark does not
+# ship, so the inventory describes the actual release graph.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+]
+
+# Waymark's own workspace crates are dual licensed like the project; they are
+# part of the source tree, not third parties, so they are not listed as
+# dependencies. The archives still carry both licence files.
+private = { ignore = true }

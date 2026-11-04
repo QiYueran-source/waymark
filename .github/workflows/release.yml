@@ -1,0 +1,356 @@
+name: Release
+
+# A tag is the only release trigger. The pipeline refuses to run unless the tag
+# equals the workspace version, builds the frontend once, runs the same gates as
+# CI on the tagged commit, packages both variants for every supported platform,
+# verifies the artifacts, and attaches them to a **draft** Release. Publishing is
+# a human decision made from docs/release-checklist.md.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  # The release workflow builds the frontend once; every Web build reuses that
+  # tree. This never relaxes the requirement for index.html or the manifest.
+  WAYMARK_SKIP_UI_BUILD: "1"
+  # A release build must embed the commit it was built from.
+  WAYMARK_RELEASE: "1"
+  WAYMARK_GIT_SHA: ${{ github.sha }}
+
+jobs:
+  version-gate:
+    name: Version gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag must equal the workspace version
+        id: version
+        run: |
+          set -euo pipefail
+          version="$(scripts/release/version.sh --tag "$GITHUB_REF_NAME")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag $GITHUB_REF_NAME matches workspace version $version"
+
+  web-dist:
+    name: Frontend tree and provenance manifest
+    needs: version-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: waymark/crates/waymark-web/ui/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: waymark
+      - name: Install frontend dependencies from the lockfile
+        working-directory: waymark/crates/waymark-web/ui
+        run: npm ci
+      - name: Check the frontend
+        working-directory: waymark/crates/waymark-web/ui
+        run: npm run check
+      - name: Build the frontend
+        working-directory: waymark/crates/waymark-web/ui
+        run: npm run build
+      - name: Generate the provenance manifest
+        working-directory: waymark
+        run: |
+          cargo run --locked -p waymark-web --bin waymark-web-manifest -- \
+            --version "${{ needs.version-gate.outputs.version }}"
+      - name: Pack the built frontend tree
+        run: |
+          scripts/release/pack-web-dist.sh \
+            --version "${{ needs.version-gate.outputs.version }}" \
+            --git-sha "$GITHUB_SHA" \
+            --out "$RUNNER_TEMP/web-dist"
+      - name: Upload the frontend tree
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: |
+            waymark/crates/waymark-web/ui/build
+            waymark/crates/waymark-web/ui/assets-manifest.json
+          if-no-files-found: error
+          # The manifest hashes every file in the tree; dropping a dotfile here
+          # would make the downloaded tree disagree with it.
+          include-hidden-files: true
+          retention-days: 7
+      - name: Upload the packed frontend tree
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist-archive
+          path: ${{ runner.temp }}/web-dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  gates:
+    name: Gate (${{ matrix.os }})
+    needs: [version-gate, web-dist]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore the release frontend tree
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: waymark/crates/waymark-web/ui
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: waymark
+      - run: cargo fmt --all --check
+        working-directory: waymark
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        working-directory: waymark
+      - run: cargo test --workspace --all-features
+        working-directory: waymark
+      - run: cargo test --workspace
+        working-directory: waymark
+
+  msrv:
+    name: Rust 1.85 build
+    needs: [version-gate, web-dist]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore the release frontend tree
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: waymark/crates/waymark-web/ui
+      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: waymark
+      - name: The lockfile still resolves on the declared MSRV
+        working-directory: waymark
+        run: cargo metadata --locked --format-version 1 > /dev/null
+      - name: Build the workspace on a real 1.85 toolchain
+        working-directory: waymark
+        run: cargo build --workspace --all-features --locked
+
+  licences:
+    name: Licence inventory
+    needs: version-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # cargo-about 0.9 hides its CLI behind the `cli` feature; without it the
+      # install is a warning and no binary is produced.
+      - name: Install cargo-about
+        run: cargo install cargo-about --version 0.9.3 --locked --features cli
+      - name: Generate THIRD_PARTY_LICENSES.txt
+        run: scripts/release/generate-licences.sh --out licences/THIRD_PARTY_LICENSES.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: licences
+          path: licences/THIRD_PARTY_LICENSES.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  build:
+    name: Package ${{ matrix.artifact_os }}-${{ matrix.artifact_arch }}
+    needs: [version-gate, web-dist, gates, msrv, licences]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_os: linux
+            artifact_arch: x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_os: macos
+            artifact_arch: aarch64
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            artifact_os: macos
+            artifact_arch: x86_64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore the release frontend tree
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: waymark/crates/waymark-web/ui
+      - name: Restore the licence inventory
+        uses: actions/download-artifact@v4
+        with:
+          name: licences
+          path: licences
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: waymark
+      - name: Build and package both variants
+        run: |
+          scripts/release/package.sh \
+            --version "${{ needs.version-gate.outputs.version }}" \
+            --git-sha "$GITHUB_SHA" \
+            --target "${{ matrix.target }}" \
+            --os "${{ matrix.artifact_os }}" \
+            --arch "${{ matrix.artifact_arch }}" \
+            --licences licences/THIRD_PARTY_LICENSES.txt \
+            --out dist
+      - name: Verify the packaged Web provenance
+        run: |
+          set -euo pipefail
+          mkdir -p verify
+          tar -xzf "dist/waymark-web-v${{ needs.version-gate.outputs.version }}-${{ matrix.artifact_os }}-${{ matrix.artifact_arch }}.tar.gz" -C verify
+          scripts/release/verify-web-provenance.sh \
+            --binary verify/waymark \
+            --version "${{ needs.version-gate.outputs.version }}" \
+            --git-sha "$GITHUB_SHA" \
+            --manifest waymark/crates/waymark-web/ui/assets-manifest.json
+      - name: Check the packaged artifacts
+        run: |
+          scripts/release/check-artifacts.sh \
+            --dir dist \
+            --version "${{ needs.version-gate.outputs.version }}" \
+            --git-sha "$GITHUB_SHA" \
+            --platform "${{ matrix.artifact_os }}-${{ matrix.artifact_arch }}" \
+            --manifest waymark/crates/waymark-web/ui/assets-manifest.json
+      - name: Upload the packaged archives
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.artifact_os }}-${{ matrix.artifact_arch }}
+          path: |
+            dist/waymark-v*.tar.gz
+            dist/waymark-v*.tar.gz.sha256
+            dist/waymark-web-v*.tar.gz
+            dist/waymark-web-v*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  source:
+    name: Source tarball
+    needs: [version-gate, web-dist]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Make sure the release tag is available to git archive
+        run: git fetch --force --tags origin
+      - name: Restore the packed frontend tree
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist-archive
+          path: web-dist
+      - name: Pack the source tarball
+        run: |
+          scripts/release/make-source-tarball.sh \
+            --version "${{ needs.version-gate.outputs.version }}" \
+            --rev "$GITHUB_REF_NAME" \
+            --git-sha "$GITHUB_SHA" \
+            --web-dist "web-dist/waymark-web-dist-v${{ needs.version-gate.outputs.version }}.tar.gz" \
+            --out dist
+      - name: Upload the source tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: source
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  verify:
+    name: Verify downloaded artifacts
+    needs: [version-gate, web-dist, build, source]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore the release frontend tree
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web-dist
+      - name: Download every platform's archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Download the source tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: source
+          path: dist
+      # This is the CI run of the same script a maintainer runs locally. Linux
+      # binaries are executed; macOS archives are checked for checksum and
+      # contents here and executed on their native build legs above.
+      - name: Check checksums, contents, versions, and provenance
+        run: |
+          scripts/release/check-artifacts.sh \
+            --dir dist \
+            --version "${{ needs.version-gate.outputs.version }}" \
+            --git-sha "$GITHUB_SHA" \
+            --manifest web-dist/assets-manifest.json \
+            --require-platforms
+
+  release:
+    name: Draft release
+    needs: [version-gate, verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download every platform's archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Download the source tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: source
+          path: dist
+      - name: Create the draft Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Waymark ${{ needs.version-gate.outputs.version }}
+          draft: true
+          prerelease: ${{ contains(needs.version-gate.outputs.version, '-') }}
+          generate_release_notes: true
+          files: |
+            dist/waymark-v*.tar.gz
+            dist/waymark-v*.tar.gz.sha256
+            dist/waymark-web-v*.tar.gz
+            dist/waymark-web-v*.tar.gz.sha256
+            dist/waymark-src-v*.tar.gz
+            dist/waymark-src-v*.tar.gz.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
