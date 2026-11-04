@@ -15,6 +15,16 @@ fn waymark() -> Command {
     Command::new(env!("CARGO_BIN_EXE_waymark"))
 }
 
+/// The binary with no `git` reachable through `PATH`.
+///
+/// The probe searches `PATH`, so removing it is how a test simulates a host
+/// without Git without touching the real repository or the ambient `PATH`.
+fn waymark_without_git() -> Command {
+    let mut command = waymark();
+    command.env_remove("PATH");
+    command
+}
+
 struct Run {
     output: Output,
 }
@@ -361,6 +371,122 @@ fn outside_a_repository_history_and_diff_exit_zero_with_an_informational_finding
         human.stderr().contains("NOT_A_GIT_REPOSITORY"),
         "stderr: {}",
         human.stderr()
+    );
+}
+
+#[test]
+fn a_missing_git_executable_inside_a_repository_is_git_unavailable_and_exits_zero() {
+    let Some((_dir, root, id)) = project_in_repository() else {
+        return;
+    };
+
+    // The repository is present but the executable is not, so exactly one
+    // cause is missing and exactly one finding names it.
+    let history = run(waymark_without_git()
+        .arg("--json")
+        .arg("git")
+        .arg("history")
+        .arg("--project")
+        .arg(&root)
+        .arg("--item")
+        .arg(&id));
+    assert_eq!(history.status(), 0, "stderr: {}", history.stderr());
+    let json = history.json();
+    assert_eq!(json["ok"], serde_json::json!(true));
+    assert_eq!(json["data"]["commits"], serde_json::json!([]));
+    assert_eq!(
+        json["_meta"]["diagnostics"]
+            .as_array()
+            .expect("diagnostics")
+            .len(),
+        1
+    );
+    let finding = &json["_meta"]["diagnostics"][0];
+    assert_eq!(finding["code"], serde_json::json!("GIT_UNAVAILABLE"));
+    assert_eq!(finding["severity"], serde_json::json!("info"));
+    assert_eq!(finding["fixable"], serde_json::json!(false));
+    assert!(finding["location"].is_null(), "{finding}");
+    assert!(
+        finding["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("PATH"),
+        "{finding}"
+    );
+
+    let diff = run(waymark_without_git()
+        .arg("--json")
+        .arg("git")
+        .arg("diff")
+        .arg("--project")
+        .arg(&root)
+        .arg("--item")
+        .arg(&id));
+    assert_eq!(diff.status(), 0, "stderr: {}", diff.stderr());
+    let json = diff.json();
+    assert_eq!(json["ok"], serde_json::json!(true));
+    assert_eq!(json["data"]["empty"], serde_json::json!(true));
+    assert_eq!(
+        json["_meta"]["diagnostics"][0]["code"],
+        serde_json::json!("GIT_UNAVAILABLE")
+    );
+    assert_eq!(
+        json["_meta"]["diagnostics"][0]["severity"],
+        serde_json::json!("info")
+    );
+}
+
+#[test]
+fn a_missing_repository_and_executable_report_both_findings_and_exit_zero() {
+    let (_dir, root, id) = project();
+
+    let history = run(waymark_without_git()
+        .arg("--json")
+        .arg("git")
+        .arg("history")
+        .arg("--project")
+        .arg(&root)
+        .arg("--item")
+        .arg(&id));
+    assert_eq!(history.status(), 0, "stderr: {}", history.stderr());
+    let json = history.json();
+    assert_eq!(json["ok"], serde_json::json!(true));
+    let codes: Vec<&str> = json["_meta"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics")
+        .iter()
+        .map(|finding| finding["code"].as_str().expect("a code"))
+        .collect();
+    assert_eq!(codes, vec!["NOT_A_GIT_REPOSITORY", "GIT_UNAVAILABLE"]);
+    for finding in json["_meta"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics")
+    {
+        assert_eq!(finding["severity"], serde_json::json!("info"));
+        assert_eq!(finding["fixable"], serde_json::json!(false));
+        assert!(finding["location"].is_null(), "{finding}");
+    }
+
+    // Human mode keeps the usual exit code and names both causes on stderr.
+    let human = run(waymark_without_git()
+        .arg("git")
+        .arg("history")
+        .arg("--project")
+        .arg(&root));
+    assert_eq!(human.status(), 0, "stderr: {}", human.stderr());
+    assert!(
+        human.stderr().contains("NOT_A_GIT_REPOSITORY"),
+        "{}",
+        human.stderr()
+    );
+    assert!(
+        human.stderr().contains("GIT_UNAVAILABLE"),
+        "{}",
+        human.stderr()
+    );
+    assert!(
+        !root.join(".git").exists(),
+        "reading history must never initialize a repository"
     );
 }
 

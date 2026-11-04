@@ -3,8 +3,9 @@
 //!
 //! Both arms are thin: `waymark_core::git` owns detection, scoping, and the Git
 //! invocation, and decides that a missing repository or a missing binary is an
-//! informational finding rather than a failure. The adapter only translates
-//! flags and renders the report.
+//! informational finding rather than a failure. One finding names each missing
+//! cause (`NOT_A_GIT_REPOSITORY`, `GIT_UNAVAILABLE`), and both appear when both
+//! are missing. The adapter only translates flags and renders the report.
 //!
 //! # Where the output goes
 //!

@@ -6,7 +6,7 @@
 //!    exactly once each;
 //! 3. a string and serde round-trip for every code;
 //! 4. the classifier invariants the spec states in prose (only two retryable
-//!    codes, six finding-only codes with no exit class).
+//!    codes, seven finding-only codes with no exit class).
 //!
 //! Adding, removing, or reclassifying a code therefore requires updating
 //! `tests/golden/error_registry.json` in the same change. Regenerate it with
@@ -35,6 +35,7 @@ const FINDING_ONLY: &[Code] = &[
     Code::OwnerMismatch,
     Code::LockHeld,
     Code::MigrationAvailable,
+    Code::GitUnavailable,
     Code::NotAGitRepository,
     Code::DanglingReference,
     Code::TimestampIncoherent,
@@ -139,6 +140,20 @@ fn a_code_round_trips_through_its_string_and_serde_forms() {
 }
 
 #[test]
+fn git_unavailable_is_a_finding_only_info_code() {
+    let code = Code::from_str("GIT_UNAVAILABLE").expect("GIT_UNAVAILABLE is a registered code");
+    assert_eq!(code.exit_class(), None, "a finding never fails a command");
+    assert!(!code.retryable());
+    assert_eq!(code.finding(), Some(Severity::Info));
+    assert!(code.details_keys().is_empty(), "no typed details");
+    assert!(
+        code.location_kinds().is_empty(),
+        "a missing binary is an environment fact, not a document location"
+    );
+    assert_eq!(Code::ALL.len(), 38, "the registry grew by exactly one code");
+}
+
+#[test]
 fn only_lock_timeout_and_snapshot_unstable_are_retryable() {
     let retryable: Vec<Code> = Code::ALL
         .iter()
@@ -209,6 +224,7 @@ fn the_finding_only_codes_keep_their_pinned_severity() {
         (Code::OwnerMismatch, Severity::Warning),
         (Code::LockHeld, Severity::Info),
         (Code::MigrationAvailable, Severity::Info),
+        (Code::GitUnavailable, Severity::Info),
         (Code::NotAGitRepository, Severity::Info),
         (Code::DanglingReference, Severity::Error),
         (Code::TimestampIncoherent, Severity::Warning),

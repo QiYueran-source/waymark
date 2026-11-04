@@ -239,6 +239,7 @@ mod tests {
         assert_eq!(Code::OwnerMismatch.exit_class(), None);
         assert_eq!(Code::LockHeld.exit_class(), None);
         assert_eq!(Code::MigrationAvailable.exit_class(), None);
+        assert_eq!(Code::GitUnavailable.exit_class(), None);
         assert_eq!(Code::NotAGitRepository.exit_class(), None);
         assert_eq!(Code::DanglingReference.exit_class(), None);
         assert_eq!(Code::TimestampIncoherent.exit_class(), None);

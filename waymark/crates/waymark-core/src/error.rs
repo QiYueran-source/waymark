@@ -84,6 +84,8 @@ pub enum Code {
     IoError,
     /// A Git operation failed.
     GitError,
+    /// No `git` executable is available, so history and diff degrade to empty.
+    GitUnavailable,
     /// The lock wait expired; nothing was written.
     LockTimeout,
     /// The lock file cannot be opened, locked, or is not a regular file.
@@ -271,6 +273,7 @@ impl Code {
         Code::ProjectNotFound,
         Code::IoError,
         Code::GitError,
+        Code::GitUnavailable,
         Code::LockTimeout,
         Code::LockFailed,
         Code::SnapshotUnstable,
@@ -421,6 +424,7 @@ impl Code {
                 &["operation", "reason"],
                 &[],
             ),
+            Self::GitUnavailable => spec(None, false, Some(Severity::Info), &[], &[]),
             Self::LockTimeout => spec(
                 Some(ExitClass::Environment),
                 true,
@@ -548,6 +552,7 @@ impl Code {
             Self::ProjectNotFound => "PROJECT_NOT_FOUND",
             Self::IoError => "IO_ERROR",
             Self::GitError => "GIT_ERROR",
+            Self::GitUnavailable => "GIT_UNAVAILABLE",
             Self::LockTimeout => "LOCK_TIMEOUT",
             Self::LockFailed => "LOCK_FAILED",
             Self::SnapshotUnstable => "SNAPSHOT_UNSTABLE",
@@ -600,6 +605,7 @@ impl Code {
             "PROJECT_NOT_FOUND" => Ok(Self::ProjectNotFound),
             "IO_ERROR" => Ok(Self::IoError),
             "GIT_ERROR" => Ok(Self::GitError),
+            "GIT_UNAVAILABLE" => Ok(Self::GitUnavailable),
             "LOCK_TIMEOUT" => Ok(Self::LockTimeout),
             "LOCK_FAILED" => Ok(Self::LockFailed),
             "SNAPSHOT_UNSTABLE" => Ok(Self::SnapshotUnstable),
@@ -1277,6 +1283,15 @@ impl WaymarkError {
             format!("{} item(s) need a format migration", items.len()),
         )
         .with_details(json!({"items": ids}))
+    }
+
+    /// No `git` executable is available, so history and diff degrade to empty.
+    pub fn git_unavailable() -> Self {
+        Self::new(
+            Code::GitUnavailable,
+            "no `git` executable was found on PATH; history and diff degrade to empty",
+        )
+        .with_details(json!({}))
     }
 
     /// No Git repository is available for history or recovery.

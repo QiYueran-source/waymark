@@ -2,10 +2,11 @@
 //!
 //! `waymark_core::git` owns repository detection, path scoping, and the Git
 //! invocation. Its contract is explicit: outside a repository, or without a
-//! `git` binary, the report is empty and carries an informational
-//! `NOT_A_GIT_REPOSITORY` finding — it is a successful answer, not a business
-//! failure. These tools therefore return the shared success envelope and let
-//! `_meta.diagnostics` describe the absent repository.
+//! `git` binary, the report is empty and carries one informational finding per
+//! missing cause — `NOT_A_GIT_REPOSITORY` for the repository and
+//! `GIT_UNAVAILABLE` for the executable, both when both are missing. It is a
+//! successful answer, not a business failure. These tools therefore return the
+//! shared success envelope and let `_meta.diagnostics` describe the environment.
 
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::tool;
@@ -52,8 +53,9 @@ pub struct GitDiffArgs {
 impl WaymarkServer {
     /// Read commit history for one work item, one project-relative path, or the
     /// configured storage root. Newest first, bounded by `limit`. Outside a Git
-    /// repository the result is empty and `_meta.diagnostics` carries the
-    /// informational `NOT_A_GIT_REPOSITORY` finding; the call still succeeds.
+    /// repository, or without a `git` executable, the result is empty and
+    /// `_meta.diagnostics` carries one informational finding per missing cause
+    /// (`NOT_A_GIT_REPOSITORY`, `GIT_UNAVAILABLE`); the call still succeeds.
     #[tool(
         name = "waymark_git_history",
         annotations(title = "Read the project's Git history")
@@ -78,9 +80,10 @@ impl WaymarkServer {
     }
 
     /// Read the unified diff of one work item's document, or of the storage
-    /// root, against the working tree or one commit. Outside a Git repository
-    /// the patch is empty and `_meta.diagnostics` carries the informational
-    /// `NOT_A_GIT_REPOSITORY` finding; the call still succeeds.
+    /// root, against the working tree or one commit. Outside a Git repository,
+    /// or without a `git` executable, the patch is empty and
+    /// `_meta.diagnostics` carries one informational finding per missing cause
+    /// (`NOT_A_GIT_REPOSITORY`, `GIT_UNAVAILABLE`); the call still succeeds.
     #[tool(
         name = "waymark_git_diff",
         annotations(title = "Read a work-item Git diff")

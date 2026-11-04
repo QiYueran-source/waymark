@@ -215,8 +215,10 @@ impl WaymarkServer {
     }
 
     /// Run the project health check: the same report as `waymark_validate`,
-    /// including the non-blocking held-lock probe (`LOCK_HELD`), projection
-    /// completeness, and graph diagnostics. Never writes business data.
+    /// including the non-blocking held-lock probe (`LOCK_HELD`), Git
+    /// availability (`NOT_A_GIT_REPOSITORY` / `GIT_UNAVAILABLE`), projection
+    /// completeness, and graph diagnostics. Never writes business data and
+    /// never installs Git or initializes a repository.
     #[tool(name = "waymark_doctor", annotations(title = "Diagnose the project"))]
     async fn waymark_doctor(&self) -> ToolResult {
         envelope::respond(|| Ok(report_result(diagnose(self.start())?)))

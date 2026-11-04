@@ -103,15 +103,22 @@ fn messages(report: &doctor::Report, code: Code) -> Vec<String> {
 }
 
 #[test]
-fn a_clean_project_reports_nothing_and_only_rebuilds_in_memory_state() {
+fn a_clean_project_reports_only_environment_findings_and_only_rebuilds_in_memory_state() {
     let (_dir, project) = project();
     create_item(&project, "one");
 
     let report = doctor::diagnose(&project).unwrap();
-    assert!(report.findings.is_empty(), "{:?}", report.findings);
+    assert!(
+        report
+            .findings
+            .iter()
+            .all(|finding| matches!(finding.code, Code::NotAGitRepository | Code::GitUnavailable)),
+        "a clean project reports only its Git environment: {:?}",
+        report.findings
+    );
     assert_eq!(report.counts.errors, 0);
     assert_eq!(report.counts.warnings, 0);
-    assert_eq!(report.counts.info, 0);
+    assert_eq!(report.counts.info, report.findings.len());
     assert!(!report.strict);
     assert_eq!(report.exit_class(), None);
     assert!(report.scope.contains(&"work_items".to_owned()));
@@ -125,6 +132,50 @@ fn a_clean_project_reports_nothing_and_only_rebuilds_in_memory_state() {
         .repairs
         .iter()
         .all(|repair| !repair.changed.is_empty()));
+}
+
+#[test]
+fn git_availability_is_an_info_finding_and_never_initializes_a_repository() {
+    let (_dir, project) = project();
+    create_item(&project, "one");
+
+    let report = doctor::diagnose(&project).unwrap();
+    let mut expected = vec![Code::NotAGitRepository];
+    if waymark_core::git::find_executable().is_none() {
+        expected.push(Code::GitUnavailable);
+    }
+    let reported: Vec<Code> = report
+        .findings
+        .iter()
+        .filter(|finding| matches!(finding.code, Code::NotAGitRepository | Code::GitUnavailable))
+        .map(|finding| finding.code)
+        .collect();
+    assert_eq!(reported, expected, "{:?}", report.findings);
+
+    for finding in report
+        .findings
+        .iter()
+        .filter(|finding| matches!(finding.code, Code::NotAGitRepository | Code::GitUnavailable))
+    {
+        assert_eq!(finding.severity, Severity::Info);
+        assert!(
+            !finding.fixable,
+            "environment findings are never auto-fixable"
+        );
+        assert!(finding.location.is_none());
+        assert!(!finding.message.is_empty());
+    }
+    assert!(
+        report.scope.contains(&"git".to_owned()),
+        "the report names the Git environment it reviewed: {:?}",
+        report.scope
+    );
+    assert_eq!(report.counts.errors, 0);
+    assert_eq!(report.exit_class(), None);
+    assert!(
+        !project.root().join(".git").exists(),
+        "a diagnostic run must never initialize a repository"
+    );
 }
 
 #[test]

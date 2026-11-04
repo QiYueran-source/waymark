@@ -136,6 +136,45 @@ fn doctor_reports_a_whole_project_and_exits_zero_by_default() {
 }
 
 #[test]
+fn doctor_and_validate_report_git_availability_as_info_and_exit_zero() {
+    let (_dir, root) = project();
+
+    // No `git` on the child's PATH and no repository in the project: both
+    // causes are missing, so both findings must be reported.
+    for command in ["doctor", "validate"] {
+        let result = run(waymark()
+            .env_remove("PATH")
+            .arg("--json")
+            .arg(command)
+            .arg("--project")
+            .arg(&root));
+        assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
+        let envelope = result.json();
+        assert_eq!(envelope["ok"], true, "{command}");
+        let findings = envelope["data"]["findings"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{command} reports findings"));
+        for code in ["NOT_A_GIT_REPOSITORY", "GIT_UNAVAILABLE"] {
+            let finding = findings
+                .iter()
+                .find(|finding| finding["code"] == code)
+                .unwrap_or_else(|| panic!("{command} reports {code}: {findings:?}"));
+            assert_eq!(finding["severity"], "info", "{command} {code}");
+            assert_eq!(finding["fixable"], false, "{command} {code}");
+            assert!(finding["location"].is_null(), "{command} {code}");
+            assert!(
+                !finding["message"].as_str().unwrap_or_default().is_empty(),
+                "{command} {code}"
+            );
+        }
+        assert!(
+            !root.join(".git").exists(),
+            "{command} must never initialize a repository"
+        );
+    }
+}
+
+#[test]
 fn doctor_strict_returns_the_invalid_data_class_but_keeps_the_report_envelope() {
     let (_dir, root) = project();
     let id = create_one(&root);
