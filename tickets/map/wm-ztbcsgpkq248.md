@@ -6,7 +6,7 @@ category: map
 status: open
 owner: frank
 created_at: 2026-11-04T02:01:45Z
-updated_at: 2026-11-04T02:32:24Z
+updated_at: 2026-11-04T11:56:11Z
 dependencies:
   - wm-djw788wb4606
 ---
@@ -24,10 +24,14 @@ Produce an implementable functional and integration specification and a decision
 
 ## Decisions so far
 
+- [Investigate DSH sidebar extension and session context](wm-n35k9b95d312): Installed DSH 0.2.1-rc.5 provides a session-scoped right-sidebar tab registry, session workspace lookup through `useSessions`, and generated host remotes; an external plugin's own Remote build recipe, live availability and end-to-end behaviour remain unproven.
+- [Investigate Waymark MCP and Web runtime prerequisites](wm-rb5kkje5001d): MCP is an existing stdio `waymark-mcp`; Web is a development-only launcher with external assets, no `waymark serve`, no embedded assets and no distribution artifacts; the loopback/Host/Origin boundary and build prerequisites are verified.
+- [Investigate safe reuse of Waymark Web in DSH](wm-v9qm3qxkse52): A separate-origin iframe is the least invasive reuse but is unproven and currently unfenced (no CSP/frame-ancestors, no authentication); a host-side read-only adapter is the fallback if the embedding boundary cannot be established.
+
 ## Not yet specified
 
-- Details of failure recovery, trust boundaries, lifecycle and UX depend on the outcomes of the host and Web investigations.
-- The distribution and supported-version matrix depend on the actual supported DSH API and Waymark build artifacts.
+- The supported DSH version range and compatibility-preflight policy: the research established the installed `0.2.1-rc.5` only, and DSH offers no cross-release API/ABI guarantee, so the supported matrix cannot be fixed until a target release policy is chosen.
+- How the sidebar obtains a runnable Waymark Web service and its assets, given that only the development launcher exists and formal packaging/distribution is a separate, not-yet-created effort.
 
 ## Out of scope
 
