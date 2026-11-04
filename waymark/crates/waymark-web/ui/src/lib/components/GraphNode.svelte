@@ -19,6 +19,7 @@
 		node,
 		selected = false,
 		collapsed = false,
+		graphX,
 		graphY,
 		height,
 		onSelect,
@@ -29,6 +30,8 @@
 		selected?: boolean;
 		/** True when this node's children are hidden. */
 		collapsed?: boolean;
+		/** The left edge of this node's column in the drawing. */
+		graphX: number;
 		/** The top edge of this node's row in the drawing. */
 		graphY: number;
 		/** The height the layout used for this card. */
@@ -100,6 +103,7 @@
 	data-state={node.state}
 	data-depth={node.depth}
 	data-parent-id={node.parentId ?? ''}
+	data-graph-x={Math.round(graphX)}
 	data-graph-y={Math.round(graphY)}
 	data-graph-height={Math.round(height)}
 	data-collapsed={collapsed ? 'true' : 'false'}

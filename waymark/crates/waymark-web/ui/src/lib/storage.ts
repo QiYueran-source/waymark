@@ -12,7 +12,14 @@
  * show a concise notice.
  */
 
-import { MAX_GRAPH_ZOOM, MIN_FIT_ZOOM, type GraphViewport } from './graph';
+import {
+	DEFAULT_GRAPH_DIRECTION,
+	MAX_GRAPH_ZOOM,
+	MIN_FIT_ZOOM,
+	graphDirection,
+	type GraphDirection,
+	type GraphViewport
+} from './graph';
 import type { PresentationName, ViewName } from './types';
 
 /** The preference namespace. Bump the version if the stored shape changes. */
@@ -78,7 +85,8 @@ export function preferenceKey(
 		| 'categories'
 		| 'collapsed'
 		| 'viewport'
-		| 'graphAlternative',
+		| 'graphAlternative'
+		| 'direction',
 	view?: ViewName
 ): string {
 	return view === undefined
@@ -134,13 +142,25 @@ function parseScroll(raw: string | null): number {
  *
  * Every value is checked: a record written by an older version, hand-edited, or
  * truncated must not put the drawing somewhere it cannot be seen from.
+ *
+ * The record also names the direction it was saved in. A viewport is only
+ * usable if that direction matches the one being drawn: the same transform on
+ * the transposed layout would point at a different part of the graph. Records
+ * written before the direction existed are top-to-bottom views, which is the
+ * only reading that was possible then.
  */
-function parseViewport(raw: string | null): GraphViewport | null {
+function parseViewport(raw: string | null, direction: GraphDirection): GraphViewport | null {
 	if (raw === null) return null;
 	try {
 		const parsed: unknown = JSON.parse(raw);
 		if (typeof parsed !== 'object' || parsed === null) return null;
-		const { x, y, zoom } = parsed as Record<string, unknown>;
+		const record = parsed as Record<string, unknown>;
+		const { x, y, zoom } = record;
+		const storedDirection =
+			record.direction === undefined
+				? DEFAULT_GRAPH_DIRECTION
+				: graphDirection(record.direction);
+		if (storedDirection === null || storedDirection !== direction) return null;
 		if (typeof x !== 'number' || !Number.isFinite(x)) return null;
 		if (typeof y !== 'number' || !Number.isFinite(y)) return null;
 		if (typeof zoom !== 'number' || !Number.isFinite(zoom)) return null;
@@ -248,6 +268,22 @@ export class PreferenceStore {
 	}
 
 	/**
+	 * The graph's reading direction, top-to-bottom when unset or unreadable.
+	 *
+	 * It is one choice per project, shared by the combined and grouped graph
+	 * modes, and never derived from the data: only the reader's explicit
+	 * choice changes it.
+	 */
+	readDirection(): GraphDirection {
+		return graphDirection(this.read(preferenceKey(this.projectId, 'direction'))) ??
+			DEFAULT_GRAPH_DIRECTION;
+	}
+
+	writeDirection(direction: GraphDirection): void {
+		this.write(preferenceKey(this.projectId, 'direction'), direction);
+	}
+
+	/**
 	 * The category keys the reader has in scope, or `null` when this project has
 	 * no stored selection (`null` means "show every configured category"; an
 	 * empty list means "the reader cleared them all").
@@ -304,19 +340,28 @@ export class PreferenceStore {
 	}
 
 	/**
-	 * The graph viewport the reader last left, or `null` when there is none.
+	 * The graph viewport the reader last left, or `null` when there is none
+	 * usable for `direction`.
 	 *
 	 * It is stored on its own key — never as the tree pane's scroll offset — so
-	 * the graph's pan and zoom survive a reload without moving the tree.
+	 * the graph's pan and zoom survive a reload without moving the tree. The
+	 * record names the direction it belongs to, so a top-to-bottom pan is never
+	 * applied to the left-to-right layout; a mismatched record is simply not
+	 * restored and the drawing fits instead.
 	 */
-	readViewport(): GraphViewport | null {
-		return parseViewport(this.read(preferenceKey(this.projectId, 'viewport')));
+	readViewport(direction: GraphDirection = DEFAULT_GRAPH_DIRECTION): GraphViewport | null {
+		return parseViewport(this.read(preferenceKey(this.projectId, 'viewport')), direction);
 	}
 
-	writeViewport(viewport: GraphViewport): void {
+	writeViewport(viewport: GraphViewport, direction: GraphDirection = DEFAULT_GRAPH_DIRECTION): void {
 		this.write(
 			preferenceKey(this.projectId, 'viewport'),
-			JSON.stringify({ x: viewport.x, y: viewport.y, zoom: viewport.zoom })
+			JSON.stringify({
+				x: viewport.x,
+				y: viewport.y,
+				zoom: viewport.zoom,
+				direction
+			})
 		);
 	}
 

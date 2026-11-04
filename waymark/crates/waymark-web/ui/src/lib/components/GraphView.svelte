@@ -1,6 +1,7 @@
 <script lang="ts">
 	/**
-	 * The graph presentation: the same active tree, drawn top to bottom.
+	 * The graph presentation: the same active tree, laid out top to bottom by
+	 * default or left to right when the reader chooses it.
 	 *
 	 * This is the only module under `ui/src` that imports the drawing library's
 	 * components and the layout engine; its child `GraphBridge.svelte` imports
@@ -8,10 +9,11 @@
 	 * inside this layer, no dagre or library type escapes it, and the rest of
 	 * the app keeps dealing in `WorkGraph` values. The library stylesheet is
 	 * imported here too, so the app shell imports no graph library at all.
-	 * Placement is computed from the model — one
-	 * row per generation, a parent's row above its children's — and handed to
-	 * the renderer as fixed geometry. Nothing here measures the DOM to decide
-	 * where a node goes, so the same input always produces the same drawing.
+	 * Placement is computed from the model and the reading direction — one row
+	 * or column per generation, with a parent before its children along that
+	 * axis — and handed to the renderer as fixed geometry. Nothing here measures
+	 * the DOM to decide where a node goes, so the same input always produces the
+	 * same drawing.
 	 *
 	 * Dependency edges are an overlay, not part of the hierarchy: the layout
 	 * never sees them, so switching the overlay on cannot move a node. They are
@@ -31,6 +33,7 @@
 	import { untrack, type Snippet } from 'svelte';
 
 	import GraphBridge from './GraphBridge.svelte';
+	import GraphDirectionControl from './GraphDirection.svelte';
 	import GraphItemNode from './GraphItemNode.svelte';
 	import UnresolvedList from './UnresolvedList.svelte';
 	import {
@@ -39,6 +42,7 @@
 		GRAPH_NODE_WIDTH,
 		GRAPH_NOMINAL_CANVAS,
 		GRAPH_ROW_GAP,
+		DEFAULT_GRAPH_DIRECTION,
 		MAX_GRAPH_ZOOM,
 		MIN_FIT_ZOOM,
 		MIN_GRAPH_ZOOM,
@@ -52,6 +56,7 @@
 		sameViewport,
 		viewportContains,
 		type GraphDependencyEdge,
+		type GraphDirection,
 		type GraphFlow,
 		type GraphNodePayload,
 		type GraphViewport,
@@ -61,6 +66,8 @@
 	let {
 		graph,
 		selectedId = null,
+		direction = DEFAULT_GRAPH_DIRECTION,
+		onDirectionChange,
 		onSelect,
 		onToggle,
 		restoredViewport = null,
@@ -76,6 +83,13 @@
 		graph: WorkGraph;
 		/** The item whose detail panel is open, if any. */
 		selectedId?: string | null;
+		/**
+		 * How the hierarchy is read: top to bottom, or left to right. It changes
+		 * the layout and the sides its lines leave and enter by, nothing else.
+		 */
+		direction?: GraphDirection;
+		/** Choosing a direction; the project remembers it. */
+		onDirectionChange?: (direction: GraphDirection) => void;
 		/**
 		 * The category control, supplied by Explorer so the drawing keeps no
 		 * category state of its own. It shares the upper-left control cluster.
@@ -223,23 +237,31 @@
 	}
 
 	/**
-	 * Lay the hierarchy out top to bottom.
+	 * Lay the hierarchy out in the chosen direction.
 	 *
 	 * Every root of the walk starts its own tree; the engine puts each node
-	 * below its parent, so depth and vertical position agree by construction.
-	 * Work-item ids are passed through unchanged — the graph never renames, nor
-	 * wraps an item in a synthetic node — and only solid parent-child relations
-	 * become layout edges. The dashed overlay is deliberately absent here.
+	 * after its parent along the reading direction, so depth and position agree
+	 * by construction. In `TB` a generation is a row and a parent sits above its
+	 * children; in `LR` a generation is a column and a parent sits to their
+	 * left. Siblings stack along the other axis. Work-item ids are passed
+	 * through unchanged — the graph never renames, nor wraps an item in a
+	 * synthetic node — and only solid parent-child relations become layout
+	 * edges. The dashed overlay is deliberately absent here.
 	 *
 	 * Each card's own height is handed to the engine, so a taller card pushes
-	 * its children down and no edge has to be drawn through wrapped text.
+	 * its neighbours along the stacking axis and no edge has to be drawn through
+	 * wrapped text.
 	 */
-	function placeNodes(model: WorkGraph, heights: Readonly<Record<string, number>>): PlacedNode[] {
+	function placeNodes(
+		model: WorkGraph,
+		heights: Readonly<Record<string, number>>,
+		direction: GraphDirection
+	): PlacedNode[] {
 		if (model.nodes.length === 0) return [];
 
 		const layoutGraph = new DagreGraph();
 		layoutGraph.setGraph({
-			rankdir: 'TB',
+			rankdir: direction,
 			nodesep: COLUMN_GAP,
 			ranksep: ROW_GAP,
 			marginx: MARGIN,
@@ -264,10 +286,12 @@
 		return model.nodes.map((node) => {
 			const center = layoutGraph.node(node.id) as { x: number; y: number } | undefined;
 			const height = heights[node.id] ?? estimatedGraphNodeHeight(node);
+			const x = (center?.x ?? 0) - NODE_WIDTH / 2;
 			const y = (center?.y ?? 0) - height / 2;
 			return {
 				payload: {
 					node,
+					graphX: x,
 					graphY: y,
 					height,
 					selected: node.id === selectedId,
@@ -276,14 +300,14 @@
 					onToggle,
 					onMeasure: measureNode
 				},
-				x: (center?.x ?? 0) - NODE_WIDTH / 2,
+				x,
 				y,
 				height
 			};
 		});
 	}
 
-	const placed = $derived(placeNodes(graph, measuredHeights));
+	const placed = $derived(placeNodes(graph, measuredHeights, direction));
 
 	/** Where each node sits, so an overlay can leave by the nearest side. */
 	const placedById = $derived(
@@ -317,51 +341,75 @@
 	 * who sees several dashes in one corridor can see the count and hover each
 	 * line for its relation. Only a shared gap is announced.
 	 */
-	const gapGroups = $derived(dependencyGaps(graph));
+	const gapGroups = $derived(dependencyGaps(graph, direction));
 	const sharedGaps = $derived(gapGroups.filter((gap) => gap.count > 1));
 	const gapByEdge = $derived(
 		new Map(gapGroups.flatMap((gap) => gap.edgeIds.map((edgeId) => [edgeId, gap] as const)))
 	);
 
 	/**
+	 * The sides a parent-child edge leaves and enters in the current direction.
+	 *
+	 * The hierarchy's relation itself is unchanged; only which sides face each
+	 * other. In `TB` the child is below its parent, so the line leaves the
+	 * bottom and enters the top. In `LR` the child is to the right, so it leaves
+	 * the right and enters the left.
+	 */
+	function hierarchyHandles(direction: GraphDirection): { source: string; target: string } {
+		return direction === 'LR'
+			? { source: OUT_RIGHT, target: IN_LEFT }
+			: { source: OUT_BOTTOM, target: IN_TOP };
+	}
+
+	/**
 	 * Which pair of handles a dependency edge should use.
 	 *
-	 * The hierarchy is top-to-bottom, so most dependencies point up or down and
-	 * the vertical pair is right. Two items on the same row — two roots, or a
-	 * dependency between siblings — are drawn side by side instead, so the arrow
-	 * arcs across rather than looping around. Rows are identified by depth, not
-	 * by the top edge: cards on one row can differ in height and therefore in
-	 * where their top edge sits. A coincident relation takes the offset pair, so
-	 * both lines stay visible.
+	 * A dependency keeps its own direction; only its route depends on the
+	 * reading direction. In `TB`, a generation is a row: most dependencies point
+	 * up or down and take the vertical pair, while two items on the same row —
+	 * two roots, or a dependency between siblings — are drawn side by side and
+	 * take the horizontal pair. In `LR` the axes swap: a generation is a column,
+	 * so same-generation items are stacked and take the vertical pair, while a
+	 * cross-generation dependency leaves through the side facing its target.
+	 *
+	 * Rows and columns are identified by depth, not by the top edge: cards in one
+	 * generation can differ in height and therefore in where their edges sit. A
+	 * coincident relation takes the offset pair, so both lines stay visible.
 	 */
 	function dependencyHandles(
 		from: string,
 		to: string,
-		coincident: boolean
+		coincident: boolean,
+		direction: GraphDirection
 	): { source: string; target: string } {
 		const source = placedById.get(from);
 		const target = placedById.get(to);
 		if (source === undefined || target === undefined) {
 			return { source: OUT_BOTTOM, target: IN_TOP };
 		}
-		if (source.depth === target.depth) {
-			if (target.x >= source.x) {
+		const sameGeneration = source.depth === target.depth;
+		// The axis a dependency travels on is the one along which the two ends
+		// are separated: the stacking axis for one generation, the reading axis
+		// between generations.
+		const vertical = direction === 'LR' ? sameGeneration : !sameGeneration;
+		if (vertical) {
+			if (target.y >= source.y) {
 				return coincident
-					? { source: OUT_RIGHT_OFFSET, target: IN_LEFT_OFFSET }
-					: { source: OUT_RIGHT, target: IN_LEFT };
+					? { source: OUT_BOTTOM_OFFSET, target: IN_TOP_OFFSET }
+					: { source: OUT_BOTTOM, target: IN_TOP };
 			}
-			return coincident
-				? { source: OUT_LEFT_OFFSET, target: IN_RIGHT_OFFSET }
-				: { source: OUT_LEFT, target: IN_RIGHT };
-		}
-		if (target.y < source.y) {
 			return coincident
 				? { source: OUT_TOP_OFFSET, target: IN_BOTTOM_OFFSET }
 				: { source: OUT_TOP, target: IN_BOTTOM };
 		}
+		if (target.x >= source.x) {
+			return coincident
+				? { source: OUT_RIGHT_OFFSET, target: IN_LEFT_OFFSET }
+				: { source: OUT_RIGHT, target: IN_LEFT };
+		}
 		return coincident
-			? { source: OUT_BOTTOM_OFFSET, target: IN_TOP_OFFSET }
-			: { source: OUT_BOTTOM, target: IN_TOP };
+			? { source: OUT_LEFT_OFFSET, target: IN_RIGHT_OFFSET }
+			: { source: OUT_LEFT, target: IN_RIGHT };
 	}
 
 	/**
@@ -494,12 +542,13 @@
 	const hierarchyEdges: Edge[] = $derived(
 		graph.edges.map((edge) => {
 			const raised = hoveredEdgeId === edge.id;
+			const handles = hierarchyHandles(direction);
 			return {
 				id: edge.id,
 				source: edge.from,
 				target: edge.to,
-				sourceHandle: OUT_BOTTOM,
-				targetHandle: IN_TOP,
+				sourceHandle: handles.source,
+				targetHandle: handles.target,
 				style: edgeStyle('parent-child', 1, raised),
 				class: edgeClass('parent-child', raised),
 				zIndex: raised ? RAISED_Z_INDEX : 0,
@@ -511,8 +560,8 @@
 					'data-to': edge.to,
 					'data-edge-kind': 'parent-child',
 					'data-hovered': raised ? 'true' : 'false',
-					'data-source-handle': OUT_BOTTOM,
-					'data-target-handle': IN_TOP
+					'data-source-handle': handles.source,
+					'data-target-handle': handles.target
 				}
 			};
 		})
@@ -527,7 +576,7 @@
 		const coincident = parentPairs.has(
 			edge.from < edge.to ? `${edge.from}|${edge.to}` : `${edge.to}|${edge.from}`
 		);
-		const handles = dependencyHandles(edge.from, edge.to, coincident);
+		const handles = dependencyHandles(edge.from, edge.to, coincident, direction);
 		const gap = gapByEdge.get(edge.id);
 		const raised = hoveredEdgeId === edge.id;
 		return {
@@ -793,6 +842,43 @@
 	});
 
 	/**
+	 * The direction the drawing was last laid out in, so an explicit switch can
+	 * be told apart from the entry that already had this direction.
+	 */
+	let appliedDirection: GraphDirection | null = null;
+
+	/**
+	 * Fit the visible drawing when the reader explicitly switches direction.
+	 *
+	 * A switch transposes the layout, so the transform from the other
+	 * orientation no longer shows the graph; this is the one layout change that
+	 * refits, alongside first entry. The detail panel is already in the DOM
+	 * when this runs, so the box measured here is the remaining canvas. The
+	 * resulting fit is reported as the remembered viewport for the new
+	 * direction, so a reload restores it instead of a record that would show a
+	 * different part of the transposed drawing.
+	 */
+	$effect(() => {
+		const current = direction;
+		if (appliedDirection === null) {
+			appliedDirection = current;
+			return;
+		}
+		if (current === appliedDirection) return;
+		appliedDirection = current;
+		untrack(() => {
+			measureCanvas();
+			const fit = fitted;
+			initial = fit;
+			entryWasFit = true;
+			entryMeasurements = measurementSignature(measuredHeights);
+			entryNodeIds = nodeSignature(graph);
+			apply(fit);
+			onViewportChange?.(fit);
+		});
+	});
+
+	/**
 	 * Re-fit a first entry once the real card heights replace the estimates.
 	 *
 	 * Only the transition from estimated to measured geometry triggers this, and
@@ -859,7 +945,7 @@
 
 </script>
 
-<div class="graph-pane" data-testid="graph">
+<div class="graph-pane" data-testid="graph" data-direction={direction}>
 	<!-- The box the fit is measured against: the drawing fills it, and the
 	     unresolved drawer below takes its own row instead of overlaying it. -->
 	<div class="graph-canvas-host" data-testid="graph-canvas" bind:this={canvasBox}>
@@ -893,13 +979,16 @@
 			<GraphBridge onReady={(handle) => (flow = handle)} />
 
 			<!-- The controls float together at the canvas's upper-left: the
-			     category picker, the canvas row, and the place where the direction
-			     control joins the same cluster. -->
+			     category picker, the canvas row, and the direction choice. -->
 			<Panel position="top-left">
 				<div class="graph-controls" data-testid="graph-controls">
 					<div class="graph-controls-cluster" data-testid="graph-controls-cluster">
 						{#if categoryControl}
 							{@render categoryControl()}
+						{/if}
+						<!-- The reading direction: it only transposes the layout. -->
+						{#if onDirectionChange}
+							<GraphDirectionControl {direction} onChange={onDirectionChange} />
 						{/if}
 						<!-- Pan and zoom are the canvas's own gestures: dragging the
 						     background, the wheel, a trackpad pinch, or two fingers on a

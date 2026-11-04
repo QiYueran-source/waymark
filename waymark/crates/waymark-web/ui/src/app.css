@@ -1133,6 +1133,25 @@ code {
 	border-radius: 4px;
 }
 
+/* The direction choice joins the same cluster without a second frame: it uses
+   the toolbar's segmented treatment at the canvas's own scale. */
+.graph-direction {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	gap: 2px;
+	margin: 0;
+	padding: 2px;
+	border: 1px solid var(--line);
+	border-radius: 4px;
+	background: var(--panel);
+}
+
+.graph-direction .segment span {
+	min-height: 1.7rem;
+	font-size: 0.79rem;
+}
+
 .graph-controls-row button {
 	min-height: 1.7rem;
 	padding: 0.2rem 0.5rem;
