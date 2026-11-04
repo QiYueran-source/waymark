@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-04T12:29:30Z
+updated_at: 2026-11-04T12:31:18Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -263,6 +263,15 @@ Confirmed by the user on 2026-11-04. These extend the accepted Web specification
 - Resizing the window preserves the current viewport and never auto-fits. Fitting stays explicit; first graph entry and an explicit direction switch still fit, as already specified.
 - There is no separate full-screen graph mode and no hiding of the app header.
 
+#### Controls and category selection
+
+- Category selection is a compact "Categories (n)" control that opens a multi-select popover with search, select-all, clear-all, and the selected count; it is not a set of inline toolbar options.
+- In graph presentation, the category control, zoom/fit/reset, and the direction control share a floating control cluster at the upper-left of the canvas; the relationship legend sits at the upper-right.
+- In tree and structured-list presentations, the same compact control stays in the top toolbar and opens the same popover; the tree content gets no canvas overlay.
+- Combined mode shows no category selector because categories do not filter that view; grouped mode shows it.
+- The popover is keyboard-operable and closes on Escape or an outside click; when closed it does not obstruct graph nodes or controls.
+- The filtered-empty state keeps the control available and also offers the select-all recovery action.
+
 #### Node content containment
 
 - Every graph node contains all of its content inside its card: category shape/name, state, title, blocked reason, and any context badge.
@@ -316,8 +325,6 @@ The following decisions extend the accepted specification. The Web implementatio
 
 ### Web page optimization: not yet specified
 
-- Category selector's presentation and scaling for many project-defined categories; access in tree and structured-list presentations and when a filtered graph is empty; overlay placement, keyboard access, and avoiding obstruction of graph nodes and controls.
-- Where the graph direction control sits relative to the zoom/fit controls, the category selector, and the legend.
 - Reproduce and identify the actual relationship line appearances, including apparently solid one- and two-arrow lines, before choosing any additional legend or edge annotations.
 
 ### Web, MCP, and distribution follow-up
