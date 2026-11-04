@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-04T01:51:18Z
+updated_at: 2026-11-04T01:53:07Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -206,6 +206,7 @@ Codes with no exit class, used as warnings and findings: `OWNER_MISMATCH` (warni
 - The DSH sidebar plugin reuses the existing Waymark Web logic and remains strictly read-only; it must not offer work-item mutations. Confirmed by the user on 2026-11-04.
 - The integration effort first produces an implementable specification and route; implementation follows after the map is complete.
 - Reuse the existing `waymark-mcp` server rather than building a second MCP server. The integration work covers its installation, configuration, and connection to hosts. MCP retains its existing read and write capabilities; the read-only restriction applies to the sidebar, not to MCP.
+- MCP host integration is generic: provide installation, stdio command and configuration guidance, verification, and troubleshooting; each harness configures and starts the server according to its own conventions. Do not build a DSH-specific MCP installer or setup flow in this effort. Clove's generic MCP registration can be used as prior art, without requiring its Claude-specific plugin or setup behavior. Confirmed by the user on 2026-11-04.
 - Provide the DSH sidebar plugin first. Do not implement a VS Code or Cursor plugin in this effort; Cursor is expected to reuse the VS Code extension approach if those hosts are addressed later. Consider future host integration in the design without promising compatibility that has not been verified. These decisions were confirmed by the user on 2026-11-04.
 - The DSH view is a right-sidebar tab associated with an active session, so it can be used alongside the conversation. The right sidebar is unavailable without an active session.
 - The sidebar follows the current DSH session workspace to the corresponding Waymark project rather than maintaining a separate project list. On session or workspace changes it follows the new context. If no Waymark project is found, explain the condition without automatically initializing one.
