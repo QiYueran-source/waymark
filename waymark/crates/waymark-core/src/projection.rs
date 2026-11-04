@@ -457,6 +457,37 @@ impl Projection {
         &self.problems
     }
 
+    /// Documents that could not be read: `(unreadable_documents,
+    /// uncertain_paths)`.
+    ///
+    /// `unreadable_documents` counts the parse/read failures; `uncertain_paths`
+    /// counts the inventory paths whose item shape could not be classified. The
+    /// pair is what [`Code::IncompleteProjection`](crate::error::Code::IncompleteProjection)
+    /// reports as the concrete shortfall, and [`Projection::diagnostics`] uses
+    /// the same counts so the prose can never disagree with the findings.
+    pub fn shortfall_counts(&self) -> (usize, usize) {
+        (
+            self.unreadable_document_count(),
+            self.uncertain_document_path_count(),
+        )
+    }
+
+    /// How many documents could not be read.
+    pub fn unreadable_document_count(&self) -> usize {
+        self.failures.len()
+    }
+
+    /// How many item-shaped inventory paths are uncertain.
+    ///
+    /// A path that is not item-shaped, or that is a symlink (which the store
+    /// deliberately never follows), is not counted: it cannot hide a document.
+    pub fn uncertain_document_path_count(&self) -> usize {
+        self.problems
+            .iter()
+            .filter(|problem| concerns_a_document(&problem.path))
+            .count()
+    }
+
     /// The paths that could not be parsed or read, or that the inventory could
     /// not classify as a document.
     ///
@@ -491,14 +522,15 @@ impl Projection {
             .filter(|problem| concerns_a_document(&problem.path))
             .collect();
         if self.completeness == Completeness::Scoped {
+            let (unreadable, uncertain_paths) = self.shortfall_counts();
             findings.push(Finding::new(
                 Code::IncompleteProjection,
                 format!(
                     "the projection is {} and {}: {} document(s) could not be read and {} item-shaped path(s) are uncertain",
                     self.completeness.as_str(),
                     self.freshness.as_str(),
-                    self.failures.len(),
-                    uncertain.len()
+                    unreadable,
+                    uncertain_paths
                 ),
             ));
         }
@@ -537,9 +569,12 @@ impl Projection {
             .iter()
             .filter_map(|finding| serde_json::to_value(finding).ok())
             .collect();
-        Err(WaymarkError::incomplete_projection(
+        let (unreadable_documents, uncertain_paths) = self.shortfall_counts();
+        Err(WaymarkError::incomplete_projection_shortfall(
             self.completeness.as_str(),
             self.freshness.as_str(),
+            unreadable_documents,
+            uncertain_paths,
             diagnostics,
         ))
     }

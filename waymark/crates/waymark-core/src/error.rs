@@ -913,6 +913,12 @@ impl WaymarkError {
 
     /// A complete, fresh projection is unavailable.
     ///
+    /// The message states the shortfall rather than restating the requirement:
+    /// an incomplete projection is called incomplete, a stale one is called
+    /// stale, and only the counted overload
+    /// ([`incomplete_projection_shortfall`](Self::incomplete_projection_shortfall))
+    /// names how many documents and paths blocked the read.
+    ///
     /// The diagnostics are the findings that blocked it; they are kept as JSON
     /// because a finding's shape belongs to the envelope, and an error must not
     /// depend on it.
@@ -925,9 +931,36 @@ impl WaymarkError {
         let freshness = freshness.into();
         Self::new(
             Code::IncompleteProjection,
-            format!(
-                "a complete, fresh projection is required but the projection is {completeness} \
-                 and {freshness}"
+            incomplete_projection_message(&completeness, &freshness, None),
+        )
+        .with_details(json!({
+            "completeness": completeness,
+            "freshness": freshness,
+            "diagnostics": diagnostics,
+        }))
+    }
+
+    /// A projection that is unavailable, with the concrete shortfall counts.
+    ///
+    /// `unreadable_documents` is the number of documents that could not be read
+    /// and `uncertain_paths` the number of item-shaped inventory paths the walk
+    /// could not classify. The counts appear in the message only as prose: the
+    /// details keys stay exactly `completeness`, `freshness`, and `diagnostics`.
+    pub fn incomplete_projection_shortfall(
+        completeness: impl Into<String>,
+        freshness: impl Into<String>,
+        unreadable_documents: usize,
+        uncertain_paths: usize,
+        diagnostics: Vec<Value>,
+    ) -> Self {
+        let completeness = completeness.into();
+        let freshness = freshness.into();
+        Self::new(
+            Code::IncompleteProjection,
+            incomplete_projection_message(
+                &completeness,
+                &freshness,
+                Some((unreadable_documents, uncertain_paths)),
             ),
         )
         .with_details(json!({
@@ -1395,3 +1428,40 @@ impl std::fmt::Display for WaymarkError {
 }
 
 impl std::error::Error for WaymarkError {}
+
+/// One line of prose stating why a complete, fresh projection is unavailable.
+///
+/// The requirement is stated once, as the clause that explains the refusal; the
+/// rest names the shortfall. An incomplete projection is never called fresh (and
+/// a complete one is never called incomplete), and the counts appear only when
+/// the caller has them: a bare constructor must not fabricate a zero shortfall.
+fn incomplete_projection_message(
+    completeness: &str,
+    freshness: &str,
+    shortfall: Option<(usize, usize)>,
+) -> String {
+    const REQUIRED: &str = "a complete, fresh projection is required but ";
+    let incomplete = completeness != "complete";
+    let stale = freshness != "fresh";
+    let counts = shortfall.map(|(documents, paths)| {
+        format!("{documents} document(s) could not be read and {paths} item-shaped path(s) are uncertain")
+    });
+    match (incomplete, stale) {
+        (true, false) => match counts {
+            Some(counts) => format!("{REQUIRED}the projection is incomplete: {counts}"),
+            None => format!("{REQUIRED}the projection is incomplete"),
+        },
+        (false, true) => {
+            format!("{REQUIRED}the projection is complete but its freshness is {freshness}")
+        }
+        (true, true) => match counts {
+            Some(counts) => format!(
+                "{REQUIRED}the projection is incomplete ({counts}) and its freshness is {freshness}"
+            ),
+            None => {
+                format!("{REQUIRED}the projection is incomplete and its freshness is {freshness}")
+            }
+        },
+        (false, false) => format!("{REQUIRED}the projection is incomplete or out of date"),
+    }
+}
