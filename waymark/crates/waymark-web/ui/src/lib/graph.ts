@@ -2,14 +2,16 @@
  * The pure graph model behind the graph presentation.
  *
  * It walks the same tree payload the tree view renders and produces the nodes,
- * the solid parent-child edges, and the roots of the hierarchy. It imports no
- * rendering library and no Svelte component, so it can be unit-tested directly
- * and so every graph ticket shares one description of the hierarchy.
+ * the solid parent-child edges, the dashed dependency edges, and the roots of
+ * the hierarchy. It imports no rendering library and no Svelte component, so it
+ * can be unit-tested directly and so every graph ticket shares one description
+ * of the hierarchy.
  *
  * Nothing here is derived from the server's data except presentation: the
  * category shape, the work state, and the blocked marker all come from the
- * payload. Dependency edges and the unresolved list are deliberately not part
- * of this drawing — the graph shows the hierarchy, nothing else.
+ * payload. Dependency edges are an optional overlay — they exist only while the
+ * reader has dependency visibility on, and they never change the hierarchy
+ * drawing or its layout.
  */
 
 import { sectionsFor } from './tree';
@@ -40,23 +42,59 @@ export interface GraphNode {
 	/** 0 for a root; one more than the parent's depth below it. */
 	depth: number;
 	hasChildren: boolean;
+	/**
+	 * The ids this item depends on, as the payload states them. They are not
+	 * resolved here: a target that is not drawn yields no edge at all.
+	 */
+	dependencies: string[];
 }
 
-/** A solid parent-child edge. There is no other kind of edge in this slice. */
+/** A solid parent-child edge. */
 export interface GraphEdge {
 	id: string;
+	kind: 'parent-child';
 	from: string;
 	to: string;
 }
 
+/**
+ * A dashed dependency edge, drawn when dependency visibility is on.
+ *
+ * `from` depends on `to`, so the arrowhead on the edge points at `to`: the
+ * depended-on item. Both ends are always drawn — a dependency whose target is
+ * not in the drawing yields no edge, not a dangling one.
+ */
+export interface GraphDependencyEdge {
+	id: string;
+	kind: 'dependency';
+	from: string;
+	to: string;
+	/** The depended-on item's title; it is drawn, so it is always known. */
+	toTitle: string;
+	/** True when the two ends belong to different categories. */
+	crossCategory: boolean;
+}
+
+/** Any edge the graph can draw. */
+export type AnyGraphEdge = GraphEdge | GraphDependencyEdge;
+
 /** Everything one rendering of the hierarchy needs. */
 export interface WorkGraph {
 	nodes: GraphNode[];
+	/** Solid parent-child edges: the hierarchy, and the only layout input. */
 	edges: GraphEdge[];
+	/** Dashed dependency edges; empty while dependency visibility is off. */
+	dependencies: GraphDependencyEdge[];
 	/** Root node ids, in payload order. Never a synthetic node. */
 	roots: string[];
 	/** Items whose parent relation cannot be resolved; the graph omits them. */
 	unresolved: UnresolvedItem[];
+}
+
+/** What the payload asks the drawing to include beyond the hierarchy. */
+export interface BuildGraphOptions {
+	/** Draw the dashed dependency overlay. Off unless asked for. */
+	dependenciesVisible?: boolean;
 }
 
 function toGraphNode(node: TreeNode, parentId: string | null, depth: number): GraphNode {
@@ -71,7 +109,8 @@ function toGraphNode(node: TreeNode, parentId: string | null, depth: number): Gr
 		blockedReason: node.blocked_reason,
 		parentId,
 		depth,
-		hasChildren: node.children.length > 0
+		hasChildren: node.children.length > 0,
+		dependencies: [...node.dependencies]
 	};
 }
 
@@ -82,8 +121,15 @@ function toGraphNode(node: TreeNode, parentId: string | null, depth: number): Gr
  * when the payload shows it as a root of its section — the graph never invents
  * a parent, and never invents a root either. An item reached twice (a payload
  * duplication) is drawn once.
+ *
+ * Dependency edges are resolved against the drawn set, in node order and then
+ * in the payload's dependency order. A dependency on an item this drawing does
+ * not contain — archived, unresolved, filtered out — is dropped silently: the
+ * graph neither draws an edge into nothing nor invents a placeholder. They are
+ * kept apart from `edges` because they are an overlay: the hierarchy layout
+ * must not move to make room for them.
  */
-export function buildGraph(data: TreeData): WorkGraph {
+export function buildGraph(data: TreeData, options: BuildGraphOptions = {}): WorkGraph {
 	const nodes: GraphNode[] = [];
 	const edges: GraphEdge[] = [];
 	const roots: string[] = [];
@@ -94,7 +140,12 @@ export function buildGraph(data: TreeData): WorkGraph {
 		seen.add(tree.id);
 		nodes.push(toGraphNode(tree, parentId, depth));
 		if (parentId !== null) {
-			edges.push({ id: `${parentId}->${tree.id}`, from: parentId, to: tree.id });
+			edges.push({
+				id: `${parentId}->${tree.id}`,
+				kind: 'parent-child',
+				from: parentId,
+				to: tree.id
+			});
 		}
 		for (const child of tree.children) {
 			walk(child, tree.id, depth + 1);
@@ -109,7 +160,34 @@ export function buildGraph(data: TreeData): WorkGraph {
 		}
 	}
 
-	return { nodes, edges, roots, unresolved: data.unresolved };
+	return {
+		nodes,
+		edges,
+		dependencies: options.dependenciesVisible ? dependencyEdges(nodes) : [],
+		roots,
+		unresolved: data.unresolved
+	};
+}
+
+/** One dashed edge per dependency of a drawn item whose target is drawn too. */
+function dependencyEdges(nodes: GraphNode[]): GraphDependencyEdge[] {
+	const drawn = new Map(nodes.map((node) => [node.id, node]));
+	const edges: GraphDependencyEdge[] = [];
+	for (const node of nodes) {
+		for (const targetId of node.dependencies) {
+			const target = drawn.get(targetId);
+			if (target === undefined) continue;
+			edges.push({
+				id: `dependency:${node.id}->${targetId}`,
+				kind: 'dependency',
+				from: node.id,
+				to: targetId,
+				toTitle: target.title,
+				crossCategory: target.category.key !== node.category.key
+			});
+		}
+	}
+	return edges;
 }
 
 /**
@@ -133,9 +211,16 @@ export function graphNodeLabel(node: GraphNode): string {
 	return `${node.title} — ${node.category.name}, ${stateLabel(node.state)}`;
 }
 
-/** The accessible name of one edge: it states the relation and both titles. */
-export function edgeLabel(graph: WorkGraph, edge: GraphEdge): string {
+/**
+ * The accessible name of one edge: it states the relation and both titles, and
+ * for a dependency it says which end depends on which, so the direction is
+ * readable without seeing the arrowhead.
+ */
+export function edgeLabel(graph: WorkGraph, edge: AnyGraphEdge): string {
 	const from = graph.nodes.find((node) => node.id === edge.from);
 	const to = graph.nodes.find((node) => node.id === edge.to);
+	if (edge.kind === 'dependency') {
+		return `Dependency: ${from?.title ?? edge.from} → ${edge.toTitle} (depends on)`;
+	}
 	return `Parent-child: ${from?.title ?? edge.from} → ${to?.title ?? edge.to}`;
 }

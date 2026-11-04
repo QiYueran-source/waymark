@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-04T02:32:24Z
+updated_at: 2026-11-04T06:34:57Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -218,6 +218,24 @@ Codes with no exit class, used as warnings and findings: `OWNER_MISMATCH` (warni
 - Initial DSH sidebar support targets the DSH server and browser running on the same machine. Supporting a remote browser requires separate future work and a security-reviewed access design. These decisions were confirmed by the user on 2026-11-04.
 - For this planning effort, do not add project-wide tracker fields just to distinguish decision-ticket type or claim state; the user does not need that distinction for now. Keep work items in Waymark and use its native parent and dependency relations.
 - Keep research results local for now; do not push branches or open pull requests. These planning-process decisions were confirmed by the user on 2026-11-04.
+
+### Graph layout direction discussion
+
+- The proposed direction switch applies to the graph presentation, not the tree list. Retain the existing top-to-bottom layout and offer a left-to-right alternative: parents on the left, children on the right, with items at the same level arranged vertically. The user confirmed the scope on 2026-11-04.
+- This planning discussion aims to settle the direction-switch control, state retention, and behavior across relevant scenarios for a later functional specification. It does not itself implement the feature or update the functional specification or implementation tickets. Confirmed on 2026-11-04.
+
+- In graph presentation, provide a toolbar direction choice between top-to-bottom and left-to-right. Default to top-to-bottom on first use. Do not show the direction control in tree presentation. Confirmed on 2026-11-04.
+- One browser-local direction preference per project applies to both combined and category-grouped graph modes; restore it on refresh or reopening the same project, without affecting other projects. Confirmed on 2026-11-04.
+- Switching direction changes layout only: preserve the category selection, selected work item and open detail panel, graph expansion/collapse state, and dependency-visibility choice. Existing planned graph features remain governed by their own design; this decision does not claim they are implemented. Confirmed on 2026-11-04.
+- After switching directions, automatically fit the currently visible graph to the canvas so the overview is visible again; users may subsequently pan and zoom. Confirmed on 2026-11-04.
+
+- Direction changes preserve parent-child relationships and the order of siblings, changing only geometry and connection placement. In left-to-right mode parent-child lines connect from the parent right to the child left; enabled dependency arrows retain their original relationship direction. Confirmed on 2026-11-04.
+- When switching direction with the detail panel open, fit the graph to the remaining visible graph canvas rather than the entire page. If there is no graph to show, retain the existing empty state and do not fit an empty graph. Confirmed on 2026-11-04.
+- When browser storage is unavailable, direction switching remains usable for the current session and the existing brief persistence-failure notice explains that the preference cannot be saved; a later session may return to the default. Browser origin, browser and normalized project path remain the existing preference isolation boundaries. Confirmed on 2026-11-04.
+- Direction is explicitly selected by the user; do not automatically switch based on hierarchy depth, item count or viewport size. Confirmed on 2026-11-04.
+
+- Refreshing or reopening restores the last saved graph viewport for the current direction when a usable record exists; otherwise fit the visible graph. This differs from an explicit direction switch, which always fits the visible graph immediately. Confirmed on 2026-11-04.
+- The direction control is keyboard-operable and exposes the selected direction to screen readers; icons or color alone must not be the only way to distinguish its choices. Confirmed on 2026-11-04.
 
 ### Reopened decisions: Web, MCP, and distribution
 

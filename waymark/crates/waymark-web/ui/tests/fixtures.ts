@@ -223,6 +223,50 @@ export const hierarchyTree: CombinedTree = {
 	categories: [BUG, TASK]
 };
 
+/**
+ * A tree with dependency relations next to the hierarchy:
+ *
+ * - `wm-dep-fix` is a child of `wm-dep-bug` *and* depends on it, so the pair
+ *   carries both a parent-child and a dependency edge, in opposite directions;
+ * - `wm-dep-ship` (Tasks) depends on `wm-dep-bug` (Bugs): cross-category;
+ * - `wm-dep-ship` also depends on `wm-dep-archived`, which this payload does not
+ *   draw at all: the graph must drop that relation silently.
+ */
+const dependencyFix = treeNode({
+	id: 'wm-dep-fix',
+	title: 'Fix the login form',
+	category: TASK,
+	parent: 'wm-dep-bug',
+	status: 'in_progress',
+	state: 'in_progress',
+	ready: false,
+	dependencies: ['wm-dep-bug']
+});
+
+const dependencyBug = treeNode({
+	id: 'wm-dep-bug',
+	title: 'Login fails',
+	category: BUG,
+	state: 'in_progress',
+	status: 'in_progress',
+	ready: false,
+	children: [dependencyFix]
+});
+
+const dependencyShip = treeNode({
+	id: 'wm-dep-ship',
+	title: 'Ship the release',
+	category: TASK,
+	dependencies: ['wm-dep-bug', 'wm-dep-archived']
+});
+
+export const dependencyTree: CombinedTree = {
+	view: 'combined',
+	roots: [dependencyBug, dependencyShip],
+	unresolved: [],
+	categories: [BUG, TASK]
+};
+
 export const groupedTree: GroupedTree = {
 	view: 'grouped',
 	groups: [

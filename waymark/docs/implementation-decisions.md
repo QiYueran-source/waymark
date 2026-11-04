@@ -2556,3 +2556,34 @@ metadata (`source` at the bottom edge, `target` at the top edge, both 1×1). jsd
 rects, so a `<Handle>` component measures 0×0 and the library then draws no edges at all; fixed
 geometry makes the drawing deterministic and lets the suite assert real edge elements. There is no
 `<Handle>` in the markup, and the layout never depends on measurement.
+
+## Dependency edges in the graph
+
+- **The model owns the overlay switch.** `buildGraph(data, { dependenciesVisible })` returns
+  `dependencies: GraphDependencyEdge[]` beside the solid `edges`. With the switch off the array is
+  empty, so "the graph shows no dependency edge" is a property of the model, not of a component
+  branch. `Explorer` passes its existing per-view `dependenciesVisible` preference into the build;
+  switching the toggle re-derives the model from the payload already in memory and reads nothing.
+- **Edges are resolved against the drawn set.** `GraphDependencyEdge` is
+  `{id, kind: 'dependency', from, to, toTitle, crossCategory}` and `from` depends on `to`. One edge is
+  produced per dependency of a drawn node whose target is also drawn. A target that is absent —
+  archived, unresolved, filtered out by the category scope — yields no edge, no placeholder, and no
+  error: the graph draws relations between items it shows, nothing more. `kind` was added to
+  `GraphEdge` too, so both edge types are discriminated by data rather than by which array they sit in.
+- **The overlay is not a layout input.** Only `edges` is handed to dagre, so switching dependencies on
+  cannot move a node; the test suite asserts the row tops are identical before and after.
+- **DOM hooks.** A dependency edge is a normal `graph-edge` with `data-edge-kind="dependency"`,
+  `data-arrow="target"`, `data-cross-category`, an explicit `stroke-dasharray` style and a closed
+  arrowhead on its target end (`marker-end`). `data-arrow` states the direction without pixel
+  geometry; the accessible name is `edgeLabel`'s
+  `"Dependency: <dependent> → <depended-on> (depends on)"`, so direction reads without hovering.
+  Parent-child edges stay solid, undirected, and keep `data-edge-kind="parent-child"`; when the same
+  pair is both a parent-child and a dependency relation, both edges are drawn.
+- **Handles.** The hierarchy always leaves the bottom of the parent and enters the top of the child.
+  Dependency edges pick the facing pair instead (top/bottom when the rows differ, left/right for two
+  items on one row) so the arrow does not wrap around its own node. Handle ids are app constants; the
+  renderer only consumes them.
+- **Legend.** The one `graph-legend` panel lists both treatments, each with a swatch and a
+  `data-legend-kind` hook: `Solid line: parent-child` and
+  `Dashed line: dependency; the arrow points at the depended-on item`. The dashed swatch draws a dash
+  pattern and an arrowhead so the meaning does not rest on the wording alone.
