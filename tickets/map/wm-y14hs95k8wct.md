@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-04T06:33:49Z
+updated_at: 2026-11-04T06:34:57Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -233,6 +233,9 @@ Codes with no exit class, used as warnings and findings: `OWNER_MISMATCH` (warni
 - When switching direction with the detail panel open, fit the graph to the remaining visible graph canvas rather than the entire page. If there is no graph to show, retain the existing empty state and do not fit an empty graph. Confirmed on 2026-11-04.
 - When browser storage is unavailable, direction switching remains usable for the current session and the existing brief persistence-failure notice explains that the preference cannot be saved; a later session may return to the default. Browser origin, browser and normalized project path remain the existing preference isolation boundaries. Confirmed on 2026-11-04.
 - Direction is explicitly selected by the user; do not automatically switch based on hierarchy depth, item count or viewport size. Confirmed on 2026-11-04.
+
+- Refreshing or reopening restores the last saved graph viewport for the current direction when a usable record exists; otherwise fit the visible graph. This differs from an explicit direction switch, which always fits the visible graph immediately. Confirmed on 2026-11-04.
+- The direction control is keyboard-operable and exposes the selected direction to screen readers; icons or color alone must not be the only way to distinguish its choices. Confirmed on 2026-11-04.
 
 ### Reopened decisions: Web, MCP, and distribution
 
