@@ -163,3 +163,83 @@ fn the_three_argument_constructor_still_states_the_requirement_without_counts() 
     assert_eq!(error.details()["freshness"], "fresh");
     assert_eq!(error.details()["diagnostics"], serde_json::json!([]));
 }
+
+#[test]
+fn a_complete_and_fresh_projection_is_never_called_incomplete() {
+    // The public constructor accepts arbitrary literals, so a caller can hand
+    // it a projection that satisfies the requirement. That is an inconsistent
+    // request, but the message must still not describe a complete, fresh
+    // projection as incomplete or stale.
+    let error = WaymarkError::incomplete_projection("complete", "fresh", Vec::new());
+    let message = error.message();
+
+    assert!(message.starts_with(REQUIREMENT), "message: {message}");
+    assert!(
+        !message.contains("incomplete") && !message.contains("stale"),
+        "a complete, fresh projection must be described neutrally: {message}"
+    );
+    assert_eq!(error.details()["completeness"], "complete");
+    assert_eq!(error.details()["freshness"], "fresh");
+}
+
+#[test]
+fn a_validation_failure_names_both_the_document_and_the_field() {
+    let (_dir, project) = project();
+    let id = make(&project, "broken field");
+    // A valid document path and ID, but one field the schema rejects: this is
+    // exactly the failure the Web read has to lead the reader back to.
+    std::fs::write(
+        task_path(&project, &id),
+        format!(
+            "---\nschema: 1\nid: {id}\ntitle: Broken\ncategory: task\nstatus: started\nowner: frank\ncreated_at: 2026-11-03T05:43:10Z\nupdated_at: 2026-11-03T05:43:10Z\n---\n"
+        ),
+    )
+    .unwrap();
+
+    let projection = Projection::load(&project).unwrap();
+    let finding = projection
+        .diagnostics()
+        .into_iter()
+        .find(|finding| finding.code == Code::ValidationError)
+        .expect("the invalid field must produce a validation finding");
+    let location = finding
+        .location
+        .expect("a validation finding must be locatable");
+    let wire = serde_json::to_value(&location).unwrap();
+
+    assert_eq!(wire["kind"], "field");
+    assert_eq!(wire["field"], "status");
+    assert_eq!(
+        wire["path"],
+        task_path(&project, &id).as_str(),
+        "the field location must name its document: {wire}"
+    );
+}
+
+#[test]
+fn the_diagnostics_summary_and_the_error_use_one_sentence() {
+    let (_dir, project) = project();
+    let broken = make(&project, "broken");
+    break_document(&project, &broken);
+
+    let projection = Projection::load(&project).unwrap();
+    let summary = projection
+        .diagnostics()
+        .into_iter()
+        .find(|finding| finding.code == Code::IncompleteProjection && finding.location.is_none())
+        .expect("a scoped projection carries one count-bearing summary");
+    let error = projection
+        .require_complete()
+        .expect_err("a broken document blocks a global read");
+
+    assert_eq!(
+        summary.message,
+        error.message(),
+        "the summary finding and the error must be one sentence"
+    );
+    assert!(
+        summary.message.contains("1 document(s) could not be read"),
+        "the shared sentence must name the shortfall: {}",
+        summary.message
+    );
+}

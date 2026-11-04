@@ -33,6 +33,16 @@ pub enum Location {
     Field {
         /// The field path, for example `title` or `custom_fields.effort`.
         field: String,
+        /// The document the field belongs to, when the failure was recorded
+        /// against a document. A field parsed outside one stays pathless.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        path: Option<String>,
+        /// 1-based line in that document, when known.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        line: Option<u32>,
+        /// 1-based column in that document, when known.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        column: Option<u32>,
     },
     /// A key of the project configuration.
     ConfigKey {
@@ -78,7 +88,25 @@ impl Location {
     pub fn field(field: impl Into<String>) -> Self {
         Self::Field {
             field: field.into(),
+            path: None,
+            line: None,
+            column: None,
         }
+    }
+
+    /// Point this location at the document it was found in.
+    ///
+    /// Only a field location gains a document: a file location already names
+    /// one, and a work item or relationship is not a document place. Any other
+    /// location is returned unchanged, so callers can attach unconditionally.
+    pub fn in_document(mut self, document: impl Into<String>) -> Self {
+        if let Self::Field {
+            path: field_path, ..
+        } = &mut self
+        {
+            *field_path = Some(document.into());
+        }
+        self
     }
 
     /// A configuration-key location.
@@ -159,7 +187,20 @@ impl std::fmt::Display for Location {
                 (Some(line), Some(column)) => write!(f, "file {path}:{line}:{column}"),
                 _ => write!(f, "file {path}"),
             },
-            Self::Field { field } => write!(f, "field {field}"),
+            Self::Field {
+                field,
+                path,
+                line,
+                column,
+            } => match path {
+                Some(path) => match (line, column) {
+                    (Some(line), Some(column)) => {
+                        write!(f, "field {field} in {path}:{line}:{column}")
+                    }
+                    _ => write!(f, "field {field} in {path}"),
+                },
+                None => write!(f, "field {field}"),
+            },
             Self::ConfigKey { key } => write!(f, "config key {key}"),
             Self::Relationship { from, relation, to } => {
                 write!(f, "relationship {relation} {from} -> {to}")

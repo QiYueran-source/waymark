@@ -37,6 +37,7 @@ use camino::Utf8Path;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
+use crate::envelope::{Completeness, Freshness};
 use crate::id::{IdError, WorkItemId};
 use crate::location::{Location, LocationKind};
 
@@ -1371,6 +1372,20 @@ impl WaymarkError {
         self.with_location(Location::field(field))
     }
 
+    /// Point a field location at the document the field was found in.
+    ///
+    /// A failure recorded while reading a document knows which document it came
+    /// from, but the parser only sees the field. The projection calls this when
+    /// it records the failure, so a consumer gets both the document path and the
+    /// field without the parser having to know its caller. A location that is
+    /// not a field is left untouched.
+    pub fn in_document(mut self, document: impl Into<String>) -> Self {
+        if let Some(location) = self.location.take() {
+            self.location = Some(Box::new((*location).in_document(document)));
+        }
+        self
+    }
+
     /// The registered code.
     pub fn code(&self) -> Code {
         self.code
@@ -1432,36 +1447,37 @@ impl std::error::Error for WaymarkError {}
 /// One line of prose stating why a complete, fresh projection is unavailable.
 ///
 /// The requirement is stated once, as the clause that explains the refusal; the
-/// rest names the shortfall. An incomplete projection is never called fresh (and
-/// a complete one is never called incomplete), and the counts appear only when
-/// the caller has them: a bare constructor must not fabricate a zero shortfall.
-fn incomplete_projection_message(
+/// rest names the shortfall in one clean sentence. The branch test uses the
+/// [`Completeness`]/[`Freshness`] vocabulary rather than comparing prose
+/// literals, an incomplete projection is never called fresh, and a complete one
+/// is never called incomplete. The counts appear only when the caller has them:
+/// a bare constructor must not fabricate a zero shortfall.
+///
+/// The projection's own summary finding calls this too, so the finding and the
+/// error can never disagree about how the shortfall is worded.
+pub(crate) fn incomplete_projection_message(
     completeness: &str,
     freshness: &str,
     shortfall: Option<(usize, usize)>,
 ) -> String {
     const REQUIRED: &str = "a complete, fresh projection is required but ";
-    let incomplete = completeness != "complete";
-    let stale = freshness != "fresh";
-    let counts = shortfall.map(|(documents, paths)| {
-        format!("{documents} document(s) could not be read and {paths} item-shaped path(s) are uncertain")
-    });
-    match (incomplete, stale) {
-        (true, false) => match counts {
-            Some(counts) => format!("{REQUIRED}the projection is incomplete: {counts}"),
-            None => format!("{REQUIRED}the projection is incomplete"),
-        },
-        (false, true) => {
-            format!("{REQUIRED}the projection is complete but its freshness is {freshness}")
-        }
-        (true, true) => match counts {
-            Some(counts) => format!(
-                "{REQUIRED}the projection is incomplete ({counts}) and its freshness is {freshness}"
-            ),
-            None => {
-                format!("{REQUIRED}the projection is incomplete and its freshness is {freshness}")
-            }
-        },
-        (false, false) => format!("{REQUIRED}the projection is incomplete or out of date"),
+    let incomplete = completeness != Completeness::Complete.as_str();
+    let stale = freshness != Freshness::Fresh.as_str();
+
+    let refusal = match (incomplete, stale) {
+        (true, false) => "the projection is incomplete".to_owned(),
+        (false, true) => format!("the projection's freshness is {freshness}"),
+        (true, true) => format!("the projection is incomplete and its freshness is {freshness}"),
+        // The public constructor accepts any literals. If a caller hands it a
+        // projection that meets the requirement, say only that none is usable:
+        // never describe a complete, fresh projection as incomplete or stale.
+        (false, false) => "no usable projection is available".to_owned(),
+    };
+
+    match shortfall {
+        Some((documents, uncertain)) => format!(
+            "{REQUIRED}{refusal}: {documents} document(s) could not be read and {uncertain} item-shaped path(s) are uncertain"
+        ),
+        None => format!("{REQUIRED}{refusal}"),
     }
 }

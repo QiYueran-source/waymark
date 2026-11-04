@@ -169,7 +169,7 @@ priority: 2
         "the unknown key must be named: {err}"
     );
     match err.location() {
-        Some(waymark_core::Location::Field { field }) => assert_eq!(field, "priority"),
+        Some(waymark_core::Location::Field { field, .. }) => assert_eq!(field, "priority"),
         other => panic!("expected a field location, got {other:?}"),
     }
 }

@@ -344,7 +344,7 @@ fn custom_field_configuration_drift_is_reported_per_field() {
     assert!(validation.iter().any(|finding| {
         matches!(
             &finding.location,
-            Some(Location::Field { field }) if field == "custom_fields.effort"
+            Some(Location::Field { field, .. }) if field == "custom_fields.effort"
         )
     }));
 }

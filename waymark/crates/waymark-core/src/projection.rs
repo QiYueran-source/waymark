@@ -57,7 +57,7 @@ use chrono::{DateTime, Utc};
 
 use crate::config::CacheSettings;
 use crate::envelope::{Completeness, Finding, Freshness, Meta, Source};
-use crate::error::{Code, WaymarkError};
+use crate::error::{incomplete_projection_message, Code, WaymarkError};
 use crate::id::WorkItemId;
 use crate::location::Location;
 use crate::model::{CategoryKey, WorkItem};
@@ -522,15 +522,13 @@ impl Projection {
             .filter(|problem| concerns_a_document(&problem.path))
             .collect();
         if self.completeness == Completeness::Scoped {
-            let (unreadable, uncertain_paths) = self.shortfall_counts();
+            let shortfall = self.shortfall_counts();
             findings.push(Finding::new(
                 Code::IncompleteProjection,
-                format!(
-                    "the projection is {} and {}: {} document(s) could not be read and {} item-shaped path(s) are uncertain",
+                incomplete_projection_message(
                     self.completeness.as_str(),
                     self.freshness.as_str(),
-                    unreadable,
-                    uncertain_paths
+                    Some(shortfall),
                 ),
             ));
         }
@@ -926,7 +924,10 @@ fn scan_once(
                     ProjectionFailure {
                         path: entry.path.clone(),
                         fingerprint: Some(fingerprint),
-                        error,
+                        // The parser names the field but cannot know the
+                        // document's place in the inventory; record it here so
+                        // a consumer of the failure gets both.
+                        error: error.in_document(entry.path.as_str()),
                     },
                 );
             }
