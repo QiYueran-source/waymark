@@ -51,6 +51,24 @@ fn run(command: &mut Command) -> Run {
 /// The workspace version the binary was built from.
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// The one deliberate exception to "human prose to stderr": the release scripts
+/// parse `waymark version` from stdout, so the human line must stay there.
+#[test]
+fn the_human_version_line_is_written_to_stdout() {
+    let result = run(waymark().arg("version"));
+    assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
+    assert!(
+        result.stdout().starts_with(&format!("waymark {VERSION} (")),
+        "the version line is the stdout parse target: {:?}",
+        result.stdout()
+    );
+    assert_eq!(
+        result.stderr(),
+        "",
+        "the human version line never goes to stderr"
+    );
+}
+
 #[cfg(not(feature = "web"))]
 #[test]
 fn a_basic_build_reports_cli_and_mcp_only() {
