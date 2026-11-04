@@ -28,6 +28,22 @@
 
 	const stateWord = $derived(stateLabel(node.state));
 	const state: WorkState = $derived(node.state);
+
+	/**
+	 * Activate the node from the keyboard.
+	 *
+	 * The title is a real button, so a browser would activate it on Enter and
+	 * Space on its own; handling the keys here keeps the selection in one place
+	 * and makes it observable without a pointer. Preventing the default stops
+	 * the browser's own activation from firing a second, duplicate selection.
+	 */
+	function onTitleKeydown(
+		event: KeyboardEvent & { currentTarget: EventTarget & HTMLButtonElement }
+	): void {
+		if (event.key !== 'Enter' && event.key !== ' ') return;
+		event.preventDefault();
+		onSelect(node.id, event.currentTarget);
+	}
 </script>
 
 <!-- The node element itself is a plain container: the title button is the one
@@ -57,6 +73,7 @@
 		data-testid={`graph-select-${node.id}`}
 		aria-current={selected ? 'true' : undefined}
 		onclick={(event) => onSelect(node.id, event.currentTarget)}
+		onkeydown={onTitleKeydown}
 	>
 		{node.title}
 	</button>
