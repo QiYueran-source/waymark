@@ -1,0 +1,712 @@
+//! MCP and CLI write the same bytes.
+//!
+//! Each test drives the same domain operation through both adapters against
+//! equivalent copies of one project, then compares the whole on-disk result.
+//! Operation-clock values (`created_at`, `updated_at`, `closed_at`,
+//! `archived_at`) are normalized because both adapters use system time; every
+//! other byte, including the canonical field order, must be identical.
+
+mod common;
+
+use std::collections::BTreeMap;
+
+use camino::Utf8Path;
+use serde_json::json;
+use waymark_core::config::FieldType;
+use waymark_core::model::FieldKey;
+use waymark_core::ops::{config, edit, relationship};
+use waymark_core::FieldValue;
+
+/// Declare an optional custom field before the project is copied.
+fn add_field(fixture: &common::Fixture, key: &str, ty: FieldType) {
+    config::add_field(
+        &fixture.project(),
+        &FieldKey::parse(key).unwrap(),
+        ty,
+        false,
+        None,
+        &common::options(),
+    )
+    .expect("the field is declared");
+}
+
+/// Declare a category before the project is copied.
+fn add_category(fixture: &common::Fixture, key: &str, path: &str) {
+    config::add_category(
+        &fixture.project(),
+        &waymark_core::CategoryKey::parse(key).unwrap(),
+        path,
+        None,
+        &common::options(),
+    )
+    .expect("the category is declared");
+}
+
+#[tokio::test]
+async fn create_matches_the_cli() {
+    let fixture = common::fixture(&["one"]);
+    let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    let result = client
+        .call(
+            "waymark_create_work_item",
+            json!({
+                "title": "New item",
+                "category": "task",
+                "owner": "frank",
+                "body": "the body\n"
+            }),
+        )
+        .await;
+    let mcp = common::envelope(&result);
+    let cli = common::cli_json(
+        &cli_root,
+        &[
+            "create",
+            "--title",
+            "New item",
+            "--category",
+            "task",
+            "--owner",
+            "frank",
+            "--body",
+            "the body\n",
+        ],
+    );
+
+    let mcp_path = camino::Utf8Path::new(mcp["data"]["path"].as_str().unwrap());
+    let cli_path = camino::Utf8Path::new(cli["data"]["path"].as_str().unwrap());
+    assert_eq!(
+        common::normalize_identity(&common::read(mcp_path)),
+        common::normalize_identity(&common::read(cli_path)),
+        "the created documents differ only in minted identity and clock"
+    );
+    assert_eq!(mcp["data"]["item"]["title"], cli["data"]["item"]["title"]);
+    assert_eq!(
+        mcp["data"]["item"]["category"],
+        cli["data"]["item"]["category"]
+    );
+    assert_eq!(mcp["data"]["item"]["owner"], cli["data"]["item"]["owner"]);
+    assert_eq!(mcp["data"]["item"]["body"], cli["data"]["item"]["body"]);
+    assert_eq!(mcp["data"]["item"]["status"], cli["data"]["item"]["status"]);
+    assert_eq!(
+        mcp["data"]["item"]["custom_fields"],
+        cli["data"]["item"]["custom_fields"]
+    );
+
+    client.shutdown().await;
+}
+
+/// A whole-tree snapshot normalized for a freshly minted ID.
+///
+/// The two adapters mint different stable IDs, so the new document's own `id`
+/// line, its file name, and every partner's symmetric reference to it differ.
+/// Replacing that one literal with a placeholder — after normalizing the
+/// operation clock — leaves every other byte, including field order, comparable.
+fn normalized_created_tree(root: &Utf8Path, created: &str) -> BTreeMap<String, Vec<u8>> {
+    common::snapshot(root)
+        .into_iter()
+        .map(|(path, bytes)| {
+            let path = path.replace(created, "<new-id>");
+            let text = String::from_utf8_lossy(&bytes);
+            let normalized = common::normalize_clocks(&text).replace(created, "<new-id>");
+            (path, normalized.into_bytes())
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn composite_create_matches_the_cli() {
+    let fixture = common::fixture(&["one", "two"]);
+    add_field(&fixture, "note", FieldType::String);
+    add_field(&fixture, "points", FieldType::Integer);
+    let parent = fixture.ids[0].clone();
+    let linked = fixture.ids[1].clone();
+    let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    let result = client
+        .call(
+            "waymark_create_work_item",
+            json!({
+                "title": "Composite item",
+                "category": "task",
+                "owner": "frank",
+                "creator": "alice",
+                "body": "the body\n",
+                "custom_fields": {"note": "hello", "points": 7},
+                "parent": parent,
+                "dependencies": [parent],
+                "soft_links": [linked]
+            }),
+        )
+        .await;
+    let mcp = common::envelope(&result);
+    assert_eq!(mcp["ok"], true, "{mcp}");
+    let mcp_id = mcp["data"]["id"].as_str().expect("the MCP id").to_owned();
+
+    let cli = common::cli_json(
+        &cli_root,
+        &[
+            "create",
+            "--title",
+            "Composite item",
+            "--category",
+            "task",
+            "--owner",
+            "frank",
+            "--creator",
+            "alice",
+            "--body",
+            "the body\n",
+            "--field",
+            "note=hello",
+            "--field",
+            "points=7",
+            "--parent",
+            &parent,
+            "--dependency",
+            &parent,
+            "--link",
+            &linked,
+        ],
+    );
+    let cli_id = cli["data"]["id"].as_str().expect("the CLI id").to_owned();
+
+    for field in [
+        "title",
+        "category",
+        "owner",
+        "creator",
+        "body",
+        "status",
+        "custom_fields",
+        "parent",
+        "dependencies",
+        "soft_links",
+    ] {
+        assert_eq!(
+            mcp["data"]["item"][field], cli["data"]["item"][field],
+            "the adapters disagree about `{field}`"
+        );
+    }
+    assert_eq!(mcp["data"]["partners"].as_array().unwrap().len(), 1);
+    assert_eq!(cli["data"]["partners"].as_array().unwrap().len(), 1);
+    assert_eq!(mcp["data"]["fingerprints"].as_array().unwrap().len(), 2);
+    assert_eq!(cli["data"]["fingerprints"].as_array().unwrap().len(), 2);
+
+    assert_eq!(
+        normalized_created_tree(&fixture.root, &mcp_id),
+        normalized_created_tree(&cli_root, &cli_id),
+        "composite creation must write the same tree through both adapters"
+    );
+
+    client.shutdown().await;
+}
+
+#[tokio::test]
+async fn title_body_and_custom_fields_match_the_cli() {
+    let fixture = common::fixture(&["one"]);
+    add_field(&fixture, "points", FieldType::Integer);
+    let id = fixture.ids[0].clone();
+    let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    for (tool, arguments) in [
+        ("waymark_set_title", json!({"id": id, "title": "Renamed"})),
+        (
+            "waymark_replace_body",
+            json!({"id": id, "body": "new body\n"}),
+        ),
+        (
+            "waymark_update_custom_fields",
+            json!({"id": id, "custom_fields": {"set": {"points": 7}}}),
+        ),
+    ] {
+        let result = client.call(tool, arguments).await;
+        assert_eq!(
+            common::envelope(&result)["ok"],
+            true,
+            "{tool}: {}",
+            common::envelope(&result)
+        );
+    }
+
+    common::cli_json(&cli_root, &["title", "set", &id, "Renamed"]);
+    common::cli_json(&cli_root, &["body", "replace", &id, "--body", "new body\n"]);
+    common::cli_json(&cli_root, &["field", "update", &id, "--set", "points=7"]);
+
+    assert_eq!(
+        common::normalized_snapshot(&fixture.root),
+        common::normalized_snapshot(&cli_root),
+        "title/body/field writes diverge from the CLI"
+    );
+
+    client.shutdown().await;
+}
+
+#[tokio::test]
+async fn status_matches_the_cli() {
+    let fixture = common::fixture(&["one"]);
+    let id = fixture.ids[0].clone();
+    let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    let result = client
+        .call("waymark_set_status", json!({"id": id, "status": "closed"}))
+        .await;
+    assert_eq!(common::envelope(&result)["ok"], true);
+    common::cli_json(&cli_root, &["status", "set", &id, "closed"]);
+
+    assert_eq!(
+        common::normalized_snapshot(&fixture.root),
+        common::normalized_snapshot(&cli_root),
+        "the status write diverges from the CLI"
+    );
+
+    client.shutdown().await;
+}
+
+#[tokio::test]
+async fn parent_matches_the_cli() {
+    let fixture = common::fixture(&["one", "two"]);
+    let child = fixture.ids[1].clone();
+    let parent = fixture.ids[0].clone();
+    let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    let result = client
+        .call("waymark_set_parent", json!({"id": child, "parent": parent}))
+        .await;
+    assert_eq!(common::envelope(&result)["ok"], true);
+    common::cli_json(&cli_root, &["parent", "set", &child, &parent]);
+
+    assert_eq!(
+        common::normalized_snapshot(&fixture.root),
+        common::normalized_snapshot(&cli_root),
+        "the parent write diverges from the CLI"
+    );
+
+    client.shutdown().await;
+}
+
+#[tokio::test]
+async fn dependency_matches_the_cli() {
+    let fixture = common::fixture(&["one", "two"]);
+    let waiting = fixture.ids[1].clone();
+    let blocking = fixture.ids[0].clone();
+    let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    let result = client
+        .call(
+            "waymark_add_dependency",
+            json!({"id": waiting, "blocking": blocking}),
+        )
+        .await;
+    assert_eq!(common::envelope(&result)["ok"], true);
+    common::cli_json(&cli_root, &["dependency", "add", &waiting, &blocking]);
+
+    assert_eq!(
+        common::normalized_snapshot(&fixture.root),
+        common::normalized_snapshot(&cli_root),
+        "the dependency write diverges from the CLI"
+    );
+
+    client.shutdown().await;
+}
+
+#[tokio::test]
+async fn soft_link_matches_the_cli() {
+    let fixture = common::fixture(&["one", "two"]);
+    let left = fixture.ids[0].clone();
+    let right = fixture.ids[1].clone();
+    let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    let result = client
+        .call("waymark_add_soft_link", json!({"id": left, "other": right}))
+        .await;
+    assert_eq!(common::envelope(&result)["ok"], true);
+    common::cli_json(&cli_root, &["link", "add", &left, &right]);
+
+    assert_eq!(
+        common::normalized_snapshot(&fixture.root),
+        common::normalized_snapshot(&cli_root),
+        "the soft-link write diverges from the CLI"
+    );
+
+    client.shutdown().await;
+}
+
+#[tokio::test]
+async fn owner_matches_the_cli() {
+    let fixture = common::fixture(&["one"]);
+    let id = fixture.ids[0].clone();
+    let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    let result = client
+        .call(
+            "waymark_transfer_owner",
+            json!({"id": id, "owner": "carol"}),
+        )
+        .await;
+    assert_eq!(common::envelope(&result)["ok"], true);
+    common::cli_json(&cli_root, &["owner", "transfer", &id, "carol"]);
+
+    assert_eq!(
+        common::normalized_snapshot(&fixture.root),
+        common::normalized_snapshot(&cli_root),
+        "the owner write diverges from the CLI"
+    );
+
+    client.shutdown().await;
+}
+
+#[tokio::test]
+async fn move_matches_the_cli() {
+    let fixture = common::fixture(&["one"]);
+    add_category(&fixture, "bug", "work/bugs");
+    let id = fixture.ids[0].clone();
+    let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    let result = client
+        .call(
+            "waymark_move_work_item",
+            json!({"id": id, "category": "bug"}),
+        )
+        .await;
+    assert_eq!(common::envelope(&result)["ok"], true);
+    common::cli_json(&cli_root, &["move", &id, "bug"]);
+
+    assert_eq!(
+        common::normalized_snapshot(&fixture.root),
+        common::normalized_snapshot(&cli_root),
+        "the move diverges from the CLI"
+    );
+
+    client.shutdown().await;
+}
+
+#[tokio::test]
+async fn archive_matches_the_cli() {
+    let fixture = common::fixture(&["one", "two"]);
+    let target = fixture.ids[0].clone();
+    let dependent = fixture.ids[1].clone();
+    relationship::add_dependency(&fixture.project(), &dependent, &target, &common::options())
+        .expect("the dependency is added");
+    let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    let result = client
+        .call(
+            "waymark_archive_work_item",
+            json!({"id": target, "reason": "retired"}),
+        )
+        .await;
+    assert_eq!(common::envelope(&result)["ok"], true);
+    common::cli_json(&cli_root, &["archive", &target, "--reason", "retired"]);
+
+    assert_eq!(
+        common::normalized_snapshot(&fixture.root),
+        common::normalized_snapshot(&cli_root),
+        "the archive diverges from the CLI"
+    );
+
+    client.shutdown().await;
+}
+
+#[tokio::test]
+async fn edit_value_shapes_match_the_cli_field_tokens() {
+    let fixture = common::fixture(&["one"]);
+    add_field(&fixture, "flag", FieldType::Boolean);
+    add_field(
+        &fixture,
+        "tags",
+        FieldType::List(Box::new(FieldType::String)),
+    );
+    let id = fixture.ids[0].clone();
+    let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    let result = client
+        .call(
+            "waymark_update_custom_fields",
+            json!({
+                "id": id,
+                "custom_fields": {"set": {"flag": true, "tags": ["a", "b"]}}
+            }),
+        )
+        .await;
+    assert_eq!(common::envelope(&result)["ok"], true);
+    common::cli_json(
+        &cli_root,
+        &[
+            "field",
+            "update",
+            &id,
+            "--set",
+            "flag=true",
+            "--set",
+            "tags=[\"a\",\"b\"]",
+        ],
+    );
+
+    assert_eq!(
+        common::normalized_snapshot(&fixture.root),
+        common::normalized_snapshot(&cli_root),
+        "structured MCP values and CLI tokens must persist identically"
+    );
+
+    client.shutdown().await;
+}
+
+#[tokio::test]
+async fn config_writes_match_the_cli() {
+    let fixture = common::fixture(&["one"]);
+    let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    for (tool, arguments) in [
+        (
+            "waymark_config_set",
+            json!({"name": "operator", "value": "frank"}),
+        ),
+        (
+            "waymark_config_add_category",
+            json!({"key": "bug", "path": "work/bugs", "name": "Bugs"}),
+        ),
+        (
+            "waymark_config_add_category",
+            json!({"key": "chore", "path": "work/chore"}),
+        ),
+        (
+            "waymark_config_update_category",
+            json!({"key": "bug", "name": "Defects"}),
+        ),
+        (
+            "waymark_config_add_field",
+            json!({"key": "points", "type": "integer", "default": "0"}),
+        ),
+        (
+            "waymark_config_update_field",
+            json!({"key": "points", "attribute": "default", "value": "5"}),
+        ),
+        ("waymark_config_remove_category", json!({"key": "chore"})),
+    ] {
+        let result = client.call(tool, arguments).await;
+        assert_eq!(common::envelope(&result)["ok"], true, "{tool}");
+    }
+
+    common::cli_json(&cli_root, &["config", "set", "operator", "frank"]);
+    common::cli_json(
+        &cli_root,
+        &[
+            "config",
+            "add",
+            "category",
+            "bug",
+            "work/bugs",
+            "--name",
+            "Bugs",
+        ],
+    );
+    common::cli_json(
+        &cli_root,
+        &["config", "add", "category", "chore", "work/chore"],
+    );
+    common::cli_json(
+        &cli_root,
+        &["config", "set", "category", "bug", "--name", "Defects"],
+    );
+    common::cli_json(
+        &cli_root,
+        &[
+            "config",
+            "add",
+            "field",
+            "points",
+            "integer",
+            "--default",
+            "0",
+        ],
+    );
+    common::cli_json(
+        &cli_root,
+        &["config", "set", "field", "points", "default", "5"],
+    );
+    common::cli_json(&cli_root, &["config", "remove", "category", "chore"]);
+
+    assert_eq!(
+        common::snapshot(&fixture.root),
+        common::snapshot(&cli_root),
+        "the configuration writes diverge from the CLI"
+    );
+
+    client.shutdown().await;
+}
+
+#[tokio::test]
+async fn migrations_match_the_cli() {
+    // Version migration.
+    let fixture = common::fixture(&["one"]);
+    let id = fixture.ids[0].clone();
+    let path = fixture.root.join("work/task").join(format!("{id}.md"));
+    let document = common::read(&path);
+    let downgraded = document.replacen(
+        &format!("schema: {}\n", waymark_core::model::FORMAT_GENERATION),
+        &format!("schema: {}\n", waymark_core::model::FORMAT_GENERATION - 1),
+        1,
+    );
+    std::fs::write(&path, downgraded).expect("the document is writable");
+    let config_path = fixture.root.join(".waymark/config.toml");
+    let config_text = common::read(&config_path);
+    let current = fixture.project().config().version.to_string();
+    let replaced =
+        config_text.replacen(&format!("version = \"{current}\""), "version = \"0.2\"", 1);
+    assert_ne!(config_text, replaced);
+    std::fs::write(&config_path, replaced).expect("the configuration is writable");
+    let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
+    let client = common::Client::connect(fixture.root.clone()).await;
+    let result = client
+        .call(
+            "waymark_migrate_version",
+            json!({"target_generation": waymark_core::model::FORMAT_GENERATION}),
+        )
+        .await;
+    assert_eq!(common::envelope(&result)["ok"], true);
+    common::cli_json(
+        &cli_root,
+        &[
+            "migrate",
+            "version",
+            "--to",
+            &waymark_core::model::FORMAT_GENERATION.to_string(),
+        ],
+    );
+    assert_eq!(
+        common::snapshot(&fixture.root),
+        common::snapshot(&cli_root),
+        "the version migration diverges from the CLI"
+    );
+    client.shutdown().await;
+
+    // Schema migration.
+    let fixture = common::fixture(&["one"]);
+    let id = fixture.ids[0].clone();
+    add_field(&fixture, "note", FieldType::String);
+    edit::update_custom_fields(
+        &fixture.project(),
+        &id,
+        &[edit::FieldChangeEntry::set(
+            "note",
+            FieldValue::String("hello".to_owned()),
+        )],
+        &common::options(),
+    )
+    .expect("the value is written");
+    let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
+    let client = common::Client::connect(fixture.root.clone()).await;
+    let result = client
+        .call(
+            "waymark_migrate_schema",
+            json!({"action": {"kind": "remove_field", "key": "note"}}),
+        )
+        .await;
+    assert_eq!(common::envelope(&result)["ok"], true);
+    common::cli_json(&cli_root, &["migrate", "schema", "--remove-field", "note"]);
+    assert_eq!(
+        common::snapshot(&fixture.root),
+        common::snapshot(&cli_root),
+        "the schema migration diverges from the CLI"
+    );
+    client.shutdown().await;
+
+    // Storage migration.
+    let fixture = common::fixture(&["one"]);
+    add_category(&fixture, "bug", "work/bugs");
+    let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
+    let client = common::Client::connect(fixture.root.clone()).await;
+    let result = client
+        .call(
+            "waymark_migrate_storage",
+            json!({"action": {"kind": "category_key", "from": "task", "to": "todo"}}),
+        )
+        .await;
+    assert_eq!(common::envelope(&result)["ok"], true);
+    common::cli_json(
+        &cli_root,
+        &["migrate", "storage", "--category-key", "task", "todo"],
+    );
+    assert_eq!(
+        common::snapshot(&fixture.root),
+        common::snapshot(&cli_root),
+        "the storage migration diverges from the CLI"
+    );
+    client.shutdown().await;
+}
+
+/// The read renderers are the shared `waymark_core::view` ones, so both
+/// adapters must publish the same `data` block for the same project.
+#[tokio::test]
+async fn read_renderings_match_the_cli() {
+    let fixture = common::fixture(&["one", "two"]);
+    let id = fixture.ids[0].clone();
+    let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    async fn mcp_data(
+        client: &common::Client,
+        tool: &str,
+        arguments: serde_json::Value,
+    ) -> serde_json::Value {
+        let result = client.call(tool, arguments).await;
+        common::envelope(&result)["data"].clone()
+    }
+
+    let cases = [
+        (
+            "waymark_get_work_item",
+            json!({"id": id}),
+            vec!["show", id.as_str()],
+        ),
+        (
+            "waymark_list_work_items",
+            json!({"limit": 100}),
+            vec!["list", "--limit", "100"],
+        ),
+        ("waymark_config_read", json!({}), vec!["config", "show"]),
+        ("waymark_get_tree", json!({}), vec!["tree"]),
+        (
+            "waymark_get_dependency_tree",
+            json!({"id": id}),
+            vec!["dep", "tree", id.as_str()],
+        ),
+        (
+            "waymark_search_work_items",
+            json!({"text": "one", "limit": 100}),
+            vec!["search", "one", "--limit", "100"],
+        ),
+    ];
+    for (tool, arguments, cli_args) in cases {
+        let mcp = mcp_data(&client, tool, arguments).await;
+        let cli = common::cli_json(&cli_root, &cli_args);
+        // The two projects live at different paths; nothing else may differ.
+        let normalize = |value: &serde_json::Value, root: &camino::Utf8Path| {
+            value
+                .to_string()
+                .replace(root.as_str(), "<root>")
+                .replace(&format!("{}/", root), "<root>/")
+        };
+        assert_eq!(
+            normalize(&mcp, &fixture.root),
+            normalize(&cli["data"], &cli_root),
+            "{tool} differs from `waymark {cli_args:?}`"
+        );
+    }
+
+    client.shutdown().await;
+}

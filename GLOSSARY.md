@@ -25,8 +25,8 @@ The declared identity that created a work item, retained as provenance when owne
 _Avoid_: Owner, operator.
 
 **Operator**:
-The human identity declared by the local project configuration for Waymark-mediated operations. It is a workflow guardrail identity, not authenticated identity.
-_Avoid_: Authenticated user, actor (unless explicitly qualified as declared operator).
+The human identity a local project configuration declares as the one currently running Waymark-mediated operations. It is advisory only: it identifies the caller for reminders and warnings, never authorizes or blocks a write, and is neither authenticated identity nor a work item field.
+_Avoid_: Authenticated user, actor (unless explicitly qualified as declared operator), owner.
 
 **Parent**:
 The single optional hierarchical relation from a work item to its containing work item. Parentage is independent of category and does not itself imply blocking or lifecycle inheritance.
@@ -37,12 +37,24 @@ A directed hard-blocking relation expressing that one work item waits for anothe
 _Avoid_: Parent, prerequisite (unless direction is made explicit).
 
 **Archive**:
-A reversible retirement marker that removes a work item from ordinary active views while preserving its identity, status, and relationships.
-_Avoid_: Close, delete.
+An irreversible-through-Waymark logical deletion marker that removes a work item from ordinary active views while retaining its file, identity, and Git history; it is distinct from closing.
+_Avoid_: Close, restore (as a Waymark operation).
 
 **Closed**:
 A core lifecycle state meaning the work item is completed and no longer blocks its dependents.
 _Avoid_: Archived, deleted.
+
+**Blocked**:
+A derived condition in which a non-closed work item has one or more unfinished hard dependencies; it is not a lifecycle state.
+_Avoid_: Status (when referring to this derived condition).
+
+**Blocked by**:
+The read-only list of hard-dependency references currently preventing a work item from being ready, including unresolved targets; unresolved targets are also identified as dangling dependencies.
+_Avoid_: Persisted field (when describing the computed result).
+
+**Ready**:
+A derived condition indicating an open or in-progress work item has no unfinished or dangling hard dependencies.
+_Avoid_: Status (when referring to this derived condition).
 
 **Soft link**:
 A non-blocking association between work items that does not affect readiness or lifecycle.
@@ -59,3 +71,37 @@ _Avoid_: Reference semantics (for custom fields).
 **Stable ID**:
 The immutable, project-unique identity of a work item, independent of its category, name, and storage path.
 _Avoid_: Name, slug, path.
+
+## Storage and machine contract
+
+**Format generation**:
+The on-disk data format a Waymark release declares it can read and write. It changes only when the file format itself changes, and no configuration edit can raise it.
+_Avoid_: Schema version (when the file format is meant), configuration revision.
+
+**Configuration revision**:
+The monotonic counter that increments once per effective mediated configuration write. It is informational only and never determines freshness, conflict detection, or cache invalidation.
+_Avoid_: Version (unqualified), format generation.
+
+**Projection**:
+The disposable in-process view of work-item files, either complete and fresh or explicitly incomplete. It is rebuilt from files and is never a second source of truth.
+_Avoid_: Index, cache (when the authoritative view is meant).
+
+**Field projection**:
+The caller-selected subset of fields a collection row renders, either a named set or all set fields, with unset values omitted. Unknown names are rejected; it changes the row shape, not which work items the query selects.
+_Avoid_: Mask, view (when the field subset is meant).
+
+**Archive range**:
+The selector that decides whether a collection query reads active or archived work items. A single work item is read by stable ID regardless of range.
+_Avoid_: Filter (when the active/archived scope is meant).
+
+**Diagnostic finding**:
+A data-integrity observation reported by validation or diagnostics, carrying a severity, a shared code, an optional location, and whether it is fixable. It is distinct from an operation that failed.
+_Avoid_: Error (when no operation failed).
+
+**Error code**:
+The stable machine code that names the recovery action for a failed operation and is shared by every interface. Codes are coarse recovery units, not one per failure variant.
+_Avoid_: Exit code (that is a class, not a code), message text.
+
+**Write lock**:
+The single store-wide advisory lock that serializes Waymark-mediated writes and is released by the operating system when the process exits. It is never held across calls.
+_Avoid_: File lock (for a single work-item file), mutex.

@@ -1,0 +1,53 @@
+//! Waymark domain library.
+//!
+//! Every rule lives here. The CLI, the MCP server, and the read-only Web view
+//! are adapters over this crate and cannot diverge from it.
+//!
+//! # Layout
+//!
+//! - [`id`], [`time`], [`model`] — the domain vocabulary: stable IDs, clocks and
+//!   timestamps, the work-item and configuration value types.
+//! - [`serialize`], [`parse`] — the canonical document bytes and their inverse.
+//! - [`store`], [`lock`], [`write`] — the file store: project discovery, path
+//!   mapping, the store-wide write lock, and atomic replacement.
+//! - [`config`] — the project configuration document and its validation.
+//! - [`projection`] — the disposable, fingerprinted in-memory view of the files.
+//! - [`ops`] — one module per capability family, each taking explicit options.
+//! - [`error`], [`location`], [`envelope`] — the machine contract.
+//! - [`testing`] — fixtures and deterministic clock/ID seams, public so every
+//!   downstream crate's tests share them.
+//! - [`view`] — the shared JSON renderers the CLI and MCP adapters publish, so
+//!   one machine payload is stated once.
+
+pub mod config;
+pub mod envelope;
+pub mod error;
+pub mod git;
+pub mod id;
+pub mod location;
+pub mod lock;
+pub mod model;
+pub mod ops;
+pub mod parse;
+pub mod projection;
+pub mod query;
+pub mod readiness;
+pub mod search;
+pub mod serialize;
+pub mod stats;
+pub mod store;
+pub mod testing;
+pub mod time;
+pub mod view;
+pub mod write;
+
+pub use config::Config;
+pub use error::{Code, ExitClass, Severity, ValidationIssue, WaymarkError};
+pub use git::{DiffReport, DiffRequest, GitProbe, HistoryReport, HistoryRequest, Repository};
+pub use id::WorkItemId;
+pub use location::{Location, LocationKind};
+pub use model::{CategoryKey, CustomFields, FieldValue, Status, WorkItem};
+pub use query::{Filters, Projection, Query, Sort, SortField, Window};
+pub use readiness::{Graph, Readiness};
+pub use store::{InitOptions, Project};
+pub use time::{Clock, FixedClock, SystemClock, Timestamp};
