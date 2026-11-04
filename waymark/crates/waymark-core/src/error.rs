@@ -70,6 +70,8 @@ pub enum Code {
     InvalidRelationship,
     /// A complete, fresh projection is unavailable.
     IncompleteProjection,
+    /// This build does not include the Web capability.
+    WebNotIncluded,
     /// The target changed since the operation read it.
     WriteConflict,
     /// An archived item rejects a write.
@@ -92,6 +94,8 @@ pub enum Code {
     LockFailed,
     /// A reader could not obtain a stable snapshot after bounded retries.
     SnapshotUnstable,
+    /// The loopback port the Web service asks for is already taken.
+    PortInUse,
     /// Data declares a generation the installed release cannot read.
     UnsupportedVersion,
     /// An item's generation is older than the project generation.
@@ -266,6 +270,7 @@ impl Code {
         Code::CycleDetected,
         Code::InvalidRelationship,
         Code::IncompleteProjection,
+        Code::WebNotIncluded,
         Code::WriteConflict,
         Code::ItemArchived,
         Code::AlreadyArchived,
@@ -277,6 +282,7 @@ impl Code {
         Code::LockTimeout,
         Code::LockFailed,
         Code::SnapshotUnstable,
+        Code::PortInUse,
         Code::UnsupportedVersion,
         Code::ItemNeedsMigration,
         Code::ActionRequiresMigration,
@@ -379,6 +385,7 @@ impl Code {
                 &["completeness", "freshness", "diagnostics"],
                 &[File, WorkItem],
             ),
+            Self::WebNotIncluded => spec(Some(ExitClass::InvalidInput), false, None, &[], &[]),
             Self::WriteConflict => spec(
                 Some(ExitClass::Conflict),
                 false,
@@ -442,6 +449,9 @@ impl Code {
             Self::SnapshotUnstable => {
                 spec(Some(ExitClass::Environment), true, None, &["retries"], &[])
             }
+            // The recovery action is a different port, not a blind retry: the
+            // same request is expected to fail again while the port is held.
+            Self::PortInUse => spec(Some(ExitClass::Environment), false, None, &["port"], &[]),
             Self::UnsupportedVersion => spec(
                 Some(ExitClass::Version),
                 false,
@@ -545,6 +555,7 @@ impl Code {
             Self::CycleDetected => "CYCLE_DETECTED",
             Self::InvalidRelationship => "INVALID_RELATIONSHIP",
             Self::IncompleteProjection => "INCOMPLETE_PROJECTION",
+            Self::WebNotIncluded => "WEB_NOT_INCLUDED",
             Self::WriteConflict => "WRITE_CONFLICT",
             Self::ItemArchived => "ITEM_ARCHIVED",
             Self::AlreadyArchived => "ALREADY_ARCHIVED",
@@ -556,6 +567,7 @@ impl Code {
             Self::LockTimeout => "LOCK_TIMEOUT",
             Self::LockFailed => "LOCK_FAILED",
             Self::SnapshotUnstable => "SNAPSHOT_UNSTABLE",
+            Self::PortInUse => "PORT_IN_USE",
             Self::UnsupportedVersion => "UNSUPPORTED_VERSION",
             Self::ItemNeedsMigration => "ITEM_NEEDS_MIGRATION",
             Self::ActionRequiresMigration => "ACTION_REQUIRES_MIGRATION",
@@ -598,6 +610,7 @@ impl Code {
             "CYCLE_DETECTED" => Ok(Self::CycleDetected),
             "INVALID_RELATIONSHIP" => Ok(Self::InvalidRelationship),
             "INCOMPLETE_PROJECTION" => Ok(Self::IncompleteProjection),
+            "WEB_NOT_INCLUDED" => Ok(Self::WebNotIncluded),
             "WRITE_CONFLICT" => Ok(Self::WriteConflict),
             "ITEM_ARCHIVED" => Ok(Self::ItemArchived),
             "ALREADY_ARCHIVED" => Ok(Self::AlreadyArchived),
@@ -609,6 +622,7 @@ impl Code {
             "LOCK_TIMEOUT" => Ok(Self::LockTimeout),
             "LOCK_FAILED" => Ok(Self::LockFailed),
             "SNAPSHOT_UNSTABLE" => Ok(Self::SnapshotUnstable),
+            "PORT_IN_USE" => Ok(Self::PortInUse),
             "UNSUPPORTED_VERSION" => Ok(Self::UnsupportedVersion),
             "ITEM_NEEDS_MIGRATION" => Ok(Self::ItemNeedsMigration),
             "ACTION_REQUIRES_MIGRATION" => Ok(Self::ActionRequiresMigration),
@@ -977,6 +991,19 @@ impl WaymarkError {
         }))
     }
 
+    /// This build has no Web capability, so `serve` cannot run.
+    ///
+    /// The recovery is to install the Web-enabled package; the command never
+    /// downloads or installs anything itself.
+    pub fn web_not_included() -> Self {
+        Self::new(
+            Code::WebNotIncluded,
+            "this build does not include the Web view; install the waymark-web package to run \
+             `waymark serve`",
+        )
+        .with_details(json!({}))
+    }
+
     // -- conflict and state rejection (class 4) ---------------------------
 
     /// The target changed since the operation read it.
@@ -1096,6 +1123,21 @@ impl WaymarkError {
             format!("the project changed during {retries} read attempts; retry"),
         )
         .with_details(json!({"retries": retries}))
+    }
+
+    /// The loopback port the Web service needs is already taken.
+    ///
+    /// The message names the port and points at `--port 0`; there is no silent
+    /// fallback to a different port.
+    pub fn port_in_use(port: u16) -> Self {
+        Self::new(
+            Code::PortInUse,
+            format!(
+                "port {port} on 127.0.0.1 is already in use; pass `--port 0` to let the \
+                 operating system choose a free port"
+            ),
+        )
+        .with_details(json!({"port": port}))
     }
 
     // -- version and migration (class 6) ----------------------------------

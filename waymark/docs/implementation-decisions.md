@@ -1997,6 +1997,10 @@ document/configuration rewrites (a category-key migration's value rewrites can r
     capabilities.
   - `agent-doc` — a generated CLI reference for humans and agents reading the
     command tree, not a business capability, so it has no tool.
+  - `version` — reports the build version and the capabilities it contains; it
+    is not a business capability and has no MCP tool.
+  - `serve` — the CLI entry point for the read-only Web adapter; the Web view is
+    its own read-only surface, not an MCP tool.
 - **No `waymark-core`, `waymark-cli`, or `waymark-web` source was changed.** The
   one genuine gap found (creation's richer inputs) is recorded above rather than
   patched around in the adapter.
@@ -3053,3 +3057,70 @@ a thin process wrapper over it.
 - `waymark_web::AssetManifest` / `AssetFile` and `waymark_web::manifest::{asset_files, read, write,
   build_manifest, validate_tree, verify_build_id, read_build_id, release_git_sha}` are public for the
   build and release checks.
+
+# Distribution: build variants, `serve`, and `version`
+
+## The Web variant is one optional feature
+
+**Choice:** `waymark-cli` declares `web = ["dep:waymark-web", "waymark-web/embed", "dep:tokio"]`, with
+`waymark-web` and `tokio` optional dependencies. The basic build therefore links neither the Web crate
+nor the async runtime; `cargo tree -p waymark-cli -e features` lists no `waymark-web`.
+
+**Why:** the distribution decision names one optional capability instead of an aggregate `full`
+feature. `tokio` is part of enabling that capability, not a separate feature: `serve` needs a runtime
+to call `waymark_web::bind`, and making it a normal dependency would put both the runtime and an
+unused async stack in the basic binary.
+
+## The build variant decides capabilities, not runtime probing
+
+**Choice:** `waymark version` builds its capability list from `cfg(feature = "web")` in the adapter:
+`["cli", "mcp"]` in every build, plus `web` only in a Web build. `variant --json` adds `assets` only
+when `waymark_web::embedded_manifest()` is `Some`, so the key is absent in a basic build rather than
+`null`. The human form is exactly `waymark <version> (<capabilities>)`.
+
+**Why:** a runtime probe could claim a capability the binary cannot exercise. The manifest accessor is
+already the compile-time proof that a Web build carries an embedded tree.
+
+## `serve` refuses in the basic build, and both branches discover first
+
+**Choice:** `serve` calls the same `open_project` discovery as every other command before it does
+anything else. In a basic build it then returns `WEB_NOT_INCLUDED` (exit class 3, invalid input); a
+missing or invalid project produces the ordinary `PROJECT_NOT_FOUND`/`CONFIG_INVALID` failure instead.
+The command never downloads, installs, or shells out.
+
+**Why:** a command that behaves differently from its siblings before failing would make "no project"
+indistinguishable from "wrong build". The build refusal is about the installed binary, so the message
+names the `waymark-web` package and the registry row carries no details or location.
+
+## `PORT_IN_USE` is an environment failure, not a retryable conflict
+
+**Choice:** a bind that fails with `AddrInUse` becomes `PORT_IN_USE`, exit class 5 (environment),
+non-retryable, details `{port}`, no location, and a message naming the port and `--port 0`. Any other
+bind failure stays `IO_ERROR`; a runtime stop is `INTERNAL_ERROR`. There is no free-port fallback.
+
+**Why:** the recovery action is a different port, not a retry, and `--port 0` is named in the message
+and the details carry the requested port so a script can report it. The functional specification's
+invariant that only `LOCK_TIMEOUT` and `SNAPSHOT_UNSTABLE` are retryable stays true.
+
+## Readiness is reported after binding and before blocking
+
+**Choice:** the Web branch binds with `WebConfig::embedded().with_port(args.port)`, reads the actual
+port from `Running::addr()`, then prints `serving http://127.0.0.1:<port>` on stderr (human mode) or
+emits `{"url": "http://127.0.0.1:<port>"}` in the success envelope on stdout (`--json`). Only then
+does it await Ctrl-C. The URL uses `127.0.0.1`, not `Running::url()`'s `localhost`, because the
+distribution decision names the loopback literal.
+
+**Why:** `--port 0` has no usable port until the listener exists, so reporting before binding would be
+either wrong or a second bind. `--json` must emit exactly one value and then keep serving; the
+readiness envelope is that value.
+
+## `--open` is best-effort and never silently enabled
+
+**Choice:** after readiness, `--open` spawns `xdg-open <url>` on Linux or `open <url>` on macOS with
+null standard streams, without waiting. A spawn failure prints a `warning:` line and leaves the
+server running. No opener runs without the flag.
+
+**Why:** the server is useful whether or not a browser exists, and a launcher that later exits must
+not take the server down. The flag is the only way to launch anything; `serve` mutates no project
+state.
+

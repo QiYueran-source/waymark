@@ -132,6 +132,7 @@ fn every_typed_constructor_fills_exactly_the_registered_details_keys() {
             "incomplete_projection",
             WaymarkError::incomplete_projection("scoped", "stale", vec![json!({"code": "X"})]),
         ),
+        ("web_not_included", WaymarkError::web_not_included()),
         (
             "write_conflict",
             WaymarkError::write_conflict(&id(), "/p/wm-000000000001.md", "aa", "bb"),
@@ -170,6 +171,7 @@ fn every_typed_constructor_fills_exactly_the_registered_details_keys() {
             WaymarkError::lock_failed("/p/.waymark/lock", "permission denied"),
         ),
         ("snapshot_unstable", WaymarkError::snapshot_unstable(3)),
+        ("port_in_use", WaymarkError::port_in_use(7331)),
         (
             "unsupported_version",
             WaymarkError::unsupported_version("3", "1 and 2"),
@@ -316,6 +318,33 @@ fn an_error_carries_a_registered_code_details_location_and_retryability() {
     assert_eq!(
         err.message(),
         "wm-000000000001 changed on disk since it was read; reread and retry"
+    );
+}
+
+#[test]
+fn a_missing_web_build_names_the_package_and_a_busy_port_names_the_recovery() {
+    let web = WaymarkError::web_not_included();
+    assert_eq!(web.code(), Code::WebNotIncluded);
+    assert_eq!(web.exit_class(), Some(ExitClass::InvalidInput));
+    assert!(
+        web.message().contains("waymark-web"),
+        "the message must name the Web package: {}",
+        web.message()
+    );
+
+    let port = WaymarkError::port_in_use(7331);
+    assert_eq!(port.code(), Code::PortInUse);
+    assert_eq!(port.exit_class(), Some(ExitClass::Environment));
+    assert_eq!(port.details()["port"], json!(7331));
+    assert!(
+        port.message().contains("7331"),
+        "the message must name the port: {}",
+        port.message()
+    );
+    assert!(
+        port.message().contains("--port 0"),
+        "the message must suggest --port 0: {}",
+        port.message()
     );
 }
 

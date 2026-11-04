@@ -565,6 +565,8 @@ fn agent_doc_lists_every_top_level_command_including_the_new_families() {
         "agent-doc",
         "config",
         "validate",
+        "version",
+        "serve",
     ] {
         assert!(
             text.contains(&format!("`waymark {command}`")),

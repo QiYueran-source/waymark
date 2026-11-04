@@ -1847,7 +1847,9 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tokio",
  "waymark-core",
+ "waymark-web",
 ]
 
 [[package]]
