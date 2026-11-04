@@ -13,6 +13,7 @@
 use camino::Utf8Path;
 use clap::Args;
 use waymark_core::error::WaymarkError;
+use waymark_core::DEFAULT_PORT;
 
 use super::open_project;
 
@@ -22,12 +23,6 @@ use super::{emit, err_line, EXIT_OK};
 use serde_json::json;
 #[cfg(feature = "web")]
 use waymark_core::envelope::{success_envelope, Meta};
-
-/// The default loopback port.
-#[cfg(feature = "web")]
-const DEFAULT_PORT: u16 = waymark_web::DEFAULT_PORT;
-#[cfg(not(feature = "web"))]
-const DEFAULT_PORT: u16 = 7331;
 
 /// Arguments of `waymark serve`.
 #[derive(Debug, Args)]
