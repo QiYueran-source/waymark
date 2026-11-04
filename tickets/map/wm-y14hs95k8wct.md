@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-03T23:52:21Z
+updated_at: 2026-11-04T01:49:12Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -200,6 +200,13 @@ Codes with no exit class, used as warnings and findings: `OWNER_MISMATCH` (warni
 - Exactly one normative document survives. The specification absorbs the settled command and tool catalog and the shared business contract from `docs/superpower/WAYMARK-CLI-MCP-INTERFACE-DESIGN.md`; that working document then retires. It already describes itself as transitional and predicts a new functional specification once the interface details land.
 - The working document's unresolved interface questions do not enter the specification. They join this map's Not yet specified list, where the specification is forbidden to infer an answer.
 - The specification lives in the Clove tracker as its own work item under `.clove/issues/`, not in `docs/`. No spec-like document remains under `docs/`; such documents are retired or migrated into it.
+
+### DSH sidebar integration
+
+- The DSH sidebar plugin reuses the existing Waymark Web logic and remains strictly read-only; it must not offer work-item mutations. Confirmed by the user on 2026-11-04.
+- The integration effort first produces an implementable specification and route; implementation follows after the map is complete.
+- Reuse the existing `waymark-mcp` server rather than building a second MCP server. The integration work covers its installation, configuration, and connection to hosts. MCP retains its existing read and write capabilities; the read-only restriction applies to the sidebar, not to MCP.
+- Provide the DSH sidebar plugin first. Do not implement a VS Code or Cursor plugin in this effort; Cursor is expected to reuse the VS Code extension approach if those hosts are addressed later. Consider future host integration in the design without promising compatibility that has not been verified. These decisions were confirmed by the user on 2026-11-04.
 
 ### Reopened decisions: Web, MCP, and distribution
 
