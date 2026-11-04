@@ -19,7 +19,7 @@ Node.js or npm. Neither variant downloads or installs anything at run time.
 ## Install
 
 Prebuilt archives are attached to the GitHub Releases for
-`https://github.com/frank/waymark`. Download the basic archive for your
+`https://github.com/QiYueran-source/waymark`. Download the basic archive for your
 platform, verify it, extract it, and put the extracted directory on `PATH`.
 
 The archive names are:
@@ -44,8 +44,8 @@ installing.
 VERSION=0.1.0
 ARCHIVE="waymark-v${VERSION}-linux-x86_64.tar.gz"
 
-curl -LO "https://github.com/frank/waymark/releases/download/v${VERSION}/${ARCHIVE}"
-curl -LO "https://github.com/frank/waymark/releases/download/v${VERSION}/${ARCHIVE}.sha256"
+curl -LO "https://github.com/QiYueran-source/waymark/releases/download/v${VERSION}/${ARCHIVE}"
+curl -LO "https://github.com/QiYueran-source/waymark/releases/download/v${VERSION}/${ARCHIVE}.sha256"
 
 sha256sum --check "${ARCHIVE}.sha256"
 
@@ -64,8 +64,8 @@ not run it.
 VERSION=0.1.0
 ARCHIVE="waymark-v${VERSION}-macos-aarch64.tar.gz"
 
-curl -LO "https://github.com/frank/waymark/releases/download/v${VERSION}/${ARCHIVE}"
-curl -LO "https://github.com/frank/waymark/releases/download/v${VERSION}/${ARCHIVE}.sha256"
+curl -LO "https://github.com/QiYueran-source/waymark/releases/download/v${VERSION}/${ARCHIVE}"
+curl -LO "https://github.com/QiYueran-source/waymark/releases/download/v${VERSION}/${ARCHIVE}.sha256"
 
 shasum -a 256 -c "${ARCHIVE}.sha256"
 
@@ -80,8 +80,8 @@ export PATH="$HOME/.local/waymark:$PATH"
 VERSION=0.1.0
 ARCHIVE="waymark-v${VERSION}-macos-x86_64.tar.gz"
 
-curl -LO "https://github.com/frank/waymark/releases/download/v${VERSION}/${ARCHIVE}"
-curl -LO "https://github.com/frank/waymark/releases/download/v${VERSION}/${ARCHIVE}.sha256"
+curl -LO "https://github.com/QiYueran-source/waymark/releases/download/v${VERSION}/${ARCHIVE}"
+curl -LO "https://github.com/QiYueran-source/waymark/releases/download/v${VERSION}/${ARCHIVE}.sha256"
 
 shasum -a 256 -c "${ARCHIVE}.sha256"
 
@@ -190,8 +190,8 @@ over the directory that already holds the basic installation:
 ```sh
 VERSION=0.1.0
 WEB_ARCHIVE="waymark-web-v${VERSION}-linux-x86_64.tar.gz"   # or the macOS archive
-curl -LO "https://github.com/frank/waymark/releases/download/v${VERSION}/${WEB_ARCHIVE}"
-curl -LO "https://github.com/frank/waymark/releases/download/v${VERSION}/${WEB_ARCHIVE}.sha256"
+curl -LO "https://github.com/QiYueran-source/waymark/releases/download/v${VERSION}/${WEB_ARCHIVE}"
+curl -LO "https://github.com/QiYueran-source/waymark/releases/download/v${VERSION}/${WEB_ARCHIVE}.sha256"
 sha256sum --check "${WEB_ARCHIVE}.sha256"
 tar -xzf "${WEB_ARCHIVE}" -C "$HOME/.local/waymark"
 waymark version

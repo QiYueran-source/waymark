@@ -60,5 +60,5 @@ The first public release of Waymark.
 - macOS binaries are unsigned and not notarized; Gatekeeper therefore requires
   explicit approval on first launch, as documented in the README.
 
-[Unreleased]: https://github.com/frank/waymark/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/frank/waymark/releases/tag/v0.1.0
+[Unreleased]: https://github.com/QiYueran-source/waymark/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/QiYueran-source/waymark/releases/tag/v0.1.0
