@@ -7,7 +7,7 @@ status: open
 owner: frank
 creator: frank
 created_at: 2026-11-04T00:57:47Z
-updated_at: 2026-11-04T12:23:06Z
+updated_at: 2026-11-04T12:37:45Z
 ---
 # Waymark Web Tree, Category Filtering, and Graph Overview
 
@@ -15,11 +15,15 @@ updated_at: 2026-11-04T12:23:06Z
 
 Waymark's read-only Web overview currently presents work items as a clear directory-style tree, but its category organization is incomplete for real project exploration. The combined view must remain a single cross-category hierarchy while making category identity visible. The category-grouped view needs explicit controls for selecting one or more categories rather than showing every category without choice. Users also need a graph view to understand hierarchy and dependencies spatially, without losing the existing tree's semantics, read-only safety, accessibility, or browser-local state behavior. The graph also needs a reading direction that fits the hierarchy on screen, without discarding the project's settled layout, viewport, selection, or accessibility state.
 
+The current page also constrains the graph to a small framed area, lets tree-wide expansion actions appear as graph controls, lets long node text and context badges overflow the card, presents category choices as an inline toolbar set that does not scale, scatters blocking and non-blocking messages, and draws dependency edges that merge into solid, unannotated lines at low zoom. Readers cannot tell overlapping dependencies apart or confirm what a line means.
+
 ## Solution
 
 Extend the existing read-only Web overview with category selection and a graph presentation alongside the existing tree presentation. Combined remains one hierarchy across categories. Category-grouped mode provides multi-select category buttons with select-all and clear-all actions. When a selected work item needs an ancestor from an unselected category to preserve its actual parent context, the ancestor remains visible as temporary context and is prominently marked as outside the selection.
 
 Add a graph view backed by the same active tree data and relationships. Render parent-child relations as solid edges in a hierarchical layout that defaults to top-to-bottom, with a user-selected left-to-right alternative. When dependency visibility is enabled, render directed dependency relations as dashed edges with arrowheads. The graph is read-only, supports navigation and density controls, reuses the existing item detail, and offers a toggleable structured text/list alternative for keyboard and screen-reader users.
+
+Refine the same overview with a canvas-sized graph, self-contained nodes, presentation-scoped expansion, a compact category control in a shared control cluster, centered blocking states, and legible, identifiable relationship edges. These changes refine the existing tree, filtering, graph, and direction behavior; they add no second view model and no write surface.
 
 ## User Stories
 
@@ -94,6 +98,43 @@ Add a graph view backed by the same active tree data and relationships. Render p
 68. As a project member, I want a refresh or reopen to restore the last saved viewport for the current direction when possible, and otherwise fit the visible graph, so that the starting view is predictable.
 69. As a keyboard and screen-reader user, I want the direction control operable by keyboard and to expose the selected direction without relying on icon or colour alone, so that I can choose and confirm it non-visually.
 
+70. As a project member, I want the graph to fill the content area below the toolbar, so that I can see more of the hierarchy without a small frame.
+71. As a project member, I want no decorative frame around the graph, so that the canvas is the space I interact with.
+72. As a project member, I want the detail panel to remain a side panel and the graph to refit to the remaining canvas when it opens, so that details and context stay visible together.
+73. As a project member, I want unresolved relations in a collapsible bottom strip, so that they are visible without covering graph nodes.
+74. As a project member, I want window resizing to preserve my current viewport, so that resizing does not lose my place.
+75. As a project member, I want no separate full-screen graph mode, so that the app navigation and global controls stay available.
+76. As a project member, I want every node to contain all of its content inside its card, so that text never spills over the graph.
+77. As a project member, I want long titles and blocked reasons to wrap within the node, so that I can read them without clipping.
+78. As a project member, I want a taller node to grow and the layout to account for its height, so that edges and spacing stay correct.
+79. As a project member, I want context badges inside the card, so that the node's content and marking stay together.
+80. As a project member, I want no graph text drawn outside a node, so that the drawing stays legible.
+81. As a project member, I want a context node to keep the ordinary node layout, so that it reads as a normal item.
+82. As a project member, I want a context node distinguished by a dashed outline around the entire card, so that I can spot it.
+83. As a project member, I want the context indicator inside the card, so that no label floats outside the node.
+84. As a screen-reader user, I want the node's accessible name to state the context, so that the visual badge is not the only cue.
+85. As a project member, I want tree Expand all/Collapse all to affect only the tree, so that graph state is not changed from the tree view.
+86. As a project member, I want graph Expand all/Collapse all in the graph controls, so that I can manage density without leaving the graph.
+87. As a project member, I want the two presentations' expansion states to stay separate, so that optimizing one does not damage the other.
+88. As a keyboard user, I want a collapsed graph branch to appear as a "Collapsed — N children" row in the structured list with its own expand control, so that I can expand it without the pointer.
+89. As a keyboard user, I want a "Show all" action in the structured list, so that I can restore the full hierarchy quickly.
+90. As a project member, I want blocking and empty states centered in the content area, so that I see why there is nothing to browse.
+91. As a project member, I want non-blocking notices to stay inline at the top, so that they do not cover the content.
+92. As a project member, I want long diagnostics in a width-limited scrollable block, so that they remain readable.
+93. As a project member, I want unresolved relations to stay in their own area rather than becoming a centered message, so that content and notices stay distinct.
+94. As a project member, I want category selection as a compact "Categories (n)" control, so that many categories do not overwhelm the toolbar.
+95. As a project member, I want the control to open a searchable multi-select popover with select-all, clear-all, and a count, so that I can manage a large category set.
+96. As a project member, I want the category control, zoom/fit/reset, and direction control in the graph's upper-left control cluster, so that graph controls are together.
+97. As a project member, I want the relationship legend at the upper right, so that I can read it without covering the controls.
+98. As a tree or structured-list user, I want the same category control in the top toolbar, so that I can filter without a canvas overlay.
+99. As a project member, I want the category control hidden in combined mode and keyboard-operable in grouped mode, so that it appears only when it can affect the view and works without a pointer.
+100. As a project member, I want dependency edges to stay visibly dashed at every zoom, so that they never read as parent-child lines.
+101. As a project member, I want dependency edges to differ from parent-child edges in colour or weight as well as dash, so that the distinction does not rely on one cue.
+102. As a project member, I want hovering an edge to raise it and show its relation label, so that I can identify overlapping edges.
+103. As a project member, I want coincident parent-child and dependency edges to be offset or haloed, so that both remain visible.
+104. As a project member, I want a count or list when several dependencies share a gap, so that I can tell a merged-looking line is multiple relations.
+105. As a project member, I want the legend to explain that hovering an edge identifies it, so that I know how to disambiguate.
+
 ## Implementation Decisions
 
 - Extend the existing Web overview rather than creating a second application or a second relationship model.
@@ -121,6 +162,23 @@ Add a graph view backed by the same active tree data and relationships. Render p
 - Reuse existing item-detail loading, focus-return, safe Markdown rendering, Host/Origin validation, and local-only service behavior.
 - Prefer a component seam around the presentation model and graph rendering that can be tested through the public UI. Avoid exposing graph-library objects as application state or requiring tests to assert library internals.
 
+### Page layout and canvas
+
+- The graph fills the content area below the toolbar: no inner fixed-height frame and no decorative border. The right-side detail panel remains; opening it shrinks the graph to the remaining width and refits to that remaining canvas. Unresolved relations sit in a collapsible bottom strip/drawer and never overlay nodes. Window resizing preserves the current viewport and never auto-fits; first graph entry and an explicit direction switch still fit. There is no separate full-screen graph mode.
+- Every graph node contains all of its content inside its card: category shape/name, state, title, blocked reason, and any context badge. Text wraps within the node width; a node grows vertically to fit wrapped content; the layout measures rendered node height so edges and spacing account for it. No graph text is drawn outside a node.
+- A context node keeps the ordinary node layout and is distinguished by a dashed outline around the entire card, without the hatch or left state stripe. Its context indicator is a text badge inside the card; the node's accessible name states the context. No context label is placed outside the node.
+- Expansion actions are presentation-scoped: tree presentation shows the tree's Expand all/Collapse all; graph presentation shows graph-wide Expand all/Collapse all in the graph control area; neither changes the other presentation's state. The structured text alternative mirrors the graph's visible model: a collapsed branch appears as a "Collapsed — N children" row with its own expand control, and the alternative offers "Show all".
+- Only blocking and empty states are centered: no category selected, selected categories with no active work, an empty project, a read failure, and a detail-load failure (centered within the detail panel). Non-blocking notices stay inline at the top and are not centered. Long diagnostics use a centered, width-limited, scrollable block. Unresolved relations remain content in their own area.
+
+### Controls and category selection
+
+- Category selection is a compact "Categories (n)" control opening a multi-select popover with search, select-all, clear-all, and the selected count; it is not a set of inline toolbar options. In graph presentation, the category control, zoom/fit/reset, and direction control share a floating control cluster at the canvas upper-left; the relationship legend sits at the upper-right. In tree and structured-list presentations the same compact control stays in the top toolbar and opens the same popover, with no canvas overlay. Combined mode shows no category selector; grouped mode shows it. The popover is keyboard-operable, closes on Escape or an outside click, does not obstruct nodes when closed, and keeps the select-all recovery action in the filtered-empty state.
+
+### Relationship line rendering
+
+- Dependency edges keep a minimum on-screen dash and gap so a single dependency is visibly dashed at every zoom; the dash pattern must not collapse into a solid line at the default fit. Dependency edges use a clearly different colour and/or weight from parent-child edges in addition to the dash; no distinction relies on colour alone.
+- Hovering an edge raises and thickens it and shows its relation label, for example "X → Y (depends on)"; the structured text alternative remains the keyboard and screen-reader route to the same relations. Where several dependencies share a visual gap, the interface identifies how many pass through it and lets the reader inspect them; dependencies are not aggregated into one line by default. When a parent-child and a dependency edge coincide on the same pair, the dependency is offset or given a halo so both remain visible. The legend keeps its two entries and adds a hint that hovering an edge identifies it.
+
 ## Testing Decisions
 
 - Test externally visible behavior and stable UI/API contracts, not graph-library internals, CSS coordinates, or private component implementation details.
@@ -138,6 +196,13 @@ Add a graph view backed by the same active tree data and relationships. Render p
 - If a graph library requires a browser-only runtime, isolate it behind the UI seam and keep semantic graph transformation tests independent of its rendering engine.
 - Validate the selected dependency and graph-library versions with the frontend lockfile and existing build/check/test commands. Do not make successful tests depend on an external network at runtime.
 
+- Cover the page layout contract: the graph pane has no fixed inner height or decorative frame, the detail panel remains a side panel, unresolved relations are a separate collapsible strip, resizing preserves the viewport, and no full-screen mode exists.
+- Cover node content containment: titles, blocked reasons, and context badges render inside the card; long text wraps; a node's measured height is reflected in the layout; no text escapes the node.
+- Cover context-node treatment: ordinary layout, dashed full-card outline, inside badge, and an accessible name that states the context.
+- Cover presentation-scoped expansion: tree actions affect only the tree, graph actions only the graph, the two states stay separate, and the structured list shows "Collapsed — N children" rows with an expand control plus "Show all".
+- Cover message placement: blocking/empty states centered, non-blocking notices inline, long diagnostics in a width-limited scrollable block, unresolved relations in their own area, and detail failures centered within the detail panel.
+- Cover the category control: compact "Categories (n)" entry, searchable multi-select popover, select-all/clear-all/count, graph upper-left cluster, legend upper-right, tree toolbar entry, combined-mode absence, keyboard/Escape/outside-close, and the filtered-empty recovery.
+- Cover relationship line rendering: the minimum on-screen dash policy, distinct colour/weight, hover raise/label, multi-edge gap identification, coincident pair offset/halo, and the legend hint. Test the dash policy as a pure function and the rendered edge attributes/roles; use a real-browser check for the visual dash and containment cases that jsdom cannot compute.
 ## Out of Scope
 
 - Any Web write operation, editing, archiving, restore, drag-to-reparent, drag-to-depend, or graph-based mutation.
@@ -150,9 +215,13 @@ Add a graph view backed by the same active tree data and relationships. Render p
 - Authentication, multi-user collaboration, live subscriptions, server-side preference synchronization, or cross-browser preference synchronization.
 - Guaranteeing graph readability for an unbounded number of work items; large projects receive navigation and collapse controls but no promise of a single-screen overview.
 
+- A separate full-screen graph mode, default aggregation of same-row dependencies, hiding or fading dependency edges by zoom level, inline category chips in the top toolbar, and centering non-blocking notices.
+
 ## Further Notes
 
 - The existing directory tree remains the primary overview for users who prefer explicit indentation; the graph is an additional presentation, not a replacement.
 - The design map records the settled decisions that led to this specification, including the category context rule, graph edge semantics, hierarchy layout and direction, viewport controls, archive treatment, unresolved handling, accessibility alternative, and legend.
 - A small prototype or spike may be used to compare Cytoscape.js and Svelte Flow against the required read-only hierarchical graph, but it must preserve the user-visible contract in this specification and should not expand scope into an editor.
 - This specification is ready for implementation planning and ticket decomposition after publication.
+- The page optimization decisions extend the same Web surface described above; they are recorded in the design map's Resolved Web page optimization and Verified graph edge behavior sections.
+- The direction switch and the page optimization changes are unimplemented in the current checkout; this specification is the buildable delta over the shipped tree, filtering, graph, and preference behavior.
