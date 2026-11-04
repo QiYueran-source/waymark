@@ -166,7 +166,7 @@ with open(path, encoding="utf-8") as handle:
 
 
 def bad(message):
-    print(f"check-artifacts: {message}", file=sys.stderr)
+    print(f"ASSETS_VERSION_MISMATCH: {message}", file=sys.stderr)
     raise SystemExit(1)
 
 
@@ -199,7 +199,7 @@ PY
             provenance_args+=(--manifest "$manifest")
         fi
         "$RELEASE_ROOT/scripts/release/verify-web-provenance.sh" "${provenance_args[@]}" \
-            || fail "$label: the Web provenance check failed"
+            || fail "ASSETS_VERSION_MISMATCH: $label: the Web provenance check failed"
     else
         # The basic build's serve must refuse rather than start a server. Its
         # failure is the registered WEB_NOT_INCLUDED, before any listener binds.
@@ -242,13 +242,13 @@ check_source_tree() {
     [[ -d "$tree" ]] || fail "$label: expected a $prefix/ directory at the archive root"
 
     for file in README.md LICENSE-MIT LICENSE-APACHE waymark/Cargo.toml \
-        crates/waymark-web/ui/build/index.html \
-        crates/waymark-web/ui/assets-manifest.json; do
+        waymark/crates/waymark-web/ui/build/index.html \
+        waymark/crates/waymark-web/ui/assets-manifest.json; do
         [[ -s "$tree/$file" ]] || fail "$label: missing $prefix/$file"
     done
 
-    python3 - "$tree/crates/waymark-web/ui/assets-manifest.json" \
-        "$tree/crates/waymark-web/ui/build/index.html" "$version" "$git_sha" <<'PY' || exit 1
+    python3 - "$tree/waymark/crates/waymark-web/ui/assets-manifest.json" \
+        "$tree/waymark/crates/waymark-web/ui/build/index.html" "$version" "$git_sha" <<'PY' || exit 1
 import hashlib
 import json
 import sys
@@ -279,33 +279,39 @@ PY
     printf 'OK: %s (source tree and manifest)\n' "$label"
 }
 
-for archive in "${basic_archives[@]}"; do
-    archive_platform="$(archive_platform "$archive")"
-    [[ -z "$platform" || "$archive_platform" == "$platform" ]] || continue
-    [[ "$(archive_version "$archive")" == "$version" ]] \
-        || fail "$(basename "$archive") is not version $version"
-    verify_sha256 "$archive"
-    label="$(basename "$archive")"
-    root="$tmp/${label%.tar.gz}"
-    mkdir -p "$root"
-    tar -xzf "$archive" -C "$root"
-    check_binary_tree "$root" basic "$label"
-    checked=$((checked + 1))
-done
+# Bash 3.2 (the macOS runner default) rejects expanding an empty array under
+# `set -u`, so guard each loop instead of expanding the array unconditionally.
+if [[ ${#basic_archives[@]} -gt 0 ]]; then
+    for archive in "${basic_archives[@]}"; do
+        archive_platform="$(archive_platform "$archive")"
+        [[ -z "$platform" || "$archive_platform" == "$platform" ]] || continue
+        [[ "$(archive_version "$archive")" == "$version" ]] \
+            || fail "$(basename "$archive") is not version $version"
+        verify_sha256 "$archive"
+        label="$(basename "$archive")"
+        root="$tmp/${label%.tar.gz}"
+        mkdir -p "$root"
+        tar -xzf "$archive" -C "$root"
+        check_binary_tree "$root" basic "$label"
+        checked=$((checked + 1))
+    done
+fi
 
-for archive in "${web_archives[@]}"; do
-    archive_platform="$(archive_platform "$archive")"
-    [[ -z "$platform" || "$archive_platform" == "$platform" ]] || continue
-    [[ "$(archive_version "$archive")" == "$version" ]] \
-        || fail "$(basename "$archive") is not version $version"
-    verify_sha256 "$archive"
-    label="$(basename "$archive")"
-    root="$tmp/${label%.tar.gz}"
-    mkdir -p "$root"
-    tar -xzf "$archive" -C "$root"
-    check_binary_tree "$root" web "$label"
-    checked=$((checked + 1))
-done
+if [[ ${#web_archives[@]} -gt 0 ]]; then
+    for archive in "${web_archives[@]}"; do
+        archive_platform="$(archive_platform "$archive")"
+        [[ -z "$platform" || "$archive_platform" == "$platform" ]] || continue
+        [[ "$(archive_version "$archive")" == "$version" ]] \
+            || fail "$(basename "$archive") is not version $version"
+        verify_sha256 "$archive"
+        label="$(basename "$archive")"
+        root="$tmp/${label%.tar.gz}"
+        mkdir -p "$root"
+        tar -xzf "$archive" -C "$root"
+        check_binary_tree "$root" web "$label"
+        checked=$((checked + 1))
+    done
+fi
 
 # Bash 3.2 (the macOS runner default) rejects an empty array under `set -u`, so
 # guard the loop instead of expanding an empty source_archives.

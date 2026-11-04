@@ -71,7 +71,7 @@ manifest="$UI_DIR/assets-manifest.json"
     || fail "the built frontend is missing at $assets. Run: (cd $UI_DIR && npm ci && npm run build)"
 [[ -f "$manifest" ]] \
     || fail "the provenance manifest is missing at $manifest. Run: cargo run -p waymark-web --bin waymark-web-manifest"
-python3 - "$manifest" "$version" "$git_sha" <<'PY' || fail "the frontend manifest does not describe the release being packaged"
+python3 - "$manifest" "$version" "$git_sha" <<'PY' || fail "ASSETS_VERSION_MISMATCH: the frontend manifest does not describe the release being packaged"
 import json
 import sys
 
