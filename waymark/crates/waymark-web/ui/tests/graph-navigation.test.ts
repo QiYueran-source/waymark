@@ -103,6 +103,41 @@ async function trackpadPan(deltaX: number, deltaY: number) {
 	await fireEvent.wheel(pane(), { deltaX, deltaY, clientX: 100, clientY: 100 });
 }
 
+/**
+ * A finger, or two, on the canvas.
+ *
+ * jsdom has a `TouchEvent` but no `Touch` constructor, so the events are built
+ * as plain `Event`s and given the touch lists the canvas reads. That is the
+ * same path a real touch screen produces: the renderer listens for `touchstart`,
+ * `touchmove`, and `touchend` on the pane.
+ */
+function touchEvents(points: Array<[number, number]>): unknown[] {
+	return points.map(([x, y], index) => ({
+		identifier: index + 1,
+		target: pane(),
+		clientX: x,
+		clientY: y,
+		pageX: x,
+		pageY: y,
+		screenX: x,
+		screenY: y,
+		radiusX: 1,
+		radiusY: 1,
+		force: 1
+	}));
+}
+
+async function touch(type: 'touchstart' | 'touchmove' | 'touchend', points: Array<[number, number]>) {
+	const event = new Event(type, { bubbles: true, cancelable: true });
+	const touches = touchEvents(points);
+	Object.defineProperty(event, 'touches', { value: touches });
+	Object.defineProperty(event, 'targetTouches', { value: touches });
+	Object.defineProperty(event, 'changedTouches', { value: touches });
+	pane().dispatchEvent(event);
+	// The renderer coalesces a gesture's moves; let them flush.
+	await new Promise((resolve) => setTimeout(resolve, 50));
+}
+
 describe('the drawing on entry', () => {
 	it('opens fitted to the whole hierarchy instead of at an unzoomed corner', async () => {
 		await openGraph({ trees: { combined: hierarchyTree } });
@@ -197,6 +232,33 @@ describe('panning and zooming', () => {
 		await waitFor(() => expect(viewport().zoom).toBeGreaterThan(panned.zoom));
 	});
 
+	it('pans with one finger and zooms with two, the way a touch screen does', async () => {
+		await openGraph({ trees: { combined: hierarchyTree } });
+		const start = viewport();
+
+		// One finger drags the background: the canvas pans, the scale holds.
+		await touch('touchstart', [[100, 100]]);
+		await touch('touchmove', [[150, 170]]);
+		await touch('touchend', []);
+		await waitFor(() => expect(viewport().x).not.toBe(start.x));
+		const panned = viewport();
+		expect(panned.y).not.toBe(start.y);
+		expect(panned.zoom).toBe(start.zoom);
+
+		// Two fingers moving apart: the canvas zooms, bounded by its range.
+		await touch('touchstart', [
+			[100, 100],
+			[200, 200]
+		]);
+		await touch('touchmove', [
+			[80, 80],
+			[240, 240]
+		]);
+		await touch('touchend', []);
+		await waitFor(() => expect(viewport().zoom).toBeGreaterThan(panned.zoom));
+		expect(viewport().zoom).toBeLessThanOrEqual(MAX_GRAPH_ZOOM);
+	});
+
 	it('zooms in and out from the controls, within the drawing’s zoom range', async () => {
 		await openGraph({ trees: { combined: hierarchyTree } });
 		const start = viewport();
@@ -258,6 +320,34 @@ describe('panning and zooming', () => {
 			);
 			expect(stored?.zoom).toBeCloseTo(entry.zoom, 2);
 		});
+	});
+});
+
+describe('dragging a node', () => {
+	it('refuses the drag and leaves the drawing and its relations as they were', async () => {
+		const { requests } = await openGraph({ trees: { combined: hierarchyTree } });
+		const element = card('wm-h-child');
+		const wrapper = element.closest('.svelte-flow__node') as HTMLElement;
+		const style = wrapper.getAttribute('style');
+		const edges = edgeTriples();
+
+		// A reader who grabs a card and pulls: the canvas is inert, the card is
+		// not draggable, and nothing follows the pointer.
+		await fireEvent.pointerDown(element, { button: 0, clientX: 20, clientY: 20 });
+		await fireEvent.pointerMove(element, { clientX: 220, clientY: 260 });
+		await fireEvent.pointerUp(element, { clientX: 220, clientY: 260 });
+
+		expect(wrapper.getAttribute('style')).toBe(style);
+		expect(edgeTriples()).toEqual(edges);
+		// The whole hierarchy is still drawn where the layout put it.
+		expect(drawnIds()).toEqual(['wm-h-root', 'wm-h-child', 'wm-h-grandchild', 'wm-h-second-root']);
+		expect(viewport().fitted).toBe(true);
+		// Nothing was written down, and nothing was re-read.
+		expect(localStorage.getItem(preferenceKey(projectIdFor(ROOT_A), 'viewport'))).toBeNull();
+		expect(requests.map((request) => request.url)).toEqual([
+			'/api/health',
+			'/api/tree?view=combined'
+		]);
 	});
 });
 
@@ -444,6 +534,15 @@ describe('when browser storage is unavailable', () => {
 		);
 	});
 });
+
+/** The drawn relations, as `kind:from->to`, in document order. */
+function edgeTriples(): string[] {
+	const drawn = screen.getByTestId('graph');
+	return Array.from(drawn.querySelectorAll('[data-testid="graph-edge"]')).map(
+		(edge) =>
+			`${edge.getAttribute('data-edge-kind')}:${edge.getAttribute('data-from')}->${edge.getAttribute('data-to')}`
+	);
+}
 
 /**
  * A node wrapper's placed position and size, as the renderer wrote them.
