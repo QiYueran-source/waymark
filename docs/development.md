@@ -50,8 +50,8 @@ cd waymark
 cargo run --locked -p waymark-web --bin waymark-web-manifest
 ```
 
-CI uploads `build/` and `assets-manifest.json` as one artifact, and every Rust
-job downloads it into `waymark/crates/waymark-web/ui`, so the files land
+CI uploads `build/` and `assets-manifest.json` as one artifact, and both Rust
+matrix jobs download it into `waymark/crates/waymark-web/ui`, so the files land
 exactly where `waymark-web/build.rs` expects them. Locally the commands above
 already leave them in place. Check that both exist:
 
@@ -131,9 +131,11 @@ cargo +1.85.0 build --workspace --locked
 cargo +1.85.0 test --workspace --locked
 ```
 
-`cargo metadata --locked` makes a dependency that raised its MSRV fail here
-instead of in a user's build. This leg uses the default feature set, so it needs
-no frontend tree.
+`cargo metadata --locked` refuses a lockfile that no longer matches the
+manifests, so a dependency bump cannot slip past review. The `cargo build` and
+`cargo test` steps are what enforce the declared `rust-version`: the compiler
+rejects a dependency that requires a newer Rust before it reaches a user. This
+leg uses the default feature set, so it needs no frontend tree.
 
 ## What only runs in CI
 
