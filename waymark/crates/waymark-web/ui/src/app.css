@@ -529,6 +529,13 @@ code {
 	font-weight: 650;
 }
 
+.lifecycle-status {
+	flex: none;
+	color: var(--muted);
+	font-size: 0.78rem;
+	white-space: nowrap;
+}
+
 .state {
 	flex: none;
 	font-size: 0.87rem;

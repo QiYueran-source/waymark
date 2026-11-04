@@ -63,6 +63,8 @@ describe('combined tree', () => {
 
 	it('states the blocked work state in text as well as colour', () => {
 		renderCombined();
+		expect(text(screen.getByTestId('status-wm-bug-login'))).toBe('In progress');
+		expect(text(screen.getByTestId('status-wm-task-ship'))).toBe('Open');
 		const state = screen.getByTestId('state-wm-bug-login');
 		expect(text(state)).toBe('Blocked');
 		expect(state.classList.contains('state-blocked')).toBe(true);

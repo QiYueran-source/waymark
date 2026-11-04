@@ -2,7 +2,7 @@
 	import Shape from './Shape.svelte';
 	import ReferenceList from './ReferenceList.svelte';
 	import type { DependencyEdge, ReferenceNode } from '$lib/tree';
-	import { shapeFor, stateLabel, type TreeNode } from '$lib/types';
+	import { shapeFor, stateLabel, statusLabel, type TreeNode } from '$lib/types';
 
 	let {
 		node,
@@ -88,7 +88,14 @@
 					{node.title}
 				</button>
 
-				<span class="state state-{node.state}" data-testid={`state-${node.id}`}>
+				<span class="lifecycle-status" data-testid={`status-${node.id}`}>
+					{statusLabel(node.status)}
+				</span>
+				<span
+					class="state state-{node.state}"
+					data-testid={`state-${node.id}`}
+					title="Derived from this item's dependencies"
+				>
 					{stateLabel(node.state)}
 				</span>
 			</div>
