@@ -2391,10 +2391,11 @@ is heavier than a fixed top-to-bottom rank layout needs. Cytoscape's equivalent 
   setup.
 - **Edges need explicit geometry.** jsdom reports `getBoundingClientRect()` as all zeros, so
   `<Handle>` components inside a custom node measure 0×0 and the library renders **zero** edges.
-  Giving each node an explicit `width`, `height` and handle metadata
+  Giving each node an explicit `width`, `height` and static handle metadata
   (`handles: [{type: 'source', position: Position.Bottom, x, y, width: 1, height: 1}, …]`) produced
-  the expected two edge paths, including the dashed style and the arrowhead marker. Prefer asserting
-  edge semantics from the model; if the DOM must be asserted, keep the explicit handles.
+  the expected edge paths, including the dashed style and the arrowhead marker — and needs no
+  `<Handle>` component at all, which also keeps the mobile/empty state honest. Prefer asserting edge
+  semantics from the model; if the DOM must be asserted, keep the static handles.
 - **Nodes are addressable.** A node rendered as
   `<div class="svelte-flow__node" role="group" aria-roledescription="node" tabindex="0"
   aria-describedby="svelte-flow__node-desc-1">`; edges as
