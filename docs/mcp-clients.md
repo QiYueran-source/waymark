@@ -5,10 +5,9 @@ It ships in both the basic and Web archives and speaks MCP over **stdio**:
 JSON-RPC on stdin and stdout, with diagnostics on stderr. There is no HTTP
 transport and no authentication to configure.
 
-Its tools cover the same operations as the `waymark` command — project and
-configuration inspection, work-item reads and writes, searches, trees,
-statistics, relationships, and Git history — so an agent can work with the same
-project the CLI uses.
+Its tools expose the tracker's project, configuration, work-item read and write,
+search, tree, statistics, relationship, archive, migration, and Git operations,
+so an agent can work with the same project the CLI uses.
 
 ## Before you configure a client
 
