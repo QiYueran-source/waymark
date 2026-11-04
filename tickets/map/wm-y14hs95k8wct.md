@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-04T12:31:18Z
+updated_at: 2026-11-04T12:33:22Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -249,7 +249,19 @@ The following are the user's requested directions for the existing Web page. The
 - Graph canvas: the user wants to avoid the small framed graph area and let the graph display across the available canvas instead. This concerns usable area, not merely the visual border; the precise relationship to global controls, details, and unresolved content remains open.
 - Project categories and controls: category options such as Implement, Map, and Spec are project-defined and may be numerous, so they should not occupy the page's top toolbar as a fixed set of inline options. The user proposed placing category selection together with zoom and other graph controls at the upper left of the canvas, with the relationship legend at the upper right. The scalable selector design and behavior outside the graphical presentation remain open.
 - Messages: the user requested that warnings, errors, and notices, including the case where no category is selected, be considered for centered presentation. Which message types should be centered, and how non-blocking warnings or lengthy diagnostics behave, remains open.
-- Relationship lines: the user observed sibling nodes connected not only by dashed arrows but also by solid lines with no arrow, one arrow, or two arrows, without clear annotation, and asked for an analysis. The current source defines solid parent-child lines and optional dashed dependency arrows, with an existing two-entry legend. A parent-child and dependency edge may both exist for the same pair, but overlap is only a hypothesis for the observed appearance, not a verified explanation; the screenshot or equivalent reproduction and the cause of one- and two-arrow solid appearances remain to be verified before assigning semantics or adding annotations.
+- Relationship lines: the user observed sibling nodes connected not only by dashed arrows but also by solid lines with no arrow, one arrow, or two arrows, without clear annotation, and asked for an analysis. The current source defines solid parent-child lines and optional dashed dependency arrows, with an existing two-entry legend. A parent-child and dependency edge may both exist for the same pair, but overlap is only a hypothesis for the observed appearance, not a verified explanation; the screenshot or equivalent reproduction and the cause of one- and two-arrow solid appearances remain to be verified before assigning semantics or adding annotations. Verified on 2026-11-04; see Verified graph edge behavior below. The rendering decision remains open.
+
+### Verified graph edge behavior
+
+Investigated on 2026-11-04 against the real project payload and a synthetic overlap payload. No product files changed; the development server was stopped.
+
+- Parent-child edges are solid, 1.5px, with no arrowhead and `data-edge-kind="parent-child"`; the current project has 49.
+- Dependency edges are dashed 6/4, 1.5px, with one arrowhead at the target and `data-edge-kind="dependency"`; the current project has 66. They are separate edges painted after the hierarchy, so a dependency can paint over a coincident parent-child line.
+- Same-row sibling dependencies are routed horizontally through the gap between cards. Their dash phases differ, so multiple overlapping dependencies fill each other's gaps into a visually solid row; an arrowhead at one or both ends belongs to a different dependency. This is the main source of the reported "solid with 0/1/2 arrows" rows, not a single malformed edge.
+- An exact parent-child and dependency coincidence produces the same path; the dashed edge paints over the solid one, leaving a solid-looking line with the dependency arrowhead. This is mechanically confirmed with a synthetic payload but does not occur in the current project's data.
+- Two arrowheads can also be a mutual dependency pair (a dependency cycle); mediated writes reject cycles with `CYCLE_DETECTED`, so that shape only comes from externally edited cyclic data.
+- At the default fit for a large project (about 11%), a 6/4 dash is sub-pixel, so even an isolated dependency edge looks solid. Low zoom is an independent cause.
+- Duplicate dependency entries collapse to one rendered edge; soft links are not drawn.
 
 ### Resolved Web page optimization
 
@@ -325,7 +337,7 @@ The following decisions extend the accepted specification. The Web implementatio
 
 ### Web page optimization: not yet specified
 
-- Reproduce and identify the actual relationship line appearances, including apparently solid one- and two-arrow lines, before choosing any additional legend or edge annotations.
+- How to render overlapping same-row dependencies, coincident parent-child and dependency pairs, and dependency dashes at low zoom, now that the causes are verified.
 
 ### Web, MCP, and distribution follow-up
 
