@@ -243,6 +243,17 @@ describe('collapsing a node', () => {
 		]);
 	});
 
+	it('records how many direct children a collapsed node hides', () => {
+		const graph = buildGraph(hierarchyTree);
+		const collapsed = collapseGraph(graph, new Set(['wm-h-child']));
+		const child = collapsed.nodes.find((node) => node.id === 'wm-h-child');
+		// One direct child is hidden; the grandchild is one generation further
+		// down and is not counted.
+		expect(child).toMatchObject({ collapsed: true, collapsedChildren: 1 });
+		// A node that is not collapsed has no hidden children to count.
+		expect(collapsed.nodes.find((node) => node.id === 'wm-h-root')?.collapsedChildren).toBeUndefined();
+	});
+
 	it('drops a dependency edge whose end is hidden, and keeps the rest', () => {
 		const graph = buildGraph(dependencyTree, WITH_DEPENDENCIES);
 		// `wm-dep-fix` is the hidden child; `wm-dep-ship` still depends on the
@@ -443,6 +454,19 @@ describe('the structured text outline', () => {
 		expect(drawn(outline, 'wm-h-second-root').parent).toBe(
 			'Parent: none; this is a top-level item.'
 		);
+	});
+
+	it('states whether an entry is collapsed and how many children that hides', () => {
+		const collapsed = collapseGraph(buildGraph(hierarchyTree), new Set(['wm-h-child']));
+		const outline = graphOutline(collapsed);
+		expect(drawn(outline, 'wm-h-child')).toMatchObject({
+			collapsed: true,
+			collapsedChildren: 1
+		});
+		expect(drawn(outline, 'wm-h-root')).toMatchObject({
+			collapsed: false,
+			collapsedChildren: 0
+		});
 	});
 
 	it('carries the server’s blocked reason in prose', () => {

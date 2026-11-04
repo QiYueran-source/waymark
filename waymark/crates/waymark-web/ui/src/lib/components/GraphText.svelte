@@ -19,13 +19,24 @@
 	let {
 		outline,
 		selectedId = null,
-		onSelect
+		onSelect,
+		onExpand,
+		onShowAll
 	}: {
 		outline: OutlineEntry[];
 		/** The item whose detail panel is open, if any. */
 		selectedId?: string | null;
 		/** Selecting an item; the trigger lets focus return after the panel closes. */
 		onSelect: (id: string, trigger?: HTMLElement) => void;
+		/**
+		 * Expanding one folded branch from the list.
+		 *
+		 * It writes the same graph collapse set the drawing reads, so expanding
+		 * here reopens the branch everywhere rather than only in this reading.
+		 */
+		onExpand: (id: string) => void;
+		/** Restore the whole hierarchy: the graph-wide expand in words. */
+		onShowAll: () => void;
 	} = $props();
 
 	const items = $derived(outline.filter((entry) => entry.kind === 'item'));
@@ -58,6 +69,17 @@
 		The same work the drawing shows, written out. Every item states its category, its work
 		state, its parent, and its children; each relation is named rather than shown.
 	</p>
+
+	<div class="graph-text-actions">
+		<button
+			type="button"
+			class="graph-text-show-all"
+			data-testid="graph-text-show-all"
+			onclick={onShowAll}
+		>
+			Show all
+		</button>
+	</div>
 
 	<ol class="graph-text-list">
 		{#each items as entry (entry.id)}
@@ -97,6 +119,27 @@
 					<p class="graph-text-relation" data-testid={`graph-text-parent-${entry.id}`}>
 						{entry.parent}
 					</p>
+
+					{#if entry.collapsed}
+						<!-- A folded branch is a described row, not a silent gap: the
+						     count says how much is hidden and the control reopens it
+						     on the same graph collapse set the drawing reads. -->
+						<div
+							class="graph-text-collapsed"
+							data-testid={`graph-text-collapsed-${entry.id}`}
+							data-collapsed-children={entry.collapsedChildren}
+						>
+							<span>Collapsed — {entry.collapsedChildren} children</span>
+							<button
+								type="button"
+								data-testid={`graph-text-expand-${entry.id}`}
+								aria-label={`Expand ${entry.title}`}
+								onclick={() => onExpand(entry.id)}
+							>
+								Expand
+							</button>
+						</div>
+					{/if}
 
 					{#if entry.children.length > 0}
 						<ul class="graph-text-children" data-testid={`graph-text-children-${entry.id}`}>
