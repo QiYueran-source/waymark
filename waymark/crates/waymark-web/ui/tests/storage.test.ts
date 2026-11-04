@@ -43,6 +43,9 @@ describe('project identifier', () => {
 		const namespace = projectIdFor('/projects/alpha');
 		expect(preferenceKey(namespace, 'view')).toBe(`${namespace}:view`);
 		expect(preferenceKey(namespace, 'expanded', 'grouped')).toBe(`${namespace}:expanded:grouped`);
+		// The category scope belongs to the project, not to one tree view: the
+		// grouped tree and the graph filter by the same selection.
+		expect(preferenceKey(namespace, 'categories')).toBe(`${namespace}:categories`);
 	});
 
 	it('refuses a raw project root where a project id is required', () => {
@@ -62,6 +65,7 @@ describe('PreferenceStore', () => {
 		expect(store.readExpanded('combined')).toBeNull();
 		expect(store.readDependencies('combined')).toBe(false);
 		expect(store.readScroll('combined')).toBe(0);
+		expect(store.readCategories()).toBeNull();
 		expect(store.failed).toBe(false);
 	});
 
@@ -72,6 +76,7 @@ describe('PreferenceStore', () => {
 		store.writeExpanded('combined', ['a', 'b']);
 		store.writeDependencies('combined', true);
 		store.writeScroll('combined', 321.6);
+		store.writeCategories(['bug', 'task']);
 
 		const reopened = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
 		expect(reopened.readView()).toBe('grouped');
@@ -80,7 +85,17 @@ describe('PreferenceStore', () => {
 		expect(reopened.readDependencies('combined')).toBe(true);
 		expect(reopened.readDependencies('grouped')).toBe(false);
 		expect(reopened.readScroll('combined')).toBe(322);
+		expect(reopened.readCategories()).toEqual(['bug', 'task']);
 		expect(reopened.failed).toBe(false);
+	});
+
+	it('remembers an empty category selection as a real choice', () => {
+		const storage = memoryStorage();
+		const store = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+		store.writeCategories([]);
+		const reopened = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+		// `null` means "nothing stored, show everything"; `[]` means "show none".
+		expect(reopened.readCategories()).toEqual([]);
 	});
 
 	it('isolates two projects sharing one origin', () => {
@@ -89,9 +104,11 @@ describe('PreferenceStore', () => {
 		const beta = new PreferenceStore(storage, projectIdFor('/projects/beta'));
 		alpha.writeView('grouped');
 		alpha.writeDependencies('combined', true);
+		alpha.writeCategories(['bug']);
 
 		expect(beta.readView()).toBe('combined');
 		expect(beta.readDependencies('combined')).toBe(false);
+		expect(beta.readCategories()).toBeNull();
 		expect(alpha.projectId).not.toBe(beta.projectId);
 	});
 
@@ -101,17 +118,31 @@ describe('PreferenceStore', () => {
 		storage.setItem(preferenceKey(store.projectId, 'view'), 'sideways');
 		storage.setItem(preferenceKey(store.projectId, 'expanded', 'combined'), '{not json');
 		storage.setItem(preferenceKey(store.projectId, 'scroll', 'combined'), '-4');
+		storage.setItem(preferenceKey(store.projectId, 'categories'), '{"bug":true}');
 		expect(store.readView()).toBe('combined');
 		expect(store.readExpanded('combined')).toBeNull();
 		expect(store.readScroll('combined')).toBe(0);
+		expect(store.readCategories()).toBeNull();
+	});
+
+	it('drops non-string entries from a malformed category scope', () => {
+		const storage = memoryStorage();
+		const store = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+		storage.setItem(preferenceKey(store.projectId, 'categories'), '["bug",7,null,"task"]');
+		// Unknown category keys are kept here and dropped when the scope is
+		// resolved against this project's configured categories.
+		expect(store.readCategories()).toEqual(['bug', 'task']);
 	});
 
 	it('degrades without throwing when storage is unavailable', () => {
 		const store = new PreferenceStore(null, projectIdFor('/projects/alpha'));
 		expect(store.failed).toBe(true);
 		expect(store.readView()).toBe('combined');
+		expect(store.readCategories()).toBeNull();
 		expect(() => store.writeView('grouped')).not.toThrow();
+		expect(() => store.writeCategories(['bug'])).not.toThrow();
 		expect(store.readView()).toBe('combined');
+		expect(store.readCategories()).toBeNull();
 	});
 
 	it('reports a write failure instead of throwing', () => {
@@ -122,5 +153,4 @@ describe('PreferenceStore', () => {
 		const store = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
 		expect(() => store.writeDependencies('combined', true)).not.toThrow();
 		expect(store.failed).toBe(true);
-	});
-});
+	});});
