@@ -26,6 +26,18 @@
     "retryable": false
   },
   {
+    "code": "ASSETS_VERSION_MISMATCH",
+    "details": [
+      "kind",
+      "expected",
+      "actual"
+    ],
+    "exit": null,
+    "finding": "error",
+    "location_kinds": [],
+    "retryable": false
+  },
+  {
     "code": "CATEGORY_NOT_FOUND",
     "details": [
       "key"

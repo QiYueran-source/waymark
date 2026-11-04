@@ -129,6 +129,8 @@ pub enum Code {
     DanglingReference,
     /// A persisted system timestamp is internally inconsistent.
     TimestampIncoherent,
+    /// The embedded frontend manifest disagrees with this build.
+    AssetsVersionMismatch,
 }
 
 /// The process exit class of a failure.
@@ -299,6 +301,7 @@ impl Code {
         Code::NotAGitRepository,
         Code::DanglingReference,
         Code::TimestampIncoherent,
+        Code::AssetsVersionMismatch,
     ];
 
     /// The registry row for this code.
@@ -538,6 +541,13 @@ impl Code {
                 &["id", "field", "value", "reason"],
                 &[WorkItem, Field],
             ),
+            Self::AssetsVersionMismatch => spec(
+                None,
+                false,
+                Some(Severity::Error),
+                &["kind", "expected", "actual"],
+                &[],
+            ),
         }
     }
 
@@ -584,6 +594,7 @@ impl Code {
             Self::NotAGitRepository => "NOT_A_GIT_REPOSITORY",
             Self::DanglingReference => "DANGLING_REFERENCE",
             Self::TimestampIncoherent => "TIMESTAMP_INCOHERENT",
+            Self::AssetsVersionMismatch => "ASSETS_VERSION_MISMATCH",
         }
     }
 
@@ -639,6 +650,7 @@ impl Code {
             "NOT_A_GIT_REPOSITORY" => Ok(Self::NotAGitRepository),
             "DANGLING_REFERENCE" => Ok(Self::DanglingReference),
             "TIMESTAMP_INCOHERENT" => Ok(Self::TimestampIncoherent),
+            "ASSETS_VERSION_MISMATCH" => Ok(Self::AssetsVersionMismatch),
             other => Err(UnknownCode(other.to_owned())),
         }
     }
@@ -1390,6 +1402,34 @@ impl WaymarkError {
             "reason": reason,
         }))
         .with_location(Location::work_item(id))
+    }
+
+    /// The embedded frontend manifest disagrees with this build.
+    ///
+    /// `kind` names the disagreement (`version` or `index_html_sha256`);
+    /// `expected` is what this build carries and `actual` is what the manifest
+    /// records. The message names both so a human sees the disagreement without
+    /// parsing the details.
+    pub fn assets_version_mismatch(
+        kind: impl Into<String>,
+        expected: impl Into<String>,
+        actual: impl Into<String>,
+    ) -> Self {
+        let kind = kind.into();
+        let expected = expected.into();
+        let actual = actual.into();
+        Self::new(
+            Code::AssetsVersionMismatch,
+            format!(
+                "the embedded frontend manifest does not match this build: \
+                 {kind} is {actual}, expected {expected}"
+            ),
+        )
+        .with_details(json!({
+            "kind": kind,
+            "expected": expected,
+            "actual": actual,
+        }))
     }
 
     // -- building ---------------------------------------------------------

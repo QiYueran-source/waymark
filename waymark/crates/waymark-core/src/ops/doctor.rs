@@ -178,6 +178,17 @@ impl Report {
         self.counts.errors > 0
     }
 
+    /// Attach one more finding, recounting the severities.
+    ///
+    /// Adapters use this for a check whose inputs it owns — the embedded
+    /// frontend provenance is one — so the finding travels the same report,
+    /// envelope, and strict-exit path as a core finding instead of growing a
+    /// second diagnosis mechanism.
+    pub fn push_finding(&mut self, finding: Finding) {
+        self.findings.push(finding);
+        self.counts = SeverityCounts::of(&self.findings);
+    }
+
     /// The process exit class strict mode asks for.
     ///
     /// A default report always succeeds; strict mode returns the registry's

@@ -41,6 +41,72 @@ pub struct AssetManifest {
     pub files: Vec<AssetFile>,
 }
 
+/// One disagreement between an embedded manifest and the build carrying it.
+///
+/// The build script refuses to embed a manifest that disagrees with the tree, so
+/// a disagreement observed at runtime means the binary or the manifest was
+/// tampered with, or two builds were mixed. It is a health finding, never a
+/// startup failure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AssetMismatch {
+    /// The manifest was generated for a different package version.
+    Version {
+        /// The workspace package version this build carries.
+        expected: String,
+        /// The version the manifest records.
+        actual: String,
+    },
+    /// The manifest's `index.html` entry describes different bytes.
+    IndexHtml {
+        /// The SHA-256 of the `index.html` this build embeds.
+        expected: String,
+        /// The SHA-256 the manifest records.
+        actual: String,
+    },
+}
+
+impl AssetMismatch {
+    /// The details `kind` naming which provenance field disagrees.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Version { .. } => "version",
+            Self::IndexHtml { .. } => "index_html_sha256",
+        }
+    }
+
+    /// What this build carries.
+    pub fn expected(&self) -> &str {
+        match self {
+            Self::Version { expected, .. } | Self::IndexHtml { expected, .. } => expected,
+        }
+    }
+
+    /// What the manifest records.
+    pub fn actual(&self) -> &str {
+        match self {
+            Self::Version { actual, .. } | Self::IndexHtml { actual, .. } => actual,
+        }
+    }
+}
+
+impl std::fmt::Display for AssetMismatch {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Version { expected, actual } => write!(
+                formatter,
+                "the provenance manifest is for version {actual}, but this build is \
+                 version {expected}"
+            ),
+            Self::IndexHtml { expected, actual } => write!(
+                formatter,
+                "the embedded index.html has sha256 {expected}, but the manifest records {actual}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for AssetMismatch {}
+
 /// Why a manifest could not be produced or trusted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ManifestError {
@@ -320,6 +386,43 @@ pub fn verify_build_id(root: &Path, manifest: &AssetManifest) -> Result<(), Mani
         return Err(ManifestError::BuildIdMismatch {
             manifest: manifest.build_id.clone(),
             tree,
+        });
+    }
+    Ok(())
+}
+
+/// Require `manifest` to describe this build's version and `index.html` bytes.
+///
+/// This is the runtime counterpart of the build script's checks: the build will
+/// not embed a manifest that disagrees with the tree, so a disagreement here
+/// means the binary or its manifest changed after the build. It is a health
+/// check, so it returns a value the caller can report instead of failing
+/// startup.
+///
+/// The version is checked first, so a manifest that disagrees about both still
+/// yields exactly one [`AssetMismatch`].
+pub fn verify_agreement(
+    manifest: &AssetManifest,
+    expected_version: &str,
+    index_html: &[u8],
+) -> Result<(), AssetMismatch> {
+    if manifest.version != expected_version {
+        return Err(AssetMismatch::Version {
+            expected: expected_version.to_owned(),
+            actual: manifest.version.clone(),
+        });
+    }
+    let embedded_sha = sha256_hex(index_html);
+    let recorded_sha = manifest
+        .files
+        .iter()
+        .find(|file| file.path == "index.html")
+        .map(|file| file.sha256.clone())
+        .unwrap_or_else(|| "the manifest has no index.html entry".to_owned());
+    if recorded_sha != embedded_sha {
+        return Err(AssetMismatch::IndexHtml {
+            expected: embedded_sha,
+            actual: recorded_sha,
         });
     }
     Ok(())
@@ -699,5 +802,71 @@ mod tests {
             release_git_sha(true, Some("  ".to_owned())),
             Err(ManifestError::ReleaseWithoutGitSha)
         ));
+    }
+
+    /// The shell used by the agreement tests, with its independently known hash.
+    const INDEX: &[u8] = b"<!doctype html>\n";
+    const INDEX_SHA: &str = "335fca8574f060eea24ebcdae6b78f32414f5de03da1084fd0e73d710768e3a9";
+
+    fn manifest_for(index_sha: &str, version: &str) -> AssetManifest {
+        AssetManifest {
+            version: version.to_owned(),
+            git_sha: None,
+            build_id: "build-42".to_owned(),
+            files: vec![AssetFile {
+                path: "index.html".to_owned(),
+                sha256: index_sha.to_owned(),
+                size: INDEX.len() as u64,
+            }],
+        }
+    }
+
+    #[test]
+    fn verify_agreement_accepts_the_manifest_for_this_build_and_shell() {
+        let manifest = manifest_for(INDEX_SHA, "0.1.0");
+        verify_agreement(&manifest, "0.1.0", INDEX).expect("the manifest describes this build");
+    }
+
+    #[test]
+    fn verify_agreement_reports_a_version_mismatch_as_expected_and_actual() {
+        let manifest = manifest_for(INDEX_SHA, "0.1.0");
+        let mismatch = verify_agreement(&manifest, "0.2.0", INDEX)
+            .expect_err("a manifest for another version is a disagreement");
+        assert_eq!(
+            mismatch,
+            AssetMismatch::Version {
+                expected: "0.2.0".to_owned(),
+                actual: "0.1.0".to_owned(),
+            }
+        );
+        assert_eq!(mismatch.kind(), "version");
+        assert_eq!(mismatch.expected(), "0.2.0");
+        assert_eq!(mismatch.actual(), "0.1.0");
+    }
+
+    #[test]
+    fn verify_agreement_reports_the_index_hash_as_expected_and_actual() {
+        let stale = "00".repeat(32);
+        let manifest = manifest_for(&stale, "0.1.0");
+        let mismatch = verify_agreement(&manifest, "0.1.0", INDEX)
+            .expect_err("a manifest for other index.html bytes is a disagreement");
+        assert_eq!(
+            mismatch,
+            AssetMismatch::IndexHtml {
+                expected: INDEX_SHA.to_owned(),
+                actual: stale,
+            }
+        );
+        assert_eq!(mismatch.kind(), "index_html_sha256");
+        assert_eq!(mismatch.expected(), INDEX_SHA);
+    }
+
+    #[test]
+    fn verify_agreement_reports_one_disagreement_when_version_and_shell_differ() {
+        let stale = "00".repeat(32);
+        let manifest = manifest_for(&stale, "0.1.0");
+        let mismatch = verify_agreement(&manifest, "0.2.0", INDEX)
+            .expect_err("both disagreements are still one finding");
+        assert_eq!(mismatch.kind(), "version");
     }
 }
