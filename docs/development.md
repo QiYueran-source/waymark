@@ -38,6 +38,7 @@ cd waymark/crates/waymark-web/ui
 npm ci
 npm run check
 npm run build
+npm test
 ```
 
 `npm run build` writes `waymark/crates/waymark-web/ui/build`. The embedding

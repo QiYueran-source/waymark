@@ -50,6 +50,9 @@ jobs:
       - name: Build the frontend
         run: npm run build
 
+      - name: Test the frontend
+        run: npm test
+
       - name: Generate the assets manifest
         working-directory: waymark
         run: cargo run --locked -p waymark-web --bin waymark-web-manifest
