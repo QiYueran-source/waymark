@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-04T01:53:53Z
+updated_at: 2026-11-04T02:01:24Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -213,6 +213,8 @@ Codes with no exit class, used as warnings and findings: `OWNER_MISMATCH` (warni
 - The DSH view is a right-sidebar tab associated with an active session, so it can be used alongside the conversation. The right sidebar is unavailable without an active session.
 - The sidebar follows the current DSH session workspace to the corresponding Waymark project rather than maintaining a separate project list. On session or workspace changes it follows the new context. If no Waymark project is found, explain the condition without automatically initializing one.
 - Initial DSH sidebar support targets the DSH server and browser running on the same machine. Supporting a remote browser requires separate future work and a security-reviewed access design. These decisions were confirmed by the user on 2026-11-04.
+- For this planning effort, do not add project-wide tracker fields just to distinguish decision-ticket type or claim state; the user does not need that distinction for now. Keep work items in Waymark and use its native parent and dependency relations.
+- Keep research results local for now; do not push branches or open pull requests. These planning-process decisions were confirmed by the user on 2026-11-04.
 
 ### Reopened decisions: Web, MCP, and distribution
 
