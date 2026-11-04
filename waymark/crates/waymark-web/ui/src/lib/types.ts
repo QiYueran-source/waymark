@@ -85,6 +85,15 @@ export type TreeData = CombinedTree | GroupedTree;
 /** The selected view, remembered per project in browser storage. */
 export type ViewName = TreeData['view'];
 
+/**
+ * How the hierarchy is presented: as an indented tree or as a graph.
+ *
+ * A presentation is a rendering choice, not a data view: both presentations
+ * read the same `TreeData`, and the choice is stored per project separately
+ * from [`ViewName`].
+ */
+export type PresentationName = 'tree' | 'graph';
+
 /** `GET /api/health` data. */
 export interface Health {
 	status: string;

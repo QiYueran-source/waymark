@@ -11,14 +11,22 @@
 	 */
 	import { onMount, tick } from 'svelte';
 	import DetailPanel from './DetailPanel.svelte';
+	import GraphView from './GraphView.svelte';
 	import ReadFailure from './ReadFailure.svelte';
 	import TreeView from './TreeView.svelte';
 	import UnresolvedList from './UnresolvedList.svelte';
 	import { ApiFailure, fetchHealth, fetchItem, fetchTree } from '$lib/api';
 	import type { Failure } from '$lib/failure';
+	import { buildGraph } from '$lib/graph';
 	import { allIds, summarize, visibleRoots } from '$lib/tree';
 	import { browserStorage, PreferenceStore, projectIdFor } from '$lib/storage';
-	import type { CategoryGroup, ItemDetail, TreeData, ViewName } from '$lib/types';
+	import type {
+		CategoryGroup,
+		ItemDetail,
+		PresentationName,
+		TreeData,
+		ViewName
+	} from '$lib/types';
 
 	let {
 		fetchImpl = globalThis.fetch,
@@ -32,6 +40,7 @@
 
 	let projectRoot = $state('');
 	let view = $state<ViewName>('combined');
+	let presentation = $state<PresentationName>('tree');
 	let treeData = $state<TreeData | null>(null);
 	let readFailure = $state<Failure | null>(null);
 	let loadingTree = $state(true);
@@ -64,6 +73,11 @@
 	);
 	/** The screen's one finding: how much work there is and what is held up. */
 	const summary = $derived(treeData === null ? '' : summarize(treeData));
+	/**
+	 * The graph is drawn from the tree payload already loaded, so switching
+	 * presentation costs no read. `null` until the first tree arrives.
+	 */
+	const workGraph = $derived(treeData === null ? null : buildGraph(treeData));
 
 	const PERSISTENCE_NOTICE =
 		'Preferences could not be saved in this browser. The view still works, but these choices may reset when the page reloads.';
@@ -122,6 +136,9 @@
 			// The preference namespace is derived once, here, from the health payload.
 			store = new PreferenceStore(storage, projectIdFor(projectRoot));
 			syncNotice();
+			// The presentation is a property of the project, not of the data view:
+			// restore it once, before the first tree read.
+			presentation = store.readPresentation();
 			await loadTree(store.readView());
 		} catch (error) {
 			readFailure = toFailure(error);
@@ -135,6 +152,19 @@
 		persist((current) => current.writeScroll(view, offset));
 		persist((current) => current.writeView(next));
 		await loadTree(next);
+	}
+
+	/**
+	 * Switch between the tree and the graph.
+	 *
+	 * The choice is one per project, so it is stored on its own key and survives
+	 * a change of data view. Nothing is re-read: both presentations render the
+	 * tree payload already in memory.
+	 */
+	function selectPresentation(next: PresentationName): void {
+		if (next === presentation) return;
+		presentation = next;
+		persist((current) => current.writePresentation(next));
 	}
 
 	function toggleNode(id: string): void {
@@ -262,6 +292,30 @@
 			</label>
 		</fieldset>
 
+		<fieldset class="views">
+			<legend class="sr-only">Presentation</legend>
+			<label class="segment">
+				<input
+					type="radio"
+					name="presentation"
+					value="tree"
+					checked={presentation === 'tree'}
+					onchange={() => selectPresentation('tree')}
+				/>
+				<span>Tree</span>
+			</label>
+			<label class="segment">
+				<input
+					type="radio"
+					name="presentation"
+					value="graph"
+					checked={presentation === 'graph'}
+					onchange={() => selectPresentation('graph')}
+				/>
+				<span>Graph</span>
+			</label>
+		</fieldset>
+
 		{#if summary}
 			<p class="summary" data-testid="tree-summary">{summary}</p>
 		{/if}
@@ -279,6 +333,7 @@
 	<main class="layout">
 		<section
 			class="tree-pane"
+			class:graph-pane-host={presentation === 'graph'}
 			bind:this={treePane}
 			onscroll={handleScroll}
 			aria-label="Work items"
@@ -298,16 +353,24 @@
 					</p>
 				</div>
 			{:else if treeData}
-				<TreeView
-					{view}
-					{roots}
-					{groups}
-					{expanded}
-					{dependenciesVisible}
-					selectedId={selectedId}
-					onToggle={toggleNode}
-					onSelect={(id, trigger) => void selectItem(id, trigger)}
-				/>
+				{#if presentation === 'graph' && workGraph}
+					<GraphView
+						graph={workGraph}
+						{selectedId}
+						onSelect={(id, trigger) => void selectItem(id, trigger)}
+					/>
+				{:else}
+					<TreeView
+						{view}
+						{roots}
+						{groups}
+						{expanded}
+						{dependenciesVisible}
+						{selectedId}
+						onToggle={toggleNode}
+						onSelect={(id, trigger) => void selectItem(id, trigger)}
+					/>
+				{/if}
 				{#if unresolved.length > 0}
 					<UnresolvedList items={unresolved} />
 				{/if}

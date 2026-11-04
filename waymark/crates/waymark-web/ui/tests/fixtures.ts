@@ -71,6 +71,74 @@ export const combinedTree: CombinedTree = {
 	categories: [BUG, TASK]
 };
 
+/**
+ * A deeper hierarchy with two roots: root → child → grandchild, plus a second
+ * unrelated root. Used to check depth, placement, and that no synthetic root
+ * is invented.
+ */
+const hierarchyGrandchild: TreeNode = {
+	id: 'wm-h-grandchild',
+	title: 'Verify the fix',
+	category: TASK,
+	status: 'open',
+	state: 'ready',
+	ready: true,
+	blocked: false,
+	blocked_reason: null,
+	parent: 'wm-h-child',
+	dependencies: [],
+	children: []
+};
+
+const hierarchyChild: TreeNode = {
+	id: 'wm-h-child',
+	title: 'Reproduce the crash',
+	category: BUG,
+	status: 'in_progress',
+	state: 'in_progress',
+	ready: false,
+	blocked: false,
+	blocked_reason: null,
+	parent: 'wm-h-root',
+	dependencies: [],
+	children: [hierarchyGrandchild]
+};
+
+const hierarchyRoot: TreeNode = {
+	id: 'wm-h-root',
+	title: 'Crashes on start',
+	category: BUG,
+	status: 'in_progress',
+	state: 'blocked',
+	ready: false,
+	blocked: true,
+	blocked_reason: 'waiting on wm-h-child (unfinished)',
+	parent: null,
+	dependencies: [],
+	children: [hierarchyChild]
+};
+
+const hierarchySecondRoot: TreeNode = {
+	id: 'wm-h-second-root',
+	title: 'Document the release',
+	category: TASK,
+	status: 'open',
+	state: 'ready',
+	ready: true,
+	blocked: false,
+	blocked_reason: null,
+	parent: null,
+	dependencies: [],
+	children: []
+};
+
+export const hierarchyTree: CombinedTree = {
+	view: 'combined',
+	roots: [hierarchyRoot, hierarchySecondRoot],
+	unresolved: [],
+	categories: [BUG, TASK]
+};
+
 export const groupedTree: GroupedTree = {
 	view: 'grouped',
 	groups: [
@@ -201,15 +269,27 @@ export interface FetchOptions {
 	healthFailure?: Record<string, unknown>;
 }
 
+/** One request the UI made, method and URL, so tests can prove read-only. */
+export interface RecordedRequest {
+	method: string;
+	url: string;
+}
+
 /** A browser `fetch` backed by fixed envelopes, recording requested URLs. */
 export function makeFetch(options: FetchOptions): {
 	fetchImpl: typeof fetch;
 	urls: string[];
+	requests: RecordedRequest[];
 } {
 	const urls: string[] = [];
-	const impl = async (input: RequestInfo | URL): Promise<Response> => {
+	const requests: RecordedRequest[] = [];
+	const impl = async (
+		input: RequestInfo | URL,
+		init?: RequestInit
+	): Promise<Response> => {
 		const raw = String(input);
 		urls.push(raw);
+		requests.push({ method: (init?.method ?? 'GET').toUpperCase(), url: raw });
 		const url = new URL(raw, 'http://localhost:7331');
 		if (url.pathname === '/api/health') {
 			if (options.healthFailure) return jsonResponse(options.healthFailure, 500);
@@ -235,5 +315,5 @@ export function makeFetch(options: FetchOptions): {
 		}
 		return new Response('not found', { status: 404 });
 	};
-	return { fetchImpl: impl as unknown as typeof fetch, urls };
+	return { fetchImpl: impl as unknown as typeof fetch, urls, requests };
 }

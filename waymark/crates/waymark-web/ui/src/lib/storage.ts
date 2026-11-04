@@ -12,7 +12,7 @@
  * show a concise notice.
  */
 
-import type { ViewName } from './types';
+import type { PresentationName, ViewName } from './types';
 
 /** The preference namespace. Bump the version if the stored shape changes. */
 export const STORAGE_PREFIX = 'waymark.web.v1';
@@ -46,7 +46,7 @@ export function projectIdFor(root: string): ProjectId {
 /** The key for one preference of one view in one project. */
 export function preferenceKey(
 	projectId: ProjectId,
-	preference: 'view' | 'expanded' | 'dependencies' | 'scroll',
+	preference: 'view' | 'presentation' | 'expanded' | 'dependencies' | 'scroll',
 	view?: ViewName
 ): string {
 	return view === undefined
@@ -65,6 +65,10 @@ export function browserStorage(): Storage | null {
 
 function isViewName(value: string | null): value is ViewName {
 	return value === 'combined' || value === 'grouped';
+}
+
+function isPresentationName(value: string | null): value is PresentationName {
+	return value === 'tree' || value === 'graph';
 }
 
 function parseStringArray(raw: string | null): string[] | null {
@@ -132,6 +136,22 @@ export class PreferenceStore {
 
 	writeView(view: ViewName): void {
 		this.write(preferenceKey(this.projectId, 'view'), view);
+	}
+
+	/**
+	 * The chosen presentation, `tree` when unset or unreadable.
+	 *
+	 * One presentation per project, not per view: the graph and the tree both
+	 * render whichever view is selected, so switching between `combined` and
+	 * `grouped` must not silently change how the reader is looking at it.
+	 */
+	readPresentation(): PresentationName {
+		const raw = this.read(preferenceKey(this.projectId, 'presentation'));
+		return isPresentationName(raw) ? raw : 'tree';
+	}
+
+	writePresentation(presentation: PresentationName): void {
+		this.write(preferenceKey(this.projectId, 'presentation'), presentation);
 	}
 
 	/**

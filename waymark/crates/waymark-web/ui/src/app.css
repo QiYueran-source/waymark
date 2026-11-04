@@ -584,6 +584,128 @@ code {
 	vertical-align: 0.03em;
 }
 
+/* Graph ------------------------------------------------------------------- */
+
+/* The drawing fills a definite box of its own; anything below it — the
+   unresolved list — still scrolls into view in the same pane. */
+.tree-pane.graph-pane-host {
+	padding-top: 0.6rem;
+}
+
+.graph-pane {
+	position: relative;
+	height: clamp(22rem, 68vh, 48rem);
+	background: var(--sheet);
+	border: 1px solid var(--line);
+	border-radius: 4px;
+}
+
+/* The drawing is read-only, so nothing in it advertises an affordance. */
+.graph-canvas {
+	--xy-edge-stroke: var(--guide);
+	--xy-edge-stroke-width: 1.5px;
+	--xy-background-color: var(--sheet);
+}
+
+.graph-node {
+	--state-stripe: transparent;
+	display: flex;
+	flex-direction: column;
+	gap: 0.12rem;
+	box-sizing: border-box;
+	width: 100%;
+	height: 100%;
+	padding: 0.42rem 0.62rem 0.5rem 0.72rem;
+	background: var(--panel);
+	border: 1px solid var(--line-strong);
+	border-left: 3px solid var(--state-stripe);
+	border-radius: 4px;
+	cursor: default;
+}
+
+.graph-node[data-state='ready'] {
+	--state-stripe: var(--state-ready-ink);
+}
+
+.graph-node[data-state='in_progress'] {
+	--state-stripe: var(--state-progress-ink);
+}
+
+.graph-node[data-state='blocked'] {
+	--state-stripe: var(--state-blocked-ink);
+}
+
+.graph-node[data-state='closed'] {
+	--state-stripe: var(--state-closed-ink);
+}
+
+.graph-node.selected {
+	background: var(--accent-soft);
+	border-color: var(--accent);
+}
+
+.graph-node-line {
+	display: flex;
+	align-items: baseline;
+	gap: 0.55rem;
+	min-width: 0;
+}
+
+.graph-node-title {
+	flex: 1 1 auto;
+	min-width: 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: var(--ink);
+	font-size: 0.9rem;
+	line-height: 1.25;
+	text-align: left;
+	text-decoration-thickness: 1px;
+	text-underline-offset: 0.18em;
+	overflow-wrap: anywhere;
+}
+
+.graph-node-title:hover {
+	color: var(--accent);
+	text-decoration: underline;
+}
+
+.graph-node-title.selected {
+	font-weight: 650;
+}
+
+/* A blocked node keeps its reason in the card; the row stays scannable. */
+.graph-node .blocked-reason {
+	max-width: none;
+	font-size: 0.76rem;
+	line-height: 1.25;
+}
+
+.graph-legend {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	padding: 0.28rem 0.5rem;
+	background: var(--panel);
+	border: 1px solid var(--line);
+	border-radius: 3px;
+	color: var(--muted);
+	font-size: 0.78rem;
+	white-space: nowrap;
+}
+
+.legend-edge {
+	flex: none;
+	width: 1.5rem;
+	height: 0.5rem;
+}
+
+.legend-edge line {
+	stroke: var(--guide);
+	stroke-width: 1.5;
+}
+
 /* Dependency overlays ----------------------------------------------------- */
 
 .edges,
