@@ -53,7 +53,7 @@ dist_version="$(basename "$web_dist")"
 dist_version="${dist_version#waymark-web-dist-v}"
 dist_version="${dist_version%.tar.gz}"
 [[ "$dist_version" == "$version" ]] \
-    || fail "the frontend archive is for version $dist_version, expected $version"
+    || fail "ASSETS_VERSION_MISMATCH: the frontend archive is for version $dist_version, expected $version"
 
 mkdir -p "$out_dir"
 work="$(mktemp -d "${TMPDIR:-/tmp}/waymark-source.XXXXXX")"
@@ -66,12 +66,12 @@ printf '==> archiving %s at %s\n' "$rev" "$git_sha"
 git -C "$RELEASE_ROOT" archive --format=tar --prefix="$prefix/" "$rev" \
     | tar -xf - -C "$staging"
 
-ui="$staging/$prefix/crates/waymark-web/ui"
+ui="$staging/$prefix/waymark/crates/waymark-web/ui"
 mkdir -p "$ui"
 printf '==> adding the built frontend from %s\n' "$(basename "$web_dist")"
 tar -xzf "$web_dist" -C "$ui"
 
-python3 - "$ui/assets-manifest.json" "$ui/build/index.html" "$version" "$git_sha" <<'PY' || fail "the source tarball's frontend does not describe this release"
+python3 - "$ui/assets-manifest.json" "$ui/build/index.html" "$version" "$git_sha" <<'PY' || fail "ASSETS_VERSION_MISMATCH: the source tarball's frontend does not describe this release"
 import hashlib
 import json
 import sys

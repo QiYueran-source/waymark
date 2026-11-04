@@ -74,5 +74,6 @@ pub use server::{
     bind, default_assets_dir, ensure_assets, serve, Running, WebConfig, WebError, LOOPBACK,
 };
 
-/// The default development port, mirrored from the launcher's `--port` default.
-pub const DEFAULT_PORT: u16 = 7331;
+/// The default loopback port, re-exported from `waymark_core` so the Web
+/// service, the launcher, and the CLI share one value.
+pub use waymark_core::DEFAULT_PORT;

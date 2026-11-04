@@ -19,6 +19,13 @@
 //! - [`view`] — the shared JSON renderers the CLI and MCP adapters publish, so
 //!   one machine payload is stated once.
 
+/// The default loopback port for the read-only Web view.
+///
+/// This is the single home for the value: `waymark-web` re-exports it as
+/// `DEFAULT_PORT`, the Web server and launcher read it, and the CLI uses it in
+/// both build variants so the basic build cannot drift.
+pub const DEFAULT_PORT: u16 = 7331;
+
 pub mod config;
 pub mod envelope;
 pub mod error;
@@ -51,3 +58,16 @@ pub use query::{Filters, Projection, Query, Sort, SortField, Window};
 pub use readiness::{Graph, Readiness};
 pub use store::{InitOptions, Project};
 pub use time::{Clock, FixedClock, SystemClock, Timestamp};
+
+#[cfg(test)]
+mod tests {
+    use super::DEFAULT_PORT;
+
+    #[test]
+    fn the_default_loopback_port_is_7331() {
+        // The functional specification names 7331 as the observable default;
+        // this literal is the independent source of truth that keeps the one
+        // constant from drifting.
+        assert_eq!(DEFAULT_PORT, 7331);
+    }
+}

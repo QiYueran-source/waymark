@@ -47,6 +47,7 @@ rm -f "$out"
 # this step rather than shipping silently.
 cargo-about generate \
     --locked \
+    --fail \
     --manifest-path "$WAYMARK_DIR/Cargo.toml" \
     --config "$RELEASE_ROOT/scripts/release/about.toml" \
     --output-file "$out" \

@@ -37,7 +37,7 @@ done
 [[ -f "$ui/build/index.html" ]] || fail "the built frontend is missing at $ui/build"
 [[ -f "$ui/assets-manifest.json" ]] || fail "the provenance manifest is missing at $ui/assets-manifest.json"
 
-python3 - "$ui/assets-manifest.json" "$version" "$git_sha" <<'PY' || fail "the frontend manifest does not describe this release"
+python3 - "$ui/assets-manifest.json" "$version" "$git_sha" <<'PY' || fail "ASSETS_VERSION_MISMATCH: the frontend manifest does not describe this release"
 import json
 import sys
 

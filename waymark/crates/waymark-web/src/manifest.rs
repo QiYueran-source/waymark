@@ -534,8 +534,12 @@ fn validate_shape(manifest: &AssetManifest) -> Result<(), ManifestError> {
     Ok(())
 }
 
-/// A relative, `/`-separated path with no traversal and no empty segment.
-fn safe_relative(path: &str) -> bool {
+/// Whether `path` is a non-empty, `/`-separated path with no `.`, `..`,
+/// backslash, NUL, or empty segment.
+///
+/// Shared with the asset server so the manifest validator and the request path
+/// guard cannot disagree about what a safe relative path is.
+pub(crate) fn safe_relative(path: &str) -> bool {
     if path.is_empty() || path.starts_with('/') || path.contains('\\') || path.contains('\0') {
         return false;
     }
