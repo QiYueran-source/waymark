@@ -185,6 +185,46 @@ export const MIN_FIT_ZOOM = 0.05;
 export const GRAPH_FIT_PADDING = 0.1;
 
 /**
+ * The smallest on-screen dash a dependency edge may draw, in screen pixels.
+ *
+ * `stroke-dasharray` is in drawing coordinates, so the canvas transform scales
+ * it with the zoom: a fixed 6/4 pattern is sub-pixel at the default fit for a
+ * large project and reads as a solid line. These are the lengths the reader
+ * must still see, whatever the zoom. Colour and weight carry the same
+ * distinction, so the dash is never the only cue.
+ */
+export const DEPENDENCY_DASH_SCREEN = 8;
+/** The smallest on-screen gap between dashes, in screen pixels. */
+export const DEPENDENCY_GAP_SCREEN = 6;
+
+function roundPattern(value: number): number {
+	// Round up, never down: the pattern is a floor for the reader's eye, so a
+	// rounded-down hundredth must not dip the screen-space dash below the
+	// minimum.
+	return Math.ceil(value * 100) / 100;
+}
+
+/**
+ * The dash pattern for a dependency edge, in drawing coordinates, at `zoom`.
+ *
+ * The pattern is divided by the zoom so its screen-space dash and gap stay at
+ * least [`DEPENDENCY_DASH_SCREEN`] and [`DEPENDENCY_GAP_SCREEN`] pixels: the
+ * drawn path keeps visible gaps instead of collapsing into a solid line at the
+ * default fit of a large drawing. The zoom is clamped to the canvas's own
+ * range, so an unusable value (zero, a negative, `NaN` before the first
+ * measure) yields the neutral pattern rather than an infinite dash.
+ */
+export function dependencyDashArray(zoom: number): string {
+	const scale =
+		Number.isFinite(zoom) && zoom > 0
+			? Math.min(Math.max(zoom, MIN_FIT_ZOOM), MAX_GRAPH_ZOOM)
+			: 1;
+	return `${roundPattern(DEPENDENCY_DASH_SCREEN / scale)} ${roundPattern(
+		DEPENDENCY_GAP_SCREEN / scale
+	)}`;
+}
+
+/**
  * The canvas size assumed until the page has measured the drawing's box.
  *
  * A browser measures the box and fits against its real size. Server rendering
@@ -326,6 +366,63 @@ function dependencyOverlayEdges(nodes: GraphNode[]): GraphDependencyEdge[] {
 		}
 	}
 	return edges;
+}
+
+/**
+ * One corridor of the top-to-bottom layout that several dependencies cross.
+ *
+ * The overlay in a drawn graph can put more than one dashed line on the same
+ * visual route: siblings in one row point at each other along that row, or
+ * several children of one generation depend on the same item above or below
+ * them. The lines stay separate — this is a count, not an aggregate — so the
+ * interface can say how many run there while each one keeps its own label.
+ */
+export interface DependencyGap {
+	/** Stable route key: `row:<depth>` or `gap:<low>:<high>`. */
+	key: string;
+	/** The gap in words, for the count marker's text. */
+	description: string;
+	/** How many dependency edges use this corridor. */
+	count: number;
+	/** The ids of those edges, so each one stays inspectable on its own. */
+	edgeIds: string[];
+}
+
+/**
+ * Count the dependency edges that share each generation gap.
+ *
+ * Rows come from the model's depth, not from measured pixels: dependencies
+ * between two items of one generation travel along that row, and dependencies
+ * between different generations cross the corridor between them. The result is
+ * ordered by route key, so the same drawing always reports the same gaps.
+ */
+export function dependencyGaps(graph: WorkGraph): DependencyGap[] {
+	const depthById = new Map(graph.nodes.map((node) => [node.id, node.depth]));
+	const groups = new Map<string, DependencyGap>();
+
+	for (const edge of graph.dependencies) {
+		const from = depthById.get(edge.from);
+		const to = depthById.get(edge.to);
+		if (from === undefined || to === undefined) continue;
+		const low = Math.min(from, to);
+		const high = Math.max(from, to);
+		const sameRow = low === high;
+		const key = sameRow ? `row:${low}` : `gap:${low}:${high}`;
+		const description = sameRow
+			? `generation ${low} row`
+			: `the gap between generations ${low} and ${high}`;
+		const existing = groups.get(key);
+		if (existing === undefined) {
+			groups.set(key, { key, description, count: 1, edgeIds: [edge.id] });
+		} else {
+			existing.count += 1;
+			existing.edgeIds.push(edge.id);
+		}
+	}
+
+	return [...groups.values()].sort((left, right) =>
+		left.key < right.key ? -1 : left.key > right.key ? 1 : 0
+	);
 }
 
 /**

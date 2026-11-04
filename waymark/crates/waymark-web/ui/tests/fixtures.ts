@@ -268,6 +268,43 @@ export const dependencyTree: CombinedTree = {
 };
 
 /**
+ * Several dependencies routed through the same visual gaps:
+ *
+ * - `wm-gap-a`, `wm-gap-b`, and `wm-gap-c` all depend on `wm-gap-other`, so
+ *   three dashed lines pass through the gap between generation 0 and 1;
+ * - `wm-gap-a` depends on `wm-gap-b` and `wm-gap-b` on `wm-gap-c`, so two
+ *   dashed lines run along generation 1's row.
+ */
+const gapChild = (id: string, dependencies: string[]): TreeNode =>
+	treeNode({
+		id,
+		title: `Gap child ${id.slice(-1).toUpperCase()}`,
+		category: BUG,
+		parent: 'wm-gap-root',
+		dependencies
+	});
+
+const gapRoot = treeNode({
+	id: 'wm-gap-root',
+	title: 'Gap root',
+	category: BUG,
+	children: [
+		gapChild('wm-gap-a', ['wm-gap-other', 'wm-gap-b']),
+		gapChild('wm-gap-b', ['wm-gap-other', 'wm-gap-c']),
+		gapChild('wm-gap-c', ['wm-gap-other'])
+	]
+});
+
+const gapOther = treeNode({ id: 'wm-gap-other', title: 'Gap other root', category: TASK });
+
+export const multiDependencyTree: CombinedTree = {
+	view: 'combined',
+	roots: [gapRoot, gapOther],
+	unresolved: [],
+	categories: [BUG, TASK]
+};
+
+/**
  * Two unrelated roots joined only by a dependency, one per category:
  *
  * - `wm-scope-task` (Tasks) depends on `wm-scope-bug` (Bugs) across categories;

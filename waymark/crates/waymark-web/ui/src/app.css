@@ -25,6 +25,10 @@
 	--line-strong: #bcc5bc;
 	--guide: #bec9c1;
 	--dash: #a8b3aa;
+	/* Dependencies get their own cool blue-grey, so their distinction from the
+	   hierarchy survives greyscale as a weight difference but is also a colour
+	   difference; it is never the only cue. */
+	--dep-edge: #526b86;
 	--accent: #1e6257;
 	--accent-soft: #dfeae4;
 	--focus: #2b6f9d;
@@ -904,11 +908,16 @@ code {
 }
 
 /* The dependency overlay is drawn dashed and directed; its stroke colour and
-   arrowhead come from the app's palette, not the library's default. */
+   arrowhead come from the app's palette, not the library's default. The dash
+   pattern itself is set on the path from the current zoom (see
+   `dependencyDashArray`), so it cannot collapse to a solid line at a low zoom. */
 .graph-canvas .svelte-flow__edge[data-edge-kind='dependency'] .svelte-flow__edge-path {
-	stroke: var(--dash);
-	stroke-width: 1.5;
-	stroke-dasharray: 6 4;
+	stroke: var(--dep-edge);
+}
+
+/* An edge is a relation, not a control: hovering only identifies it. */
+.graph-canvas .svelte-flow__edge[data-edge-kind] {
+	cursor: help;
 }
 
 /*
@@ -1185,11 +1194,41 @@ code {
 }
 
 .legend-edge.dashed line {
-	stroke: var(--dash);
+	stroke: var(--dep-edge);
+	stroke-width: 2.25;
 }
 
 .legend-edge polygon {
-	fill: var(--dash);
+	fill: var(--dep-edge);
+}
+
+/* The legend also says how to identify a line where several share a gap. */
+.legend-hint {
+	margin: 0;
+	padding-top: 0.15rem;
+	border-top: 1px solid var(--line);
+	color: var(--faint);
+	font-style: italic;
+}
+
+/* Where several dependencies cross one generation gap, the marker states the
+   count; the lines themselves stay separate and each is hoverable. */
+.graph-gap-counts {
+	display: flex;
+	flex-direction: column;
+	gap: 0.15rem;
+	max-width: 19rem;
+	padding: 0.3rem 0.55rem;
+	background: var(--panel);
+	border: 1px solid var(--line);
+	border-radius: 3px;
+	color: var(--muted);
+	font-size: 0.78rem;
+	line-height: 1.3;
+}
+
+.graph-gap-count {
+	margin: 0;
 }
 
 /* Dependency overlays ----------------------------------------------------- */
