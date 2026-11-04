@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-04T01:53:07Z
+updated_at: 2026-11-04T01:53:53Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -204,6 +204,8 @@ Codes with no exit class, used as warnings and findings: `OWNER_MISMATCH` (warni
 ### DSH sidebar integration
 
 - The DSH sidebar plugin reuses the existing Waymark Web logic and remains strictly read-only; it must not offer work-item mutations. Confirmed by the user on 2026-11-04.
+- The sidebar aims to retain all existing Web read-only browsing capabilities, including the tree, filtering, item detail, and existing view controls. Layout may adapt to the narrow sidebar, but the plugin does not introduce separate work-item semantics.
+- For the initial integration, users may prepare Waymark and required Web assets in advance. If a dependency or asset is missing, the plugin explains what is needed; it must not automatically download or install dependencies. Determine the actual prerequisites from the existing build and packaging. These decisions were confirmed by the user on 2026-11-04.
 - The integration effort first produces an implementable specification and route; implementation follows after the map is complete.
 - Reuse the existing `waymark-mcp` server rather than building a second MCP server. The integration work covers its installation, configuration, and connection to hosts. MCP retains its existing read and write capabilities; the read-only restriction applies to the sidebar, not to MCP.
 - MCP host integration is generic: provide installation, stdio command and configuration guidance, verification, and troubleshooting; each harness configures and starts the server according to its own conventions. Do not build a DSH-specific MCP installer or setup flow in this effort. Clove's generic MCP registration can be used as prior art, without requiring its Claude-specific plugin or setup behavior. Confirmed by the user on 2026-11-04.
