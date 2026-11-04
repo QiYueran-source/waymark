@@ -36,11 +36,13 @@
 mod api;
 mod assets;
 mod guard;
+pub mod manifest;
 mod render;
 mod respond;
 mod server;
 
 pub use api::{CategoryView, SHAPES};
+pub use manifest::{AssetFile, AssetManifest};
 pub use server::{
     bind, default_assets_dir, ensure_assets, serve, Running, WebConfig, WebError, LOOPBACK,
 };

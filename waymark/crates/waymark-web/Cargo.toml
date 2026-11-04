@@ -15,6 +15,17 @@ path = "src/lib.rs"
 name = "waymark-web-dev"
 path = "src/bin/waymark-web-dev.rs"
 
+[[bin]]
+name = "waymark-web-manifest"
+path = "src/bin/waymark-web-manifest.rs"
+
+[features]
+default = []
+# Embed the built frontend (and its provenance manifest) in the binary. Off by
+# default so an ordinary `cargo build`/`cargo test` needs no frontend on disk and
+# no npm; the release pipeline builds the frontend first, then toggles this.
+embed = []
+
 [dependencies]
 waymark-core = { workspace = true }
 axum = { workspace = true }
@@ -26,9 +37,20 @@ ammonia = { workspace = true }
 idna_adapter = "=1.2.0"
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 camino = { workspace = true }
 thiserror = { workspace = true }
 clap = { workspace = true }
 
+[build-dependencies]
+# The build script shares `src/manifest.rs` with the library, so the tree walk
+# and the manifest shape have exactly one implementation.
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+flate2 = { workspace = true }
+
 [dev-dependencies]
 tempfile = { workspace = true }
+sha2 = { workspace = true }
+flate2 = { workspace = true }
