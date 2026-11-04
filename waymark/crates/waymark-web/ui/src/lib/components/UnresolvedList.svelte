@@ -1,3 +1,11 @@
+<script module lang="ts">
+	// Two hosts render this list (the tree panel and the graph drawer), so its
+	// heading and content ids must be unique per instance. The SPA renders on
+	// the client only (`ssr = false`), so a module counter is deterministic
+	// enough for hydration-free ids.
+	let instances = 0;
+</script>
+
 <script lang="ts">
 	import Shape from './Shape.svelte';
 	import { shapeFor, unresolvedReason, type UnresolvedItem } from '$lib/types';
@@ -16,23 +24,27 @@
 		collapsible?: boolean;
 	} = $props();
 
+	const instance = ++instances;
+	const headingId = `unresolved-heading-${instance}`;
+	const contentId = `unresolved-content-${instance}`;
+
 	let open = $state(true);
 </script>
 
 <section
 	class="unresolved"
 	class:unresolved-drawer={collapsible}
-	aria-labelledby="unresolved-heading"
+	aria-labelledby={headingId}
 	data-testid="unresolved"
 >
 	{#if collapsible}
-		<h2 id="unresolved-heading" class="unresolved-heading">
+		<h2 id={headingId} class="unresolved-heading">
 			<button
 				type="button"
 				class="unresolved-toggle"
 				data-testid="unresolved-toggle"
 				aria-expanded={open}
-				aria-controls="unresolved-content"
+				aria-controls={contentId}
 				onclick={() => (open = !open)}
 			>
 				<span class="unresolved-toggle-mark" aria-hidden="true">{open ? '▾' : '▸'}</span>
@@ -40,9 +52,9 @@
 			</button>
 		</h2>
 	{:else}
-		<h2 id="unresolved-heading">Unresolved relations</h2>
+		<h2 id={headingId}>Unresolved relations</h2>
 	{/if}
-	<div id="unresolved-content" class="unresolved-content" hidden={collapsible && !open}>
+	<div id={contentId} class="unresolved-content" hidden={collapsible && !open}>
 		<p class="explanation">
 			These items exist but are not placed in the tree, because their parent cannot be reached.
 			They are listed here instead of being invented as roots.

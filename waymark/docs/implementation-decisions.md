@@ -1231,9 +1231,9 @@ preference store, and its tests. It consumes exactly the phase-1 contract above;
 
 **Choice:** the overview is a surveyor's field sheet for a work tree: a cool sage paper ground
 (`#eef0ea`), instrument ink (`#1a2420`), one deep-teal accent for interaction (`#1e6257`), a light
-header band, and no ornament that does not carry meaning. Colour is used only on work state and the
-selected row; category identity is the six-shape vocabulary plus the category name, never a category
-colour.
+header band, and no ornament that does not carry meaning. Colour is used only on work state, the
+selected row, and the dependency-line treatment (`--dep-edge`); category identity is the six-shape
+vocabulary plus the category name, never a category colour.
 
 - **Type:** one family (the system UI face) for all reading; `ui-monospace` appears only inside literal
   `code`/`pre` from a sanitized Markdown body. The tree title reads at 14px, metadata at 12–13px, and
@@ -2845,7 +2845,8 @@ and keys) and `ui/tests/preferences.test.ts` (the control → reload loop).
 These decisions extend the Web tree/graph surface and are the current behaviour. They supersede the
 earlier passages above that describe a fixed 216×84 card, a top-to-bottom-only layout, an inline
 category filter, a fixed-height framed canvas, hatch-marked graph context cards, an unfiltered
-unresolved list below the drawing, and a structured alternative without its own expansion controls.
+unresolved list below the drawing, a structured alternative without its own expansion controls, and
+colour used only on work state and the selected row.
 
 ## Canvas, cards, and states
 
@@ -2906,9 +2907,11 @@ unresolved list below the drawing, and a structured alternative without its own 
 
 ## Relationship lines
 
-- **The dependency dash is zoom-derived.** `dependencyDashArray(zoom)` divides screen-space constants
-  (`DEPENDENCY_DASH_SCREEN` 8, `DEPENDENCY_GAP_SCREEN` 6) by the shown zoom (clamped to the canvas's
-  fit/user range), so a single dependency never collapses to a solid line at the default fit.
+- **The dependency dash is zoom- and span-derived.** `dependencyDashArray(zoom, screenSpan?)` divides
+  screen-space constants (`DEPENDENCY_DASH_SCREEN` 8, `DEPENDENCY_GAP_SCREEN` 6) by the shown zoom
+  (clamped to the canvas's fit/user range). It also caps the pattern when the edge's straight screen
+  chord is shorter than two periods: a short cross-generation edge at a low fit zoom would otherwise
+  be one dash and read as solid, so the dash and gap shrink in proportion until two periods fit.
   Dependencies are also thicker (2.5 px vs 1.5 px) and use a distinct blue-grey (`--dep-edge`) in
   addition to the dash; the distinction never rests on colour alone.
 - **Identification.** Hovering an edge raises its z-index, thickens it, and shows its relation label;

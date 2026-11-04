@@ -707,7 +707,6 @@
 				<PaneState
 					testId="filtered-empty-state"
 					kind={noCategorySelected ? 'categories-cleared' : 'no-active-work'}
-					emptyKind={noCategorySelected ? 'categories-cleared' : 'no-active-work'}
 				>
 					<div class="empty">
 						{#if noCategorySelected}

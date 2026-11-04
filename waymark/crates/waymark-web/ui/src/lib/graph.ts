@@ -229,6 +229,18 @@ function roundPattern(value: number): number {
 }
 
 /**
+ * Round a dash pattern that a short span forced below its usual screen size.
+ *
+ * This is the opposite of [`roundPattern`]: the edge's chord is a budget the
+ * whole period has to fit into at least twice, so rounding up could push it
+ * back over that budget. The floor keeps the dash and gap positive, which is
+ * what stops a very short edge from collapsing into one solid stroke.
+ */
+function roundCappedPattern(value: number): number {
+	return Math.max(0.01, Math.floor(value * 100) / 100);
+}
+
+/**
  * The dash pattern for a dependency edge, in drawing coordinates, at `zoom`.
  *
  * The pattern is divided by the zoom so its screen-space dash and gap stay at
@@ -237,12 +249,31 @@ function roundPattern(value: number): number {
  * default fit of a large drawing. The zoom is clamped to the canvas's own
  * range, so an unusable value (zero, a negative, `NaN` before the first
  * measure) yields the neutral pattern rather than an infinite dash.
+ *
+ * A dependency edge only spans about one generation gap, which can be shorter
+ * on screen than one whole dash plus gap at a low fit zoom: the edge would then
+ * be a single dash and read as solid. When the caller supplies that straight
+ * chord as `screenSpan`, a span too short for two full periods scales the dash
+ * and gap down in proportion (the dash:gap ratio is kept), so two periods and
+ * therefore at least one complete gap fit along the edge. The lengths still
+ * convert back to drawing units, because `stroke-dasharray` is drawn in them.
  */
-export function dependencyDashArray(zoom: number): string {
+export function dependencyDashArray(zoom: number, screenSpan?: number): string {
 	const scale =
 		Number.isFinite(zoom) && zoom > 0
 			? Math.min(Math.max(zoom, MIN_FIT_ZOOM), MAX_GRAPH_ZOOM)
 			: 1;
+	const span =
+		screenSpan !== undefined && Number.isFinite(screenSpan) && screenSpan > 0
+			? screenSpan
+			: null;
+	const period = DEPENDENCY_DASH_SCREEN + DEPENDENCY_GAP_SCREEN;
+	if (span !== null && span < period * 2) {
+		const factor = span / (period * 2);
+		return `${roundCappedPattern((DEPENDENCY_DASH_SCREEN * factor) / scale)} ${roundCappedPattern(
+			(DEPENDENCY_GAP_SCREEN * factor) / scale
+		)}`;
+	}
 	return `${roundPattern(DEPENDENCY_DASH_SCREEN / scale)} ${roundPattern(
 		DEPENDENCY_GAP_SCREEN / scale
 	)}`;

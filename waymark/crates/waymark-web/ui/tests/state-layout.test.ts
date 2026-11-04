@@ -93,6 +93,8 @@ describe('blocking and empty states are centred', () => {
 
 		const empty = await screen.findByTestId('empty-state');
 		expect(empty.getAttribute('data-state-kind')).toBe('empty-project');
+		// Only the two filtered-empty kinds carry the older hook.
+		expect(empty.getAttribute('data-empty-kind')).toBeNull();
 		expectCentred(empty);
 		expect(empty.textContent).toContain('No active work items');
 	});
@@ -108,6 +110,7 @@ describe('blocking and empty states are centred', () => {
 		const alert = await screen.findByTestId('read-failure');
 		const host = centredHost(alert);
 		expect(host.getAttribute('data-state-kind')).toBe('read-failure');
+		expect(host.getAttribute('data-empty-kind')).toBeNull();
 		expectCentred(host);
 		expect(host.closest('.tree-pane')).not.toBeNull();
 		expect(alert.getAttribute('role')).toBe('alert');
@@ -128,6 +131,7 @@ describe('blocking and empty states are centred', () => {
 		const alert = await screen.findByTestId('detail-failure');
 		const host = centredHost(alert);
 		expect(host.getAttribute('data-state-kind')).toBe('detail-failure');
+		expect(host.getAttribute('data-empty-kind')).toBeNull();
 		expectCentred(host);
 		// Centred in the panel's own remaining area, not in the tree pane.
 		expect(screen.getByTestId('detail-panel').contains(host)).toBe(true);

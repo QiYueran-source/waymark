@@ -195,7 +195,7 @@ fn finish(result: Result<u8, waymark_core::WaymarkError>, json: bool) -> ExitCod
 /// class directly instead of travelling through the generic failure mapping.
 fn run(cli: Cli) -> Result<u8, waymark_core::WaymarkError> {
     let json = cli.json;
-    let colour = cmd::colour::Palette::for_human_stream(cli.color);
+    let colour = cmd::colour::Palette::from_human_environment(cli.color);
     let options = OpOptions::new()
         .with_clock(Arc::new(SystemClock))
         .with_lock_wait(cmd::lock_wait(cli.lock_timeout_ms));

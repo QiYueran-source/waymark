@@ -1,4 +1,4 @@
-//! The frozen error registry, pinned four ways:
+//! The frozen error registry, pinned five ways:
 //!
 //! 1. a golden snapshot of every code's exit class, retryability, details keys,
 //!    location kinds, and finding severity;
@@ -6,10 +6,12 @@
 //!    exactly once each;
 //! 3. a string and serde round-trip for every code;
 //! 4. the classifier invariants the spec states in prose (only two retryable
-//!    codes, seven finding-only codes with no exit class).
+//!    codes, seven finding-only codes with no exit class);
+//! 5. a JSON-schema enum of the wire literals, in registry/table order.
 //!
 //! Adding, removing, or reclassifying a code therefore requires updating
-//! `tests/golden/error_registry.json` in the same change. Regenerate it with
+//! `tests/golden/error_registry.json` and the schema's `enum` in the same
+//! change. Regenerate the snapshot with
 //!
 //! ```sh
 //! UPDATE_ERROR_REGISTRY=1 cargo test -p waymark-core --test registry
@@ -23,6 +25,8 @@ use serde_json::{json, Value};
 use waymark_core::error::{Code, ExitClass, Severity};
 
 const GOLDEN: &str = include_str!("golden/error_registry.json");
+
+const SCHEMA: &str = include_str!("golden/error_codes.schema.json");
 
 const GOLDEN_PATH: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -85,6 +89,29 @@ fn the_golden_snapshot_matches_the_registry() {
         snapshot(),
         "the error registry changed; review the diff and regenerate \
          `tests/golden/error_registry.json` with UPDATE_ERROR_REGISTRY=1"
+    );
+}
+
+#[test]
+fn the_json_schema_enum_matches_the_registry_in_table_order() {
+    let schema: Value = serde_json::from_str(SCHEMA).expect("the schema is valid JSON");
+    assert_eq!(schema["type"], "string", "a wire code is a string");
+    let choices = schema["enum"]
+        .as_array()
+        .expect("the schema declares an enum of codes");
+
+    let expected: Vec<&str> = Code::ALL.iter().map(|code| code.as_str()).collect();
+    let actual: Vec<&str> = choices
+        .iter()
+        .map(|choice| choice.as_str().expect("every enum value is a string"))
+        .collect();
+    assert_eq!(
+        actual, expected,
+        "the schema enum must be the registry, in table order"
+    );
+    assert!(
+        actual.contains(&"GIT_UNAVAILABLE"),
+        "the schema pins the Git availability finding too"
     );
 }
 

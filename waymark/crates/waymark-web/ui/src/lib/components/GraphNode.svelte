@@ -96,7 +96,6 @@
 <div
 	class="graph-node"
 	class:selected
-	class:context
 	bind:this={card}
 	data-testid={`graph-node-${node.id}`}
 	data-node-id={node.id}

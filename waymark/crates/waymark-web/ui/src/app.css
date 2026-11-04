@@ -909,8 +909,9 @@ code {
 
 /* The dependency overlay is drawn dashed and directed; its stroke colour and
    arrowhead come from the app's palette, not the library's default. The dash
-   pattern itself is set on the path from the current zoom (see
-   `dependencyDashArray`), so it cannot collapse to a solid line at a low zoom. */
+   pattern itself is set on the path from the current zoom and the edge's own
+   screen span (see `dependencyDashArray`), so it cannot collapse to a solid
+   line at a low zoom. */
 .graph-canvas .svelte-flow__edge[data-edge-kind='dependency'] .svelte-flow__edge-path {
 	stroke: var(--dep-edge);
 }
