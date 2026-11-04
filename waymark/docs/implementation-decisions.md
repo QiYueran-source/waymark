@@ -3124,3 +3124,24 @@ server running. No opener runs without the flag.
 not take the server down. The flag is the only way to launch anything; `serve` mutates no project
 state.
 
+## Embedded manifest disagreements are doctor findings, not startup failures
+
+**Choice:** `waymark_web::manifest::verify_agreement` compares an `AssetManifest`'s `version` with the
+running package version and its `index.html` SHA-256 with the bytes this build embeds;
+`waymark_web::embedded_manifest_mismatch()` applies it to the binary and returns the disagreement, or
+`None` for a matching Web build or a basic build with no manifest. The `doctor`/`validate` adapter
+turns a disagreement into a finding-only `ASSETS_VERSION_MISMATCH` — severity `error`, non-fixable,
+details `{kind, expected, actual}`, no location — and appends it to the report it already has. The
+version is checked first, so a manifest that disagrees about both still produces one finding. `serve`
+never calls the check.
+
+**Why:** `build.rs` refuses to embed a manifest that disagrees with the tree, so a disagreement
+observed at runtime means tampering or a mixed build; that is a health fact, not a reason to refuse to
+start. Keeping the comparison next to the manifest keeps the rule in `waymark-web`, and pushing the
+finding through `Report::push_finding` reuses the envelope and the `--strict` exit rules instead of
+adding a second diagnosis path. `build.rs` keeps an uncompressed copy of `index.html` beside the gzip
+table so the hash needs no runtime decompressor.
+
+**What would change it:** if `serve` ever needs to refuse a mismatched tree, it can call the same
+function and choose its own failure; today it starts regardless.
+

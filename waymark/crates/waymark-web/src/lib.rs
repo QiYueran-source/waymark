@@ -50,7 +50,7 @@ mod respond;
 mod server;
 
 pub use api::{CategoryView, SHAPES};
-pub use manifest::{AssetFile, AssetManifest};
+pub use manifest::{AssetFile, AssetManifest, AssetMismatch};
 
 /// The provenance manifest embedded by an `embed` build, or `None`.
 ///
@@ -58,6 +58,17 @@ pub use manifest::{AssetFile, AssetManifest};
 /// `Some` value describes exactly the bytes this binary serves.
 pub fn embedded_manifest() -> Option<&'static AssetManifest> {
     embedded::manifest()
+}
+
+/// Why this binary's embedded frontend disagrees with the build, if it does.
+///
+/// A basic build embeds no frontend and returns `None`; a Web build whose
+/// manifest matches the version and the embedded `index.html` also returns
+/// `None`. The disagreement is reported, never enforced: `serve` still starts.
+pub fn embedded_manifest_mismatch() -> Option<AssetMismatch> {
+    let manifest = embedded::manifest()?;
+    let index_html = embedded::index_html().expect("an embed build embeds index.html");
+    manifest::verify_agreement(manifest, env!("CARGO_PKG_VERSION"), index_html).err()
 }
 pub use server::{
     bind, default_assets_dir, ensure_assets, serve, Running, WebConfig, WebError, LOOPBACK,

@@ -329,3 +329,42 @@ fn a_diagnostic_failure_uses_the_shared_exit_mapping() {
         );
     }
 }
+
+/// Run `doctor` on a healthy project and assert the asset provenance check
+/// added nothing. The basic build has no manifest; the Web build's manifest
+/// matches, so both variants must stay silent.
+fn assert_no_asset_mismatch() {
+    let (_dir, root) = project();
+    let result = run(waymark()
+        .arg("--json")
+        .arg("doctor")
+        .arg("--project")
+        .arg(&root));
+    assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
+    let envelope = result.json();
+    let findings = envelope["data"]["findings"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding["code"] != "ASSETS_VERSION_MISMATCH"),
+        "the embedded manifest matches this build: {findings:?}"
+    );
+}
+
+/// A Web build embeds a manifest generated for the same version and shell, so
+/// the provenance check adds no finding to a healthy project.
+#[cfg(feature = "web")]
+#[test]
+fn a_web_build_reports_no_asset_mismatch_for_its_matching_manifest() {
+    assert_no_asset_mismatch();
+}
+
+/// A basic build embeds no manifest, so there is nothing to disagree with.
+#[cfg(not(feature = "web"))]
+#[test]
+fn a_basic_build_reports_no_asset_mismatch() {
+    assert_no_asset_mismatch();
+}
