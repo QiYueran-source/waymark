@@ -2839,3 +2839,91 @@ and keys) and `ui/tests/preferences.test.ts` (the control → reload loop).
 - **What would change it:** a new preference would need its own key in this inventory and a line in
   `preferences.test.ts`; a preference that must differ per data view would move under the `:<view>`
   suffix, which is a deliberate widening of the key space, not a rename.
+
+# Web page optimization (implemented 2026-11-04)
+
+These decisions extend the Web tree/graph surface and are the current behaviour. They supersede the
+earlier passages above that describe a fixed 216×84 card, a top-to-bottom-only layout, an inline
+category filter, a fixed-height framed canvas, hatch-marked graph context cards, an unfiltered
+unresolved list below the drawing, and a structured alternative without its own expansion controls.
+
+## Canvas, cards, and states
+
+- **The graph fills the content area.** `.tree-pane.graph-pane-host` is a flex column only while the
+  drawing renders; `.graph-pane` is a `flex: 1` column with no inner fixed height and no decorative
+  border, and `.graph-canvas-host` is the measured box. The unresolved list is a collapsible bottom
+  drawer row inside `.graph-pane`, never an overlay; its toggle is a real button with a count.
+- **Cards are content-sized.** A card's width stays 216 px and its height comes from wrapped content;
+  `GraphView` measures border-box height per card through a `ResizeObserver` and lays out with the
+  measured height, falling back to `estimatedGraphNodeHeight` before measurement. A measured re-fit
+  happens only on a first entry that was itself a fit and only before the reader moves or the drawn
+  set changes. Opening the detail panel re-measures the reduced canvas and fits; closing does not fit;
+  a window resize only re-measures. Direction switches fit explicitly.
+- **Context cards.** A retained unselected-category ancestor keeps the ordinary card layout, gets a
+  dashed outline around the whole card with no hatch and no left state stripe, and carries a wrapping
+  "Context — outside the selection" badge inside the card. Its accessible name states the context.
+- **Messages.** Exactly five blocking/empty states centre through `PaneState`: no category selected,
+  selected categories with no active work, an empty project, a project read failure, and a
+  detail-load failure inside the detail panel. Non-blocking notices stay inline above the toolbar.
+  Long diagnostics use a bounded, width-limited, scrollable block; unresolved relations stay content.
+
+## Controls, categories, and expansion
+
+- **One compact category control.** `CategoryPicker` renders "Categories (n)" and a popover with
+  case-insensitive search, select-all, clear-all, and the configured options. The popover exists only
+  while open, closes on Escape (returning focus to the trigger) or an outside pointer press, and a
+  filtered-empty result still offers select-all. It sits in the top toolbar for the tree and the
+  structured list, and in the graph's upper-left cluster for the drawing; combined mode shows none.
+- **The graph control cluster.** The upper-left cluster holds the category picker, the direction
+  radio group, the graph-wide expansion row, and the canvas row (zoom out/in, fit, reset) with the
+  readout below. The relationship legend sits upper-right with the hover hint, and dependency-gap
+  counts sit bottom-left.
+- **Expansion is presentation-scoped.** Tree Expand all/Collapse all render only in the tree and write
+  the per-view `expanded` key. Graph-wide Expand all/Collapse all render in the graph cluster (or the
+  top toolbar for the structured list) and write the per-project `collapsed` set; graph-wide collapse
+  stores every drawn node with children, so only roots remain. The structured list shows a collapsed
+  branch as "Collapsed — N children" with its own Expand control and offers "Show all"; expanding
+  there updates the same graph collapse set.
+
+## Direction and viewport
+
+- **TB/LR direction.** A graph-only native radio group chooses top-to-bottom (default) or
+  left-to-right. `GraphDirection` is `'TB' | 'LR'`, one per project (`PREF:direction`), shared by
+  combined and grouped graph modes, never derived from data or viewport. Dagre uses the direction as
+  `rankdir`; hierarchy edges leave bottom→top in TB and right→left in LR; dependency arrows keep their
+  relationship direction and route along the axis the two ends are separated on.
+- **Switch semantics.** A switch changes geometry only: category scope, selected item and open detail,
+  graph collapse set, dependency visibility, and sibling order survive. It then fits the visible graph
+  to the remaining canvas (the reduced canvas when the detail is open) and stores that fit for the new
+  direction. Refresh/reopen restores the saved viewport for the current direction; no usable record
+  falls back to fit. Storage failure keeps the control usable and shows the existing notice.
+- **Viewport record.** The existing `viewport` key holds `{x, y, zoom, direction}`;
+  `readViewport(direction = 'TB')` / `writeViewport(viewport, direction = 'TB')` keep older callers
+  and legacy records on TB, and a record for another direction is not applied. The key inventory is
+  now: `PREF:view`, `PREF:presentation`, `PREF:graphAlternative`, `PREF:categories`, `PREF:collapsed`,
+  `PREF:direction`, `PREF:viewport`, and the per-view `expanded:<view>`, `dependencies:<view>`, and
+  `scroll:<view>`.
+
+## Relationship lines
+
+- **The dependency dash is zoom-derived.** `dependencyDashArray(zoom)` divides screen-space constants
+  (`DEPENDENCY_DASH_SCREEN` 8, `DEPENDENCY_GAP_SCREEN` 6) by the shown zoom (clamped to the canvas's
+  fit/user range), so a single dependency never collapses to a solid line at the default fit.
+  Dependencies are also thicker (2.5 px vs 1.5 px) and use a distinct blue-grey (`--dep-edge`) in
+  addition to the dash; the distinction never rests on colour alone.
+- **Identification.** Hovering an edge raises its z-index, thickens it, and shows its relation label;
+  `aria-label` is present without hover. Coincident parent-child and dependency pairs take dedicated
+  offset handles and carry `data-coincident="true"`, so both remain visible. Dependencies that share a
+  generation corridor stay separate lines, expose `data-gap`/`data-gap-count`, and are summarised by a
+  visible count marker; nothing is aggregated. The legend keeps both entries and adds the hover hint.
+
+## CLI colour and Git availability (adjacent tickets)
+
+- The CLI's human state cell/line is painted from the shared `DisplayState` (ready green,
+  in-progress blue, blocked red, closed grey) only when `--color`/`NO_COLOR` and the terminal decide
+  it may be; text layout and JSON/raw output are unchanged. Details are in the "CLI work-state colour"
+  section above.
+- Git is optional. `GIT_UNAVAILABLE` (no executable) and `NOT_A_GIT_REPOSITORY` (no containing
+  repository) are separate location-less info findings; history/diff succeed empty, doctor/validate
+  report them, and both adapters exit zero. The registry is 38 codes. Details are in the Git sections
+  above.
