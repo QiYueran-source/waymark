@@ -86,16 +86,16 @@ pub(crate) async fn app_asset(
 }
 
 async fn serve_relative(state: AppState, relative: String) -> Response {
-    let Some(relative) = safe_relative(&relative) else {
+    if !crate::manifest::safe_relative(&relative) {
         return respond::bad_request(
             "INVALID_ASSET_PATH",
             "the asset path contains a forbidden segment",
         );
-    };
+    }
     match state.assets.as_ref() {
-        AssetSource::Directory(directory) => serve_directory(directory, relative).await,
+        AssetSource::Directory(directory) => serve_directory(directory, &relative).await,
         #[cfg(feature = "embed")]
-        AssetSource::Embedded => embedded(relative),
+        AssetSource::Embedded => embedded(&relative),
     }
 }
 
@@ -140,19 +140,6 @@ fn asset_not_found(relative: &str) -> Response {
         "the requested asset does not exist",
         serde_json::json!({ "path": relative }),
     )
-}
-
-/// A relative path with no traversal and no empty segments.
-fn safe_relative(path: &str) -> Option<&str> {
-    if path.is_empty() || path.starts_with('/') || path.contains('\\') || path.contains('\0') {
-        return None;
-    }
-    for segment in path.split('/') {
-        if segment.is_empty() || segment == "." || segment == ".." {
-            return None;
-        }
-    }
-    Some(path)
 }
 
 /// Canonicalize the target and require it to stay inside the asset root.
