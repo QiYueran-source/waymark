@@ -63,9 +63,13 @@ fn diagnose(project: Option<&Utf8Path>, options: DoctorOptions) -> Result<Report
         Some(path) => path.to_path_buf(),
         None => invocation_dir()?,
     };
-    let mut report = doctor::diagnose_from(&start, options)?;
+    let report = doctor::diagnose_from(&start, options)?;
     #[cfg(feature = "web")]
-    attach_asset_finding(&mut report, waymark_web::embedded_manifest_mismatch());
+    let report = {
+        let mut report = report;
+        attach_asset_finding(&mut report, waymark_web::embedded_manifest_mismatch());
+        report
+    };
     Ok(report)
 }
 
