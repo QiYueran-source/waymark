@@ -187,17 +187,22 @@ cannot put an unregistered string in `_meta`, and making the severity derived me
 severity cannot drift from the registry row. The constructors keep the details shape in one place
 instead of in each caller.
 
-## `field` locations name the field, not a target and a path
+## `field` locations name the field and, when known, its document
 
-**Choice:** `Location::Field` serializes as `{"kind": "field", "field": "title"}`. The onboarding
-notes sketched it as `Field { target, path }`; the specification only pins the *kind* and leaves the
-payload open, and T1 already shipped the single-name shape.
+**Choice:** `Location::Field` serializes as `{"kind": "field", "field": "title"}` and, when the failure
+was recorded against a document, additionally carries `path` (with `line`/`column` when a parser knows
+them). All three are optional with `skip_serializing_if`, so the original field-only shape — and the
+registry golden — is unchanged and old consumers keep working. `Location::field(name)` still produces
+the field-only form; the projection calls `WaymarkError::in_document(path)` at the point it records a
+document failure, because the parser knows the field but not the document's place in the inventory.
 
-**Why:** a field is identified by its name at the point of failure, and the surrounding error already
-says which target it belongs to (`VALIDATION_ERROR.details.target`, or the work item in `location` when
-the target is an item). Adding a second target/path pair would duplicate that and leave two places
-naming the same subject, which is exactly the drift the registry is meant to prevent. Changing this
-later is a wire break and needs its own ticket.
+**Why:** a field is identified by its name, but a read failure has to lead the reader to the file; the
+Web read renders the document path and the field as separate labels. The earlier decision kept the
+location field-only and relied on the error's message to name the target, which left
+`failure.ts`'s `where` null for every validation finding (wm-rmncxnace770 AC1). Adding optional keys
+is an additive, backwards-compatible wire change, not the breaking target/path rewrite this section
+previously warned against: there is still one document path and one field name, and the surrounding
+error keeps the target.
 
 ## Lifecycle and readiness (T5)
 
@@ -1252,14 +1257,19 @@ colour.
 `GET /api/health` (`data.project.root`), one project never reading another's keys.
 
 - **Identifier:** `waymark.web.v1:<hex(cyrb53(normalized root))>`. Normalization trims, maps `\` to `/`,
-  collapses repeated `/`, and strips trailing `/` except for the filesystem root. The 53-bit hash is
-  deterministic and non-reversible; it only separates projects on one origin and is not a security
-  boundary.
-- **Keys:** `…:view`, `…:expanded:<view>`, `…:dependencies:<view>`, `…:scroll:<view>` for
-  `view ∈ {combined, grouped}`. Preferences are therefore remembered separately per view, and the
-  stored scroll offset is a plain integer (0 when unreadable).
-- **Defaults:** `combined`, fully expanded, dependency overlays hidden, scroll 0. A stored empty
-  expansion array is respected (a collapsed tree stays collapsed).
+  collapses repeated `/`, folds `.` and `..` segments, and strips trailing `/` except for the
+  filesystem root. The 53-bit hash is deterministic and non-reversible; it only separates projects on
+  one origin and is not a security boundary.
+- **Keys:** nine preferences, in two scopes. Per project: `…:presentation`, `…:graphAlternative`,
+  `…:categories`, `…:collapsed`, `…:viewport`. Per data view (`view ∈ {combined, grouped}`):
+  `…:expanded:<view>`, `…:dependencies:<view>`, `…:scroll:<view>`, plus `…:view`. The stored scroll
+  offset is a plain integer (0 when unreadable). The full inventory, defaults, and what would change
+  it are recorded under "The remembered-preference surface" below; this early list and that one are
+  the same surface.
+- **Defaults:** `combined`, `tree`, the drawing (not the text alternative), no category scope (every
+  configured category), nothing folded, no remembered viewport (fit), fully expanded, dependency
+  overlays hidden, scroll 0. A stored empty expansion array is respected (a collapsed tree stays
+  collapsed).
 - **Failure:** storage is optional. If `localStorage` is absent, blocked, or a write throws (quota,
   revoked permission), the session keeps working in memory and a single non-blocking notice reports
   that preferences may reset. Nothing is written into the project and nothing is sent to the service.
@@ -1286,7 +1296,10 @@ The vitest suites cover combined and grouped rendering (including a cross-catego
 parent), dependency overlay toggling and reference anchoring, detail contents and the single
 `body_html` injection sink, per-node and whole-tree expansion, browser persistence and per-project
 isolation, unavailable/failing storage, empty, unresolved, and read-failure states, and the GET-only
-API seam. The Rust suite keeps the HTTP/security coverage and adds the built-asset check above.
+API seam. The graph work adds `graph.test.ts` for the pure model and `graph-view`, `graph-dependency`,
+`graph-filter`, `graph-navigation`, `graph-detail`, and `graph-text` for the rendered drawing, its
+overlay, category scope, fit/pan/zoom/fold controls, detail reuse, and structured alternative. The
+Rust suite keeps the HTTP/security coverage and adds the built-asset check above.
 
 ## Launcher and developer commands
 
@@ -2405,9 +2418,13 @@ takes the `ArchiveRange` and `Projection` explicitly because those are caller ch
 exact version (no `^`, no `~`) in `crates/waymark-web/ui/package.json` and in
 `crates/waymark-web/ui/package-lock.json`, so `npm ci` resolves them from the lockfile alone. They sit
 in `devDependencies` beside every other UI input (the SPA is bundled at build time and served as
-static files, so this project has no runtime `dependencies` list). Only
-`ui/src/lib/components/GraphView.svelte` imports them (see the integration seam below); nothing else
-under `ui/src` may.
+static files, so this project has no runtime `dependencies` list). The sanctioned set is exactly the
+graph component layer: `ui/src/lib/components/GraphView.svelte` imports `@xyflow/svelte`,
+`@dagrejs/dagre`, and the library's `base.css`; its child `ui/src/lib/components/GraphBridge.svelte`
+imports only `useSvelteFlow`. Nothing else under `ui/src` may import either package (see the
+integration seam below). The stylesheet lives with the graph, not in `routes/+layout.svelte`, so the
+app shell imports no graph library at all; the bridge is a child of the view, no dagre reaches it, and
+no library type escapes that layer.
 
 **Why:** judged only against this project's contract:
 
@@ -2463,11 +2480,15 @@ is heavier than a fixed top-to-bottom rank layout needs. Cytoscape's equivalent 
   optional dashed dependency edges, the visible/collapsed/filtered sets, and the structured text
   alternative's data. It imports no graph library (dagre included) and no Svelte component, and is
   unit-tested directly.
-- `ui/src/lib/components/GraphView.svelte` — plus at most small child components under the same
-  layer, such as a node component — is the **only** module that imports `@xyflow/svelte` and
-  `@dagrejs/dagre`. It receives the model and `onSelect`/`onToggle` callbacks, owns the layout call
-  and the pan/zoom/fit/reset controls, and never becomes application state.
+- `ui/src/lib/components/GraphView.svelte` is the only module that imports the drawing library's
+  components, `@dagrejs/dagre`, and the library stylesheet. Its child
+  `ui/src/lib/components/GraphBridge.svelte` imports only `useSvelteFlow` to hand the pan/zoom API
+  up; it draws nothing and no library type or dagre object leaves this layer. `GraphView` receives the
+  model and `onSelect`/`onToggle` callbacks, owns the layout call and the pan/zoom/fit/reset controls,
+  and never becomes application state.
 - `ui/src/lib/components/GraphText.svelte` renders the structured text/list alternative as plain DOM.
+- `ui/src/lib/keys.ts` holds the one Enter/Space activation rule the graph title buttons share;
+  `tree.ts` still owns the tree's own helpers.
 - Tests drive rendered controls and observable state (roles, accessible names, `data-*` hooks the app
   owns, callback effects), never library objects — no `cy` instances, no `nodeLookup`, no
   `useSvelteFlow` store assertions.
@@ -2516,19 +2537,25 @@ is heavier than a fixed top-to-bottom rank layout needs. Cytoscape's equivalent 
   status, state, blocked, blocked reason, parent id, depth, has-children), solid `edges`
   (`{id, from, to}`), `roots`, and `unresolved`. There is no synthetic root: `roots` are exactly the
   parentless items, in payload order. `graphNodeLabel` and `edgeLabel` supply the accessible names
-  (`"<title> — <category>, <state>"`, `"Parent-child: <a> → <b>"`). No library, no Svelte, no I/O.
+  (`"<title> — <category>, <state>"`, `"Parent-child: <a> → <b>"`, and for a cross-category dependency
+  `"Dependency: <a> → <b> (depends on, across categories)"`). No library, no Svelte, no I/O.
 - `ui/src/lib/components/GraphItemNode.svelte` — the library's node slot. It unpacks the node's
-  `GraphNodePayload` (`node`, `graphY`, `selected`, `onSelect`) so `GraphNode.svelte` stays a plain
-  component that takes work-item values and library props never leak into it.
-- `ui/src/lib/components/GraphNode.svelte` — one card: the category's `<Shape>` plus its name, the
-  lifecycle status, the title as the single interactive element, the state word with its existing
-  `state-*` class, and the blocked marker with the server's reason. It carries
-  `data-node-id`/`data-depth`/`data-parent-id`/`data-graph-y` on the card element, so placement and
-  single-appearance are assertable without touching the library.
-- `ui/src/lib/components/GraphView.svelte` — the only importer of `@xyflow/svelte` and
-  `@dagrejs/dagre`. It lays the model out with dagre (`rankdir: 'TB'`, `nodesep: 28`, `ranksep: 56`,
-  16 px margins) and hands the renderer fixed geometry. It owns the legend panel; it does not own the
-  presentation choice.
+  `GraphNodePayload` (`node`, `graphY`, `selected`, `collapsed`, `onSelect`, `onToggle`) and passes
+  those props to `GraphNode.svelte`, so the card stays a plain component and library props never leak
+  into it.
+- `ui/src/lib/components/GraphNode.svelte` — one card. Props: `node`, `graphY`, `selected`,
+  `collapsed`, `onSelect`, `onToggle`. It renders the category's `<Shape>` plus its name, the
+  lifecycle status, the title as the single interactive element (plus a fold button when the node has
+  children), the state word with its existing `state-*` class, and the blocked marker with the
+  server's reason. It carries `data-node-id`/`data-depth`/`data-parent-id`/`data-graph-y`/
+  `data-collapsed` on the card element, so placement, fold state, and single-appearance are assertable
+  without touching the library.
+- `ui/src/lib/components/GraphView.svelte` (with its child `GraphBridge.svelte` and the library
+  stylesheet) is the graph component layer. It lays the model out with dagre (`rankdir: 'TB'`,
+  `nodesep: 28`, `ranksep: 56`, 16 px margins) and hands the renderer fixed geometry. It owns the
+  legend panel; it does not own the presentation choice. `GraphBridge` imports only
+  `useSvelteFlow` and exposes `{setViewport, zoomIn, zoomOut}` as a `GraphFlow`; there is no unused
+  `getViewport` on that seam.
 - `ui/src/lib/components/Explorer.svelte` — owns the presentation. A second `.segment` radio group
   (`name="presentation"`, labels `Tree` and `Graph`, sr-only legend `Presentation`) switches between
   `<TreeView>` and `<GraphView>`; both render the tree payload already in memory, so switching reads
@@ -2573,12 +2600,19 @@ geometry makes the drawing deterministic and lets the suite assert real edge ele
 - **The overlay is not a layout input.** Only `edges` is handed to dagre, so switching dependencies on
   cannot move a node; the test suite asserts the row tops are identical before and after.
 - **DOM hooks.** A dependency edge is a normal `graph-edge` with `data-edge-kind="dependency"`,
-  `data-arrow="target"`, `data-cross-category`, an explicit `stroke-dasharray` style and a closed
-  arrowhead on its target end (`marker-end`). `data-arrow` states the direction without pixel
-  geometry; the accessible name is `edgeLabel`'s
-  `"Dependency: <dependent> → <depended-on> (depends on)"`, so direction reads without hovering.
-  Parent-child edges stay solid, undirected, and keep `data-edge-kind="parent-child"`; when the same
-  pair is both a parent-child and a dependency relation, both edges are drawn.
+  `data-arrow="target"`, an explicit `stroke-dasharray` style and a closed arrowhead on its target end
+  (`marker-end`). `data-arrow` states the direction without pixel geometry; the accessible name is
+  `edgeLabel`'s `"Dependency: <dependent> → <depended-on> (depends on)"`, extended with
+  `", across categories"` when the two ends belong to different categories, so direction and scope
+  read without hovering. Parent-child edges stay solid, undirected, and keep
+  `data-edge-kind="parent-child"`; when the same pair is both a parent-child and a dependency
+  relation, both edges are drawn. There is no `data-cross-category` DOM hook: the model field is used
+  by the accessible name, and an extra attribute with no consumer would be dead surface.
+- **The dependency stroke is deliberately low-contrast.** `--dash` on the panel measures roughly
+  1.9:1. That is accepted because colour is not the only carrier: the stroke is dashed, the arrowhead
+  states direction, the legend names the treatment, and the edge's accessible name says which item
+  depends on which and whether it crosses categories. Raising the contrast is a visual change, not a
+  correction.
 - **Handles.** The hierarchy always leaves the bottom of the parent and enters the top of the child.
   Dependency edges pick the facing pair instead (top/bottom when the rows differ, left/right for two
   items on one row) so the arrow does not wrap around its own node. Handle ids are app constants; the
@@ -2592,14 +2626,17 @@ geometry makes the drawing deterministic and lets the suite assert real edge ele
 
 - **The fit is computed, not measured.** `fittedViewport(bounds, width, height)` in `graph.ts` takes
   the drawing's own bounding box (`graphBounds`, from the dagre placement) and the canvas box and
-  returns `{x, y, zoom}`: the whole hierarchy centred, inside `MIN_GRAPH_ZOOM` (0.5) and
-  `MAX_GRAPH_ZOOM` (2), with `GRAPH_FIT_PADDING` (10%) of margin. Because it reads model geometry
-  rather than the DOM, the same drawing always fits the same way, and a stored viewport can be
-  compared with the fit exactly (`sameViewport`, 0.001 tolerance) — which is what makes "is the
-  drawing fitted?" an answerable question rather than a guess.
+  returns `{x, y, zoom}`: the whole hierarchy centred, with `GRAPH_FIT_PADDING` (10%) of margin. Its
+  lower bound is `MIN_FIT_ZOOM` (0.05), deliberately far below `MIN_GRAPH_ZOOM` (0.5), which is the
+  range the reader's own gestures and controls stay inside. A large project therefore fits instead of
+  overflowing at the 0.5 floor; the canvas's own `minZoom` is opened down to `MIN_FIT_ZOOM` only when
+  the fit is itself below 0.5, so the reader's first Zoom out cannot clamp *up*. Because the fit reads
+  model geometry rather than the DOM, the same drawing always fits the same way, and a stored
+  viewport can be compared with the fit exactly (`sameViewport`, 0.001 tolerance).
 - **A DOM without layout still fits.** `GraphView` measures its `.graph-pane` on mount; before that,
   and in jsdom where `clientWidth`/`clientHeight` are 0, `GRAPH_NOMINAL_CANVAS` (960×640) stands in,
-  so first entry is a fit in every environment and the suite can assert the entry state. A real
+  so first entry is a fit in every environment and the suite can assert the entry state. This nominal
+  canvas is a no-layout (server-render, pre-mount, jsdom) fallback and never product behaviour: a real
   browser measures the box and fits for real.
 - **Entry, not re-entry.** The viewport is applied once per mounted drawing — from `oninit` and from
   the `GraphBridge` `$effect`, whichever arrives first, guarded by `initial !== null`. A remembered
@@ -2612,14 +2649,18 @@ geometry makes the drawing deterministic and lets the suite assert real edge ele
   `data-testid` buttons in a `role="group"` labelled `Canvas`; `Reset viewport` re-applies the entry
   fit *and* forgets the stored viewport, so a reload starts fitted rather than at the transform the
   reader has just discarded. `Fit to view` re-applies it and remembers it.
-- **The readout is app state, not a library detail.** `data-testid="graph-viewport"` carries
-  `data-x`, `data-y`, `data-zoom`, and `data-fitted`, and says `Zoom 160% · whole graph in view` or
-  `… · panned` in words. The bound `viewport` from the renderer starts `undefined` and is written by
-  `apply()` before the drawing confirms it, so the readout, the fitted marker, and the stored
-  preference move together instead of lagging a frame behind the canvas.
+- **The readout is app state, and it never claims a fit it does not have.** `data-testid="graph-viewport"`
+  carries `data-x`, `data-y`, `data-zoom`, and `data-fitted`, and says `Zoom 160% · whole graph in
+  view` or `… · panned` in words. `data-fitted` is true only when the shown viewport equals the computed
+  fit *and* `viewportContains` confirms every corner of the drawing is on the canvas, so a clamped fit
+  (a drawing larger than any usable zoom) reads `panned`, not "whole graph in view". The bound
+  `viewport` from the renderer starts `undefined` and is written by `apply()` before the drawing
+  confirms it, so the readout, the fitted marker, and the stored preference move together instead of
+  lagging a frame behind the canvas.
 - **`GraphBridge.svelte` is the only bridge.** It renders nothing, sits inside `SvelteFlow` so it can
-  call `useSvelteFlow()`, and hands `{setViewport, getViewport, zoomIn, zoomOut}` up as a
-  `GraphFlow` value. Everything outside `GraphView`/`GraphBridge` deals in `WorkGraph` and
+  call `useSvelteFlow()`, and hands `{setViewport, zoomIn, zoomOut}` up as a `GraphFlow` value.
+  `getViewport` is not on that seam: the app reads the bound `viewport`, so an unused accessor would be
+  dead surface. Everything outside `GraphView`/`GraphBridge` deals in `WorkGraph` and
   `GraphViewport` values, so the renderer and the layout engine stay replaceable and untested-through.
 - **Folding is presentation only.** `collapseGraph(graph, collapsed)` drops the descendants of any
   collapsed node — every generation, not only the next — and the edges, dependency edges, and roots
@@ -2629,16 +2670,21 @@ geometry makes the drawing deterministic and lets the suite assert real edge ele
   (`['/api/health', '/api/tree?view=combined']`, all GET). Because parents precede children in the
   model, one pass is enough.
 - **The fold control lives on the node.** Any node with children carries a real `<button
-  data-testid="graph-toggle-<id>">` with `aria-expanded`, `aria-controls`, an `Expand`/`Collapse`
-  accessible name, and a chevron; the card carries `data-collapsed="true"` and its line reads
-  `· folded`. A leaf has no such control. Collapsing is not the tree's expansion: the two are stored
-  and restored independently.
+  data-testid="graph-toggle-<id>">` with `aria-expanded`, an `Expand`/`Collapse` accessible name, and
+  a chevron; the card carries `data-collapsed="true"` and its state line reads `· folded` once (the
+  folded note is scoped to the line after the heading, not both card lines). A leaf has no such
+  control. There is no `aria-controls`: the children are separate drawing nodes rather than one
+  controlled DOM region, so pointing at a non-existent id would be worse than the button's
+  `aria-expanded` and its name. Collapsing is not the tree's expansion: the two are stored and
+  restored independently.
 - **Persistence, per project, on its own keys.** `<projectId>:collapsed` (a JSON array of ids) and
   `<projectId>:viewport` (a JSON `{x, y, zoom}`), both on `PreferenceStore`, both separate from
   `expanded:<view>` and `scroll:<view>`. One set and one viewport per project rather than per view, so
   switching between `combined` and `grouped` does not reopen a folded branch or move the canvas.
   Stored ids the current data does not contain match nothing and are ignored without error; a stored
-  viewport that does not parse, or whose zoom is out of range, is ignored and the drawing is fitted.
+  viewport that does not parse, or whose zoom is outside `[MIN_FIT_ZOOM, MAX_GRAPH_ZOOM]`, is ignored
+  and the drawing is fitted. The stored range is the fit floor, not `MIN_GRAPH_ZOOM`, because a large
+  graph's legitimate fit is below the user zoom floor and must survive a reload.
   With browser storage unavailable, both controls keep working for the session and the existing
   `persistence-notice` appears once.
 
@@ -2682,12 +2728,21 @@ geometry makes the drawing deterministic and lets the suite assert real edge ele
 - **Non-promotion is the filter's, not the graph's.** A selected item under an unselected parent keeps
   the parent chain `filterGroups` built, so its `parentId` and `depth` are its real ones and the
   ancestor remains a root. The graph never re-parents and never invents a root for the kept chain.
+- **Why category scoping is a client concern.** The core remains the authority for active items,
+  parentage, archive exclusion, unresolved relations, and readiness: `filterGroups` only keeps or hides
+  rows from the payload the core produced, and it never writes a parent, drops an archived item the
+  payload kept, or computes readiness. The specification's "core is the authority for parentage"
+  sentence is about the real relation, not about which rows a presentation chooses to show; the
+  context-ancestor rule exists precisely so the real chain survives the client's display filter.
 - **The marking is worded once.** `CONTEXT_NOTE` in `graph.ts` is the tree's phrase
-  (`context, outside the selection`). The card shows it as visible text in a `context-marker` badge
+  (`context, outside the selection`). Both `NodeRow.svelte` and `GraphNode.svelte` import that constant;
+  neither keeps its own copy. The card shows it as visible text in a `context-marker` badge
   (`aria-hidden`, because the title's accessible name already carries it), gives the node
   `data-context="true"`, and hatches the card with a dashed state stripe — the same three cues the tree
-  row uses, so the distinction survives greyscale and colour-blindness. `graphNodeLabel` appends
-  `(<context note>)` for the node wrapper's accessible name.
+  row uses, so the distinction survives greyscale and colour-blindness. The title's accessible name is
+  `<title> — <category>, <state> (context, outside the selection)` in both presentations: the marking
+  extends the name instead of replacing the category and state the same element carries elsewhere.
+  `graphNodeLabel` builds the graph's name; the tree row builds the same shape from the same vocabulary.
 - **The summary counts selected work only.** It stays `summarizeCounts(scopedGroups.counts, …)`, whose
   counts exclude context rows; the graph has no summary of its own.
 - **Two empty filtered states, one recovery.** `filtered-empty-state` carries
