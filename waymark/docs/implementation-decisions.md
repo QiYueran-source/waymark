@@ -2699,3 +2699,37 @@ geometry makes the drawing deterministic and lets the suite assert real edge ele
   dependency edge, or placeholder can exist for one) and `graph.unresolved` is passed through to the
   existing list, with no synthetic parent and no promotion to a root. The tests assert that property
   rather than duplicating the server rule.
+
+## The remembered-preference surface, proved per project and per presentation
+
+**Choice:** the nine browser-local preferences are one closed set, each on its own key under the
+project namespace, and the isolation rules are asserted through the rendered Explorer rather than
+only against `PreferenceStore`. The closing tests are `ui/tests/storage.test.ts` (the store's parsers
+and keys) and `ui/tests/preferences.test.ts` (the control → reload loop).
+
+- **Key inventory** (`waymark.web.v1:<cyrb53(normalized root)>` prefix, `PREF = <projectId>`):
+  `PREF:view`, `PREF:presentation`, `PREF:graphAlternative`, `PREF:categories`, `PREF:collapsed`,
+  `PREF:viewport`, and the three per-view keys `PREF:expanded:<view>`, `PREF:dependencies:<view>`,
+  `PREF:scroll:<view>` for `view ∈ {combined, grouped}`.
+- **Scope.** `presentation`, `graphAlternative`, `categories`, `collapsed`, and `viewport` are per
+  project, so switching the data view cannot change how the reader is looking at it. `expanded`,
+  `dependencies`, and `scroll` are per view, because the combined hierarchy and the grouped sections
+  are different lists; each view's fold, overlay, and offset are written under its own suffix and
+  restored when that view is read again.
+- **Defaults** when nothing is stored: `combined`, `tree`, `false` (drawing, not the alternative),
+  `categories` = `null` ("show everything"), `collapsed` = `null` (nothing folded), `viewport` =
+  `null` (fit), `expanded` = `null` (expand everything), `dependencies` = `false`, `scroll` = `0`.
+- **Normalization folds `.` and `..` as well as separators and trailing slashes.** The health read
+  canonicalizes the root, but its fallback is the opened spelling; folding segments here keeps
+  `/a/b`, `/a/b/`, `/a/./b`, and `/a/c/../b` in one namespace without a second file read. A root that
+  genuinely moves is still a different namespace and starts from defaults, leaving the old one intact.
+- **One bad element does not discard a readable list.** `parseStringArray` drops non-string entries
+  (so `["bug",7]` still yields `["bug"]`), but an array with no string at all (`[7,null]`) reads as
+  missing rather than as "the reader chose none": `[]` is the only spelling of that choice.
+- **A malformed value is not a storage failure.** It falls back silently and does not raise the
+  persistence notice; only an unavailable, unreadable, or unwritable store does, once, from the one
+  `Explorer.persist()`/`syncNotice()` seam. A read-only store therefore shows no notice until the
+  first failed write, rather than claiming failure up front.
+- **What would change it:** a new preference would need its own key in this inventory and a line in
+  `preferences.test.ts`; a preference that must differ per data view would move under the `:<view>`
+  suffix, which is a deliberate widening of the key space, not a rename.

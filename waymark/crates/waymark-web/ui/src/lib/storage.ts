@@ -18,14 +18,36 @@ import type { PresentationName, ViewName } from './types';
 /** The preference namespace. Bump the version if the stored shape changes. */
 export const STORAGE_PREFIX = 'waymark.web.v1';
 
-/** Collapse path spelling differences that do not identify a different root. */
+/**
+ * Collapse path spelling differences that do not identify a different root.
+ *
+ * The health read canonicalizes the root, but its fallback is the opened path,
+ * which may still carry `.`, `..`, or a trailing separator. Folding those here
+ * keeps `/a/b`, `/a/b/`, and `/a/./b` in one namespace even then: a project
+ * that moved must not silently inherit a namespace it no longer has, and a
+ * project reached through a different spelling must not lose its own.
+ */
 export function normalizeProjectRoot(root: string): string {
-	let value = root.trim().replace(/\\/g, '/');
-	value = value.replace(/\/{2,}/g, '/');
-	if (value.length > 1) {
-		value = value.replace(/\/+$/, '');
+	const value = root.trim().replace(/\\/g, '/').replace(/\/{2,}/g, '/');
+	const absolute = value.startsWith('/');
+	const segments: string[] = [];
+	for (const segment of value.split('/')) {
+		if (segment === '' || segment === '.') continue;
+		if (segment === '..') {
+			if (segments.length > 0 && segments[segments.length - 1] !== '..') {
+				segments.pop();
+			} else if (!absolute) {
+				// A relative root cannot climb above its own start; keep the
+				// segment so `../a` stays distinct from `a`.
+				segments.push(segment);
+			}
+			continue;
+		}
+		segments.push(segment);
 	}
-	return value === '' ? '/' : value;
+	const folded = segments.join('/');
+	if (folded === '') return '/';
+	return absolute ? `/${folded}` : folded;
 }
 
 declare const projectIdBrand: unique symbol;
@@ -81,12 +103,21 @@ function isPresentationName(value: string | null): value is PresentationName {
 	return value === 'tree' || value === 'graph';
 }
 
+/**
+ * A stored list of strings, or `null` when there is nothing usable.
+ *
+ * Entries of the wrong type are dropped, so one corrupted element cannot
+ * discard a readable selection. An array with no usable entry at all is not a
+ * choice the reader made — `[]` means "none", and defaulting is the only safe
+ * reading of `[7, null]` — so it reads as missing rather than as "none".
+ */
 function parseStringArray(raw: string | null): string[] | null {
 	if (raw === null) return null;
 	try {
 		const parsed: unknown = JSON.parse(raw);
 		if (!Array.isArray(parsed)) return null;
-		return parsed.filter((entry): entry is string => typeof entry === 'string');
+		const entries = parsed.filter((entry): entry is string => typeof entry === 'string');
+		return parsed.length > 0 && entries.length === 0 ? null : entries;
 	} catch {
 		return null;
 	}

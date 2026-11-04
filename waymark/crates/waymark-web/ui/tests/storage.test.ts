@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { normalizeProjectRoot, PreferenceStore, preferenceKey, projectIdFor } from '$lib/storage';
+import type { ViewName } from '$lib/types';
 
 function memoryStorage(): Storage {
 	const values = new Map<string, string>();
@@ -18,6 +19,11 @@ function memoryStorage(): Storage {
 			values.set(key, value);
 		}
 	} as unknown as Storage;
+}
+
+/** The keys a `Storage` holds, through its public interface. */
+function storedKeys(storage: Storage): string[] {
+	return Array.from({ length: storage.length }, (_, index) => storage.key(index) ?? '').sort();
 }
 
 describe('project identifier', () => {
@@ -248,4 +254,355 @@ describe('PreferenceStore', () => {
 		const store = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
 		expect(() => store.writeDependencies('combined', true)).not.toThrow();
 		expect(store.failed).toBe(true);
-	});});
+	});
+});
+
+/**
+ * The remembered preferences, as one table, so a per-preference test cannot
+ * silently skip one and a preference written to another preference's key fails
+ * instead of round-tripping by luck.
+ *
+ * `raw` is the exact stored string, and `view` is the data view the preference
+ * is keyed by (`undefined` for the per-project ones).
+ */
+interface PreferenceCase {
+	name: Parameters<typeof preferenceKey>[1];
+	view?: ViewName;
+	write: (store: PreferenceStore) => void;
+	read: (store: PreferenceStore) => unknown;
+	expected: unknown;
+	raw: string;
+	defaulted: unknown;
+}
+
+const PREFERENCES: PreferenceCase[] = [
+	{
+		name: 'view',
+		write: (store) => store.writeView('grouped'),
+		read: (store) => store.readView(),
+		expected: 'grouped',
+		raw: 'grouped',
+		defaulted: 'combined'
+	},
+	{
+		name: 'presentation',
+		write: (store) => store.writePresentation('graph'),
+		read: (store) => store.readPresentation(),
+		expected: 'graph',
+		raw: 'graph',
+		defaulted: 'tree'
+	},
+	{
+		name: 'graphAlternative',
+		write: (store) => store.writeGraphAlternative(true),
+		read: (store) => store.readGraphAlternative(),
+		expected: true,
+		raw: 'true',
+		defaulted: false
+	},
+	{
+		name: 'categories',
+		write: (store) => store.writeCategories(['bug', 'task']),
+		read: (store) => store.readCategories(),
+		expected: ['bug', 'task'],
+		raw: JSON.stringify(['bug', 'task']),
+		defaulted: null
+	},
+	{
+		name: 'expanded',
+		view: 'grouped',
+		write: (store) => store.writeExpanded('grouped', ['wm-h-root']),
+		read: (store) => store.readExpanded('grouped'),
+		expected: ['wm-h-root'],
+		raw: JSON.stringify(['wm-h-root']),
+		defaulted: null
+	},
+	{
+		name: 'dependencies',
+		view: 'grouped',
+		write: (store) => store.writeDependencies('grouped', true),
+		read: (store) => store.readDependencies('grouped'),
+		expected: true,
+		raw: 'true',
+		defaulted: false
+	},
+	{
+		name: 'collapsed',
+		write: (store) => store.writeCollapsed(['wm-h-child']),
+		read: (store) => store.readCollapsed(),
+		expected: ['wm-h-child'],
+		raw: JSON.stringify(['wm-h-child']),
+		defaulted: null
+	},
+	{
+		name: 'viewport',
+		write: (store) => store.writeViewport({ x: 12.5, y: -3, zoom: 0.75 }),
+		read: (store) => store.readViewport(),
+		expected: { x: 12.5, y: -3, zoom: 0.75 },
+		raw: JSON.stringify({ x: 12.5, y: -3, zoom: 0.75 }),
+		defaulted: null
+	},
+	{
+		name: 'scroll',
+		view: 'grouped',
+		write: (store) => store.writeScroll('grouped', 320),
+		read: (store) => store.readScroll('grouped'),
+		expected: 320,
+		raw: '320',
+		defaulted: 0
+	}
+];
+
+describe('every remembered preference', () => {
+	for (const preference of PREFERENCES) {
+		it(`round-trips ${preference.name} under its own key`, () => {
+			const storage = memoryStorage();
+			const store = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+			preference.write(store);
+
+			// One write, one key: the value is where `preferenceKey` says it is.
+			const key = preferenceKey(store.projectId, preference.name, preference.view);
+			expect(storedKeys(storage)).toEqual([key]);
+			expect(storage.getItem(key)).toBe(preference.raw);
+
+			const reopened = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+			expect(preference.read(reopened)).toEqual(preference.expected);
+		});
+
+		it(`reads the default for a project that never wrote ${preference.name}`, () => {
+			const storage = memoryStorage();
+			const store = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+			expect(preference.read(store)).toEqual(preference.defaulted);
+		});
+
+		it(`keeps ${preference.name} out of another project`, () => {
+			const storage = memoryStorage();
+			const alpha = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+			const beta = new PreferenceStore(storage, projectIdFor('/projects/beta'));
+			preference.write(alpha);
+			expect(preference.read(beta)).toEqual(preference.defaulted);
+		});
+
+		it(`namespaces ${preference.name} by the normalized project root`, () => {
+			const storage = memoryStorage();
+			const store = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+			preference.write(store);
+			// The same root, spelled differently, is the same project.
+			const spelled = new PreferenceStore(storage, projectIdFor('/projects//alpha/'));
+			expect(preference.read(spelled)).toEqual(preference.expected);
+			// A sibling directory is not.
+			const sibling = new PreferenceStore(storage, projectIdFor('/projects/alphabeta'));
+			expect(preference.read(sibling)).toEqual(preference.defaulted);
+		});
+	}
+});
+
+describe('per-view preferences keep their view apart', () => {
+	it('stores expansion, dependency visibility, and scroll per data view', () => {
+		const storage = memoryStorage();
+		const store = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+		store.writeExpanded('combined', ['wm-h-child']);
+		store.writeDependencies('combined', true);
+		store.writeScroll('combined', 90);
+
+		// The other view is untouched by those writes.
+		expect(store.readExpanded('grouped')).toBeNull();
+		expect(store.readDependencies('grouped')).toBe(false);
+		expect(store.readScroll('grouped')).toBe(0);
+
+		store.writeExpanded('grouped', ['wm-h-root']);
+		store.writeDependencies('grouped', true);
+		store.writeScroll('grouped', 240);
+
+		// And writing the second view does not rewrite the first.
+		expect(store.readExpanded('combined')).toEqual(['wm-h-child']);
+		expect(store.readDependencies('combined')).toBe(true);
+		expect(store.readScroll('combined')).toBe(90);
+		expect(store.readExpanded('grouped')).toEqual(['wm-h-root']);
+		expect(store.readScroll('grouped')).toBe(240);
+	});
+
+	it('keeps per-project preferences shared by both data views', () => {
+		const storage = memoryStorage();
+		const store = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+		store.writePresentation('graph');
+		store.writeCategories(['bug']);
+		store.writeCollapsed(['wm-h-child']);
+		store.writeViewport({ x: 1, y: 2, zoom: 1.5 });
+		store.writeGraphAlternative(true);
+
+		// Switching the data view reads the same project-scoped values.
+		store.writeView('grouped');
+		const reopened = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+		expect(reopened.readView()).toBe('grouped');
+		expect(reopened.readPresentation()).toBe('graph');
+		expect(reopened.readCategories()).toEqual(['bug']);
+		expect(reopened.readCollapsed()).toEqual(['wm-h-child']);
+		expect(reopened.readViewport()).toEqual({ x: 1, y: 2, zoom: 1.5 });
+		expect(reopened.readGraphAlternative()).toBe(true);
+	});
+
+	it('never writes one preference while reading another', () => {
+		const storage = memoryStorage();
+		const store = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+		for (const preference of PREFERENCES) preference.read(store);
+		expect(storedKeys(storage)).toEqual([]);
+		expect(store.failed).toBe(false);
+	});
+});
+
+describe('project identity across spellings and moves', () => {
+	it('treats a dot segment as the same project as the canonical path', () => {
+		const canonical = projectIdFor('/a/b');
+		expect(projectIdFor('/a/b/')).toBe(canonical);
+		expect(projectIdFor('/a//b')).toBe(canonical);
+		expect(projectIdFor('/a/./b')).toBe(canonical);
+		expect(projectIdFor('/a/b/../b')).toBe(canonical);
+		expect(projectIdFor('/a/b/.')).toBe(canonical);
+		expect(projectIdFor('/a/c/../b/')).toBe(canonical);
+		expect(normalizeProjectRoot('/a/./b')).toBe('/a/b');
+		expect(normalizeProjectRoot('/a/b/../c')).toBe('/a/c');
+		expect(normalizeProjectRoot('/a/..')).toBe('/');
+		expect(normalizeProjectRoot('.')).toBe('/');
+		expect(normalizeProjectRoot('C:\\work\\.\\project')).toBe('C:/work/project');
+	});
+
+	it('starts a moved project from defaults and leaves the old namespace intact', () => {
+		const storage = memoryStorage();
+		const before = new PreferenceStore(storage, projectIdFor('/work/alpha'));
+		before.writeView('grouped');
+		before.writePresentation('graph');
+		before.writeGraphAlternative(true);
+		before.writeCategories(['bug']);
+		before.writeExpanded('combined', ['wm-h-root']);
+		before.writeDependencies('combined', true);
+		before.writeCollapsed(['wm-h-child']);
+		before.writeViewport({ x: 10, y: 20, zoom: 1.25 });
+		before.writeScroll('combined', 240);
+
+		const moved = new PreferenceStore(storage, projectIdFor('/archive/alpha'));
+		expect(moved.projectId).not.toBe(before.projectId);
+		expect(moved.readView()).toBe('combined');
+		expect(moved.readPresentation()).toBe('tree');
+		expect(moved.readGraphAlternative()).toBe(false);
+		expect(moved.readCategories()).toBeNull();
+		expect(moved.readExpanded('combined')).toBeNull();
+		expect(moved.readDependencies('combined')).toBe(false);
+		expect(moved.readCollapsed()).toBeNull();
+		expect(moved.readViewport()).toBeNull();
+		expect(moved.readScroll('combined')).toBe(0);
+
+		// The old namespace is still there, untouched by the move.
+		const still = new PreferenceStore(storage, projectIdFor('/work/alpha/'));
+		expect(still.readView()).toBe('grouped');
+		expect(still.readPresentation()).toBe('graph');
+		expect(still.readGraphAlternative()).toBe(true);
+		expect(still.readCategories()).toEqual(['bug']);
+		expect(still.readExpanded('combined')).toEqual(['wm-h-root']);
+		expect(still.readDependencies('combined')).toBe(true);
+		expect(still.readCollapsed()).toEqual(['wm-h-child']);
+		expect(still.readViewport()).toEqual({ x: 10, y: 20, zoom: 1.25 });
+		expect(still.readScroll('combined')).toBe(240);
+	});
+});
+
+describe('malformed stored values', () => {
+	it('falls back to the default for every parser', () => {
+		const storage = memoryStorage();
+		const store = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+		const malformed: Array<[Parameters<typeof preferenceKey>[1], string, string]> = [
+			['view', 'sideways', 'combined'],
+			['presentation', 'diagram', 'tree'],
+			['graphAlternative', 'sideways', 'false'],
+			['categories', '{"bug":true}', 'null'],
+			['expanded', '{not json', 'null'],
+			['expanded', '"wm-h-root"', 'null'],
+			['expanded', '42', 'null'],
+			['dependencies', 'yes', 'false'],
+			['collapsed', '{not json', 'null'],
+			['viewport', '{"x":"left"}', 'null'],
+			['viewport', '{"x":1,"y":2,"zoom":9}', 'null'],
+			['viewport', '{"x":1,"y":2,"zoom":0}', 'null'],
+			['scroll', '-4', '0'],
+			['scroll', 'Infinity', '0']
+		];
+		for (const [preference, raw] of malformed) {
+			storage.setItem(preferenceKey(store.projectId, preference), raw);
+		}
+
+		expect(store.readView()).toBe('combined');
+		expect(store.readPresentation()).toBe('tree');
+		expect(store.readGraphAlternative()).toBe(false);
+		expect(store.readCategories()).toBeNull();
+		expect(store.readExpanded('combined')).toBeNull();
+		expect(store.readDependencies('combined')).toBe(false);
+		expect(store.readCollapsed()).toBeNull();
+		expect(store.readViewport()).toBeNull();
+		expect(store.readScroll('combined')).toBe(0);
+	});
+
+	it('treats a stored array of the wrong element type as missing, not as a choice', () => {
+		const storage = memoryStorage();
+		const store = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+		// A corrupted array is not "the reader selected nothing"; defaulting is
+		// the only safe reading, and it must not throw.
+		storage.setItem(preferenceKey(store.projectId, 'categories'), '[7,null,true]');
+		storage.setItem(preferenceKey(store.projectId, 'expanded', 'combined'), '[7,null]');
+		storage.setItem(preferenceKey(store.projectId, 'collapsed'), '[{"id":"wm-h-root"}]');
+		expect(store.readCategories()).toBeNull();
+		expect(store.readExpanded('combined')).toBeNull();
+		expect(store.readCollapsed()).toBeNull();
+
+		// An empty array is still a real choice and still respected.
+		storage.setItem(preferenceKey(store.projectId, 'categories'), '[]');
+		storage.setItem(preferenceKey(store.projectId, 'expanded', 'combined'), '[]');
+		expect(store.readCategories()).toEqual([]);
+		expect(store.readExpanded('combined')).toEqual([]);
+	});
+
+	it('keeps working after reading malformed values', () => {
+		const storage = memoryStorage();
+		const store = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+		storage.setItem(preferenceKey(store.projectId, 'viewport'), '{truncated');
+		expect(store.readViewport()).toBeNull();
+		store.writeViewport({ x: 1, y: 2, zoom: 1.5 });
+		expect(new PreferenceStore(storage, store.projectId).readViewport()).toEqual({
+			x: 1,
+			y: 2,
+			zoom: 1.5
+		});
+	});
+
+	it('degrades without throwing when reads throw', () => {
+		const storage = memoryStorage();
+		storage.getItem = () => {
+			throw new Error('access denied');
+		};
+		const store = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+		expect(() => store.readView()).not.toThrow();
+		expect(store.readView()).toBe('combined');
+		expect(store.readPresentation()).toBe('tree');
+		expect(store.readGraphAlternative()).toBe(false);
+		expect(store.readCategories()).toBeNull();
+		expect(store.readExpanded('combined')).toBeNull();
+		expect(store.readDependencies('combined')).toBe(false);
+		expect(store.readCollapsed()).toBeNull();
+		expect(store.readViewport()).toBeNull();
+		expect(store.readScroll('combined')).toBe(0);
+		expect(store.failed).toBe(true);
+	});
+
+	it('reports a quota failure by name without throwing', () => {
+		const storage = memoryStorage();
+		storage.setItem = () => {
+			const error = new Error('The quota has been exceeded.');
+			error.name = 'QuotaExceededError';
+			throw error;
+		};
+		const store = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+		for (const preference of PREFERENCES) {
+			expect(() => preference.write(store)).not.toThrow();
+		}
+		expect(store.failed).toBe(true);
+	});
+});
