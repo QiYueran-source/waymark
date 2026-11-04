@@ -198,8 +198,9 @@ waymark version
 # waymark 0.1.0 (cli, mcp, web)
 ```
 
-Only the binaries are replaced. The project's `.waymark/` directory and every
-work-item document are untouched, and no migration or re-initialisation is
+The Web archive replaces the executables in the installation directory; no
+project file is touched. The project's `.waymark/` directory and every
+work-item document are unchanged, and no migration or re-initialisation is
 needed: the basic and Web packages read and write the same project format.
 
 ### Run the server
