@@ -86,6 +86,10 @@ _Avoid_: Version (unqualified), format generation.
 The disposable in-process view of work-item files, either complete and fresh or explicitly incomplete. It is rebuilt from files and is never a second source of truth.
 _Avoid_: Index, cache (when the authoritative view is meant).
 
+**Field projection**:
+The caller-selected subset of fields a collection row renders, either a named set or all set fields, with unset values omitted. Unknown names are rejected; it changes the row shape, not which work items the query selects.
+_Avoid_: Mask, view (when the field subset is meant).
+
 **Archive range**:
 The selector that decides whether a collection query reads active or archived work items. A single work item is read by stable ID regardless of range.
 _Avoid_: Filter (when the active/archived scope is meant).

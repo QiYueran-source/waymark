@@ -120,7 +120,7 @@ Produce a handoff-ready functional specification for Waymark, a general-purpose,
 - Configuration changes are also exposed through shared functions and both adapters, so configuration edits are versionable and reviewable through Waymark's normal deterministic file changes. Configuration updates must use structured operations with validation, conflict checks, and explicit migration handling when existing work-item data could be affected; there is no unrestricted raw configuration patch.
 - CLI may expose convenience commands such as `start`, `close`, and `reopen` as adapters over the shared status operation; these are not separate domain capabilities. MCP should expose the structured status operation rather than requiring one tool per convenience alias.
 - Waymark does not provide user-facing cross-work-item batch commands. Each write targets exactly one work item; CLI accepts no multiple IDs and MCP accepts no `items` arrays, and there is no arbitrary mixed-operation array. The all-or-nothing, per-target-outcome, and rollback rules apply only to a single operation that inherently writes multiple files — archive relationship cleanup, migration, multi-target relationship writes, and configuration/schema changes — and are provided by the shared write engine rather than by a batch API.
-- Editing and migration contracts are both resolved in this map; what remains for them is naming and transport shape, tracked under Not yet specified.
+- Editing and migration contracts are both resolved in this map; their naming and transport shapes were resolved on 2026-11-04 in Resolved remaining interface decisions.
 
 ### Resolved migration and versioning semantics
 
@@ -347,6 +347,76 @@ The following decisions extend the accepted specification. The Web implementatio
 - T12 is limited to Web dependencies and implementation; distribution, packaging, downloads and release automation are a separate planning effort. T12 supplies a development/test Web launcher that uses the current working directory to discover a Waymark project by default and accepts an explicit project path. A missing project or invalid configuration returns a clear error without initializing or modifying it. Developers install frontend dependencies from the lockfile and build assets before launch; the launcher loads those local assets, uses the shared core, and supports independent browser testing of the real read-only UI and API. Missing assets produce a clear startup error with preparation guidance; no npm invocation, dependency download, or placeholder page occurs automatically. Ordinary Rust compilation and basic-build tests neither run npm automatically nor require frontend build output; the local T12 Web launcher checks assets at startup, while the later distributable Web build enforces its own asset requirement at build time. The launcher is not the formal user installation command. T12 does not implement the formal `waymark serve` entry point, CLI feature gating or embedding release assets. The subsequent distribution work connects those pieces and reuses T12's server and frontend build output, rather than building a second Web service or UI.
 - Create a separate Wayfinder map for Waymark build, packaging and distribution, covering basic/Web variants, source installation, prebuilt packages, frontend assets, version verification and release workflow. Consult Clove's build, packaging and distribution as prior art while retaining Waymark's decisions and scope; do not copy its fallback behavior blindly. The effort leads to its own specification and implementation tickets once decisions are ready. Web UI and MCP business behavior are outside that map. The present T12 design is synchronized to the existing specification and T12 ticket. Defer the distribution map and its implementation for now and prioritize Waymark's core and interfaces; revisit distribution separately when it becomes necessary.
 
+### Resolved remaining interface decisions
+
+Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps and settle the Git-availability question they raised; where they overlap the provisional choices in `waymark/docs/implementation-decisions.md`, these rules win. The functional specification is not yet synchronized.
+
+#### Format generation field
+
+- Work-item frontmatter carries `schema`, an unsigned integer, written first in canonical order, with current value `1`.
+- `schema` is required. A missing key or a non-integer value is `VALIDATION_ERROR`; a generation outside the readable window (the current and the immediately previous major) is `UNSUPPORTED_VERSION`, checked before any other validation.
+- No default is inferred. A hand-written document must declare its generation; Waymark never guesses one.
+- The configuration version is the string `"<generation>.<revision>"` (`"1.0"` for a new project). Its generation part and the work-item `schema` denote the same on-disk format generation, so one release cannot write a document and a configuration that disagree about it.
+
+#### Projection synchronization is internal
+
+- There is no `sync` command in the CLI and no `waymark_sync` tool in MCP. The projection lives only in memory and is rebuilt or refreshed per operation: the CLI builds one per invocation and discards it, while long-lived MCP and Web contexts perform lightweight inventory checks before each call.
+- A refresh failure after a successful write leaves the documents committed, reports that synchronization needs recovery, and the next operation rebuilds from the files. There is no persisted plan or index to repair.
+- `doctor` and `validate` load a fresh projection and report completeness and freshness; they gain no rebuild flag. This rewords the earlier "projection synchronization is eligible for both adapters" sentence: synchronization is a shared-library behavior, not an adapter surface.
+
+#### MCP surface
+
+- Transport stays stdio-only: a local MCP client starts the server and communicates over standard input and output.
+- The server advertises tools only. It exposes no resources, resource templates, prompts, or subscriptions in v1; an HTTP transport or a resource surface is future work.
+- Tool names follow `waymark_<verb>_<noun>`, for example `waymark_get_work_item`, `waymark_list_work_items`, `waymark_update_custom_fields`. The 39 names already published are the contract; renaming one is a breaking change.
+
+#### Human-readable CLI output and colour
+
+- Human output keeps the current text layout: collections render `id`, padded `status`, `state`, and `title` on one line, with indented `needs migration` and `blocked by …` lines and an `N of M match (offset X, limit Y)` footer; a single item renders labeled `category`/`status`/`state`/custom-field blocks; edits render one confirmation line; diagnosis, tree, and stats keep their existing sectioned prose. No header row is added.
+- Human prose goes to stderr; stdout carries JSON, `show --raw` documents, and raw `git diff` patches.
+- Colour is added only for a terminal: `--color=auto|always|never`, default `auto`, with `NO_COLOR` honoured. Colour never changes the text and never carries meaning alone.
+- The CLI and Web share the semantic states `ready`, `in_progress`, `blocked`, and `closed` from the shared display-state derivation, and the same green/blue/red/grey mapping. Each medium encodes it itself (ANSI for the CLI, CSS for the Web); the hex values are not a shared contract. Category identity stays shape-based in the Web and is not colour-coded.
+
+#### MCP edit schemas
+
+- `waymark_set_title` takes `{id, title, dry_run?, lock_timeout_ms?}` and returns `{id, path, changed, written, item}`.
+- `waymark_replace_body` takes `{id, body, dry_run?, lock_timeout_ms?}`. `body` is required: an empty string clears the body, a non-empty one replaces it. There is no "leave unchanged" form; a caller that wants no change does not call the tool.
+- `waymark_update_custom_fields` takes `{id, custom_fields: {set: {key: value}, clear: [key]}, dry_run?, lock_timeout_ms?}` and returns `{id, path, changed, written, item, changed_fields}`. `set` and `clear` are two fields, not a tagged union; null, unknown, duplicate, conflicting, and required-field clears are `VALIDATION_ERROR`, and the whole map is validated before one write.
+- All three return the complete resulting item and use the shared versioned envelope.
+
+#### No composite edit
+
+- Editing stays split by data area: `title set`, `body replace`, and `field update` in the CLI, and the three MCP tools above. There is no generic frontmatter patch.
+- A caller that wants to change title, body, and fields together makes three calls. Each is atomic per document with its own lock, fingerprint check, and `updated_at`; there is no cross-area transaction and no all-or-nothing guarantee across the calls, and a partial failure leaves the earlier calls applied and reports which call failed.
+- Creation remains the one request that sets several areas at once, and it is atomic because it is a single document write (plus soft-link partners in the same batch).
+
+#### Field projection and rank
+
+- `--fields` and the MCP `fields` parameter accept exactly these 22 names: `schema`, `id`, `title`, `category`, `status`, `owner`, `creator`, `created_at`, `updated_at`, `closed_at`, `parent`, `dependencies`, `soft_links`, `custom_fields`, `archived_at`, `archive_reason`, `needs_migration`, `ready`, `blocked`, `blocked_by`, `children`, `dependents`.
+- Unknown names are `VALIDATION_ERROR` listing the allowed set; an empty list is rejected; `--fields` conflicts with `--compact`; unset values are omitted; `id` and `status` are always present in a projected row.
+- Individual custom-field keys are not projection names. A caller selects the `custom_fields` map and reads keys from it.
+- Rank's final tie-break inside a status group and topological level is the stable ID ascending, in ascending and descending sorts alike (only the primary key reverses). The level order and the tie-break together are total and machine-stable.
+
+#### Migration envelopes
+
+- All three migration classes return one shared report: `{migration: version|schema|storage, description, dry_run, affected: [{id, path}], targets: [{path, outcome, error?}], moves: [{from, to, outcome, error?}], rewritten: [{id, path, from, to}], count, written, config_changed, previous_revision, revision}`.
+- Each call carries exactly one action: version `{target_generation}`; schema `{action: {kind: remove_field, key} | {kind: add_required_field, key, type, default?}}`; storage `{action: {kind: root, path} | {kind: category_path, key, path} | {kind: category_key, from, to}}`; all plus `dry_run` and optional `lock_timeout_ms`.
+- A dry run sends the same request with `dry_run: true` and returns the same shape with `written: false` and targets marked `skipped`; a real run marks each target `applied` or `failed`. CLI flags map one-to-one (`--to`, `--remove-field`, `--add-required-field` with `--type`/`--default`, `--root`, `--category-path`, `--category-key`, `--dry-run`).
+
+#### Git parity
+
+- Both adapters expose the same two Git capabilities with the same parameters: history `{item?, path?, limit?}` and diff `{item?, commit?}`.
+- History defaults `limit` to 20, where `0` means unlimited; `item` and `path` are mutually exclusive. The CLI renders human commit lines or the raw patch, and MCP returns the shared envelope; this presentation difference is the only allowed one.
+- `item` and `path` together is rejected by both. The CLI rejects it as `USAGE_ERROR` at the argument layer and MCP as `VALIDATION_ERROR` from the shared core; the adapter-level usage-error rule permits that class difference for the same invalid input.
+- No Git capability exists in only one adapter. Git-based stats, blame, and status are not part of v1.
+
+#### Git availability
+
+- Git is optional. A probe checks both a containing repository and a `git` executable on `PATH`; if either is missing, history and diff succeed with an empty payload, an informational finding, and the usual exit code. No tracker operation is blocked or degraded.
+- Two findings name the causes: `GIT_UNAVAILABLE` when no `git` executable is found, and `NOT_A_GIT_REPOSITORY` when no repository contains the project. When both are missing, both findings are reported, each with a message naming its cause.
+- Both findings are info severity, non-fixable, and never change the exit code. `doctor` and `validate` report them so a user learns before running history; they do not install Git or initialize a repository.
+- This adds `GIT_UNAVAILABLE` to the frozen registry (37 → 38): the registry table, JSON-schema enum, golden snapshot, and documented table change in the same edit.
+
 ## Not yet specified
 
 ### Web, MCP, and distribution follow-up
@@ -356,19 +426,7 @@ The following decisions extend the accepted specification. The Web implementatio
 - Implementation details for loopback HTTP validation, including canonical handling of IPv6 and default ports and tests for malformed, repeated, or missing headers, within the accepted Host/Origin rules above.
 - The separate packaging/download/release map, its decision tickets, specification and implementation tickets have yet to be created.
 
-Before the Web, MCP, and distribution follow-up above, every original decision ticket had been closed and indexed under Decisions so far. The replacement `wm-srxj8ztv1zfz` was accepted with 130 user stories, the absorbed command and tool catalog, and the frozen error registry; the interface working document was retired to `.inbox/superpower/`. The map remains the decision record and implementation tickets are cut from the specification, not from this map. The Web implementation and behavior follow-up above is reflected in that specification and T12; the MCP and formal distribution follow-up remains to be synchronized.
-
-The following earlier details also remain unspecified:
-
-- the frontmatter field name and value shape that carries the format generation;
-- whether `sync` stays a public command, folds into `doctor`, or is implied by per-operation inventory checks;
-- MCP details other than the selected initial stdio transport: tool-name convention and whether resources or subscriptions are exposed;
-- the concrete shape of human-readable CLI output, and whether CLI and Web share work-state colours and markers;
-- the exact MCP schema and return values for title, body, and custom-field operations;
-- whether a composite `edit` operation exists at all, and whether cross-domain edits are atomic;
-- which field names `--fields` projection accepts, and the final deterministic tie-break for `rank` ordering within a topological level;
-- the full request and response envelopes for the three migration classes, and the machine-readable shape of `--dry-run` output;
-- whether Git capabilities are exposed with identical parameters through both adapters.
+Before the Web, MCP, and distribution follow-up above, every original decision ticket had been closed and indexed under Decisions so far. The replacement `wm-srxj8ztv1zfz` was accepted with 130 user stories, the absorbed command and tool catalog, and the frozen error registry; the interface working document was retired to `.inbox/superpower/`. The map remains the decision record and implementation tickets are cut from the specification, not from this map. The Web implementation and behavior follow-up above is reflected in that specification and T12; the MCP interface decisions and the formal distribution follow-up remain to be synchronized. The nine earlier interface details were resolved on 2026-11-04; see Resolved remaining interface decisions above.
 
 ## Out of scope
 
