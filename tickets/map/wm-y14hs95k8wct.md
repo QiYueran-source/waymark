@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-04T11:41:08Z
+updated_at: 2026-11-04T12:08:29Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -202,6 +202,9 @@ Codes with no exit class, used as warnings and findings: `OWNER_MISMATCH` (warni
 - The specification lives in the Clove tracker as its own work item under `.clove/issues/`, not in `docs/`. No spec-like document remains under `docs/`; such documents are retired or migrated into it.
 
 ### DSH sidebar integration
+
+> Deferred on 2026-11-04: the DSH sidebar and MCP integration effort is archived (map `wm-ztbcsgpkq248`); this section remains decision history and is not in the current timeframe. Its internal relations were cleared before archiving so the project health check stays clean.
+
 
 - The DSH sidebar plugin reuses the existing Waymark Web logic and remains strictly read-only; it must not offer work-item mutations. Confirmed by the user on 2026-11-04.
 - The sidebar reuses the Web read-only browsing capabilities, including tree views, item detail, and view controls. Layout may adapt to the narrow sidebar without separate work-item semantics. The sidebar design depends on the Web feature design; the future sidebar specification and implementation must be blocked until the still-evolving Web work is ready. Category selection and graph view are specified Web extensions, not yet implemented in the current checkout. The exact Web completion gate must be clarified before wiring future spec/implementation dependencies.

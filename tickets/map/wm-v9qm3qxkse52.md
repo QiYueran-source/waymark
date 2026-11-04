@@ -6,9 +6,10 @@ category: map
 status: closed
 owner: frank
 created_at: 2026-11-04T02:01:58Z
-updated_at: 2026-11-04T11:55:21Z
+updated_at: 2026-11-04T12:08:11Z
 closed_at: 2026-11-04T11:55:21Z
-parent: wm-ztbcsgpkq248
+archived_at: 2026-11-04T12:08:23Z
+archive_reason: Deferred with the DSH sidebar effort on 2026-11-04
 ---
 ## Question
 

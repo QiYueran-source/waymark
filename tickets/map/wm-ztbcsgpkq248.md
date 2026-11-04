@@ -6,9 +6,11 @@ category: map
 status: open
 owner: frank
 created_at: 2026-11-04T02:01:45Z
-updated_at: 2026-11-04T11:56:11Z
+updated_at: 2026-11-04T12:08:16Z
 dependencies:
   - wm-djw788wb4606
+archived_at: 2026-11-04T12:08:23Z
+archive_reason: DSH sidebar and MCP integration deferred on 2026-11-04; not in the current timeframe
 ---
 ## Destination
 
@@ -21,6 +23,14 @@ Produce an implementable functional and integration specification and a decision
 - MCP uses the existing read/write stdio server with generic host-specific configuration guidance; DSH-specific MCP setup is not in scope.
 - Keep research local; do not push or open pull requests. Do not add tracker fields solely for ticket type or claim state; parent and dependency relationships remain native Waymark relationships.
 - Consult grilling and domain-modeling when working a human decision. A decision is not implementation work.
+
+## Deferred
+
+Deferred on 2026-11-04: the DSH sidebar and MCP integration is not in the current timeframe. This map and all child tickets are archived; `show` still reads them, and restoring a historical Git version is the only way back.
+
+The internal parent and dependency edges were cleared before archiving, because archived-to-archived relations are reported as `DANGLING_REFERENCE` by `validate`; this Decisions index preserves the mapping.
+
+If the effort resumes, the shortest first step is the A0 spike: launch `waymark-web-dev` with the session workspace and a stable port, embed the page in the right sidebar, and verify DSH's CSP and the 320-400px layout. A1 adds a configurable `frame-ancestors`; B (a host-side adapter over MCP) is the fallback if iframe embedding is blocked. The trade-off lives in the archived architecture ticket.
 
 ## Decisions so far
 
