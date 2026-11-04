@@ -755,18 +755,33 @@ code {
 
 /* Graph ------------------------------------------------------------------- */
 
-/* The drawing fills a definite box of its own; anything below it — the
-   unresolved list — still scrolls into view in the same pane. */
+/* The drawing fills the content area below the toolbar: the pane is a flex
+   column, the canvas takes the remaining height, and the unresolved drawer
+   below it takes a row of its own instead of floating over the nodes. There is
+   no inner fixed height and no decorative frame around the canvas. */
 .tree-pane.graph-pane-host {
-	padding-top: 0.6rem;
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	padding: 0;
+	overflow: hidden;
 }
 
 .graph-pane {
 	position: relative;
-	height: clamp(22rem, 68vh, 48rem);
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	min-height: 0;
 	background: var(--sheet);
-	border: 1px solid var(--line);
-	border-radius: 4px;
+}
+
+/* The box the fit is measured against; the drawing fills it. */
+.graph-canvas-host {
+	position: relative;
+	flex: 1;
+	min-width: 0;
+	min-height: 0;
 }
 
 /* The drawing is read-only, so nothing in it advertises an affordance. */
@@ -1315,6 +1330,57 @@ button.graph-text-title:hover {
 .unresolved-reason {
 	color: var(--notice-ink);
 	font-size: 0.8rem;
+}
+
+/*
+ * The graph's bottom drawer. It is a row of the graph pane's flex column, not
+ * an overlay: the canvas above it keeps the remaining height and no node is
+ * ever covered. The whole header is a button, so the strip folds from the
+ * keyboard and says how many entries it holds.
+ */
+.unresolved-drawer {
+	flex: none;
+	max-height: 40%;
+	margin: 0;
+	padding: 0;
+	overflow-y: auto;
+	border-top: 1px solid var(--notice-line);
+	border-left: 0;
+	border-radius: 0;
+}
+
+.unresolved-drawer .unresolved-heading {
+	margin: 0;
+	padding: 0;
+}
+
+.unresolved-toggle {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	width: 100%;
+	min-height: 2rem;
+	padding: 0.4rem clamp(0.75rem, 2.2vw, 1.6rem);
+	border: 0;
+	background: transparent;
+	color: var(--notice-ink);
+	font-size: 0.88rem;
+	font-weight: 650;
+	text-align: left;
+}
+
+.unresolved-toggle:hover {
+	text-decoration: underline;
+	text-underline-offset: 0.15em;
+}
+
+.unresolved-toggle-mark {
+	font-size: 0.78rem;
+	line-height: 1;
+}
+
+.unresolved-drawer .unresolved-content {
+	padding: 0 clamp(0.75rem, 2.2vw, 1.6rem) 0.7rem;
 }
 
 /* Failure ----------------------------------------------------------------- */
