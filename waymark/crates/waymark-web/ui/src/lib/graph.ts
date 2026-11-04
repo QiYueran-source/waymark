@@ -107,7 +107,60 @@ export interface WorkGraph {
 
 const EMPTY_CONTEXT: ReadonlySet<string> = new Set();
 
-/** What the payload asks the drawing to include beyond the hierarchy. */
+/**
+ * A viewport: where the canvas is scrolled to and how far it is zoomed.
+ *
+ * The values are the drawing library's own transform — `x`/`y` in screen
+ * pixels, `zoom` a scale factor — so a remembered viewport can be restored
+ * exactly, and so one project's viewport cannot be mistaken for another's.
+ */
+export interface GraphViewport {
+	x: number;
+	y: number;
+	zoom: number;
+}
+
+/** The zoom range a fitted viewport stays inside. */
+export const MIN_GRAPH_ZOOM = 0.5;
+export const MAX_GRAPH_ZOOM = 2;
+
+/** The share of the canvas the fitted drawing leaves free at its edges. */
+export const GRAPH_FIT_PADDING = 0.1;
+
+/**
+ * The canvas size assumed until the page has measured the drawing's box.
+ *
+ * A browser measures the box and fits against its real size. Server rendering
+ * and a DOM without layout (tests) report a zero-sized box, so fitting needs a
+ * nominal one: without it the first fitted viewport would be the neutral
+ * `zoom: 1`, which is not a fit at all.
+ */
+export const GRAPH_NOMINAL_CANVAS = { width: 960, height: 640 };
+
+/**
+ * The pan/zoom operations the canvas controls need, as the app sees them.
+ *
+ * The drawing library satisfies this; naming it here keeps the view free of
+ * the library's own types, so the controls talk to a small, replaceable seam.
+ */
+export interface GraphFlow {
+	setViewport(viewport: GraphViewport): Promise<boolean> | boolean | void;
+	/** The canvas's current transform, as the drawing holds it. */
+	getViewport(): GraphViewport;
+	zoomIn(): Promise<boolean> | boolean | void;
+	zoomOut(): Promise<boolean> | boolean | void;
+}
+
+/** An axis-aligned box in the drawing's coordinate space. */
+export interface GraphBounds {
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+}
+
+/**
+ * What the payload asks the drawing to include beyond the hierarchy. */
 export interface BuildGraphOptions {
 	/** Draw the dashed dependency overlay. Off unless asked for. */
 	dependenciesVisible?: boolean;
@@ -233,7 +286,11 @@ export interface GraphNodePayload extends Record<string, unknown> {
 	/** Top edge of the node's place in the drawing: one row per generation. */
 	graphY: number;
 	selected: boolean;
+	/** True when this node's children are hidden by the reader's collapse. */
+	collapsed: boolean;
 	onSelect: (id: string, trigger?: HTMLElement) => void;
+	/** Collapse or expand this node's children. Never changes the item. */
+	onToggle: (id: string) => void;
 }
 
 /**
@@ -361,6 +418,66 @@ export function collapseGraph(graph: WorkGraph, collapsed: ReadonlySet<string>):
 		roots: graph.roots.filter((id) => drawn.has(id)),
 		unresolved: graph.unresolved
 	};
+}
+
+/** The bounding box of the drawn nodes, or `null` when nothing is drawn. */
+export function graphBounds(
+	rects: ReadonlyArray<{ x: number; y: number; width: number; height: number }>
+): GraphBounds | null {
+	if (rects.length === 0) return null;
+	let left = Infinity;
+	let top = Infinity;
+	let right = -Infinity;
+	let bottom = -Infinity;
+	for (const rect of rects) {
+		left = Math.min(left, rect.x);
+		top = Math.min(top, rect.y);
+		right = Math.max(right, rect.x + rect.width);
+		bottom = Math.max(bottom, rect.y + rect.height);
+	}
+	return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+/**
+ * The viewport that fits `bounds` inside a canvas of `width` by `height`.
+ *
+ * This is the drawing's initial state and the target of "fit to view": the
+ * whole drawing, centred, inside the zoom range, with a margin at the edges.
+ * It is computed from the model's geometry rather than measured from the DOM,
+ * so the same drawing always fits the same way and the viewport can be
+ * restored exactly. An empty drawing — or a canvas that has not been measured
+ * yet — yields the neutral viewport rather than an infinite zoom.
+ */
+export function fittedViewport(
+	bounds: GraphBounds | null,
+	width: number,
+	height: number
+): GraphViewport {
+	if (bounds === null || bounds.width <= 0 || bounds.height <= 0 || width <= 0 || height <= 0) {
+		return { x: 0, y: 0, zoom: 1 };
+	}
+	const padX = Math.floor((width - width / (1 + GRAPH_FIT_PADDING)) * 0.5);
+	const padY = Math.floor((height - height / (1 + GRAPH_FIT_PADDING)) * 0.5);
+	const zoom = clamp(
+		Math.min((width - padX * 2) / bounds.width, (height - padY * 2) / bounds.height),
+		MIN_GRAPH_ZOOM,
+		MAX_GRAPH_ZOOM
+	);
+	return {
+		x: width / 2 - (bounds.x + bounds.width / 2) * zoom,
+		y: height / 2 - (bounds.y + bounds.height / 2) * zoom,
+		zoom
+	};
+}
+
+function clamp(value: number, min: number, max: number): number {
+	return Math.min(Math.max(value, min), max);
+}
+
+/** True when two viewports describe the same view; the tolerance is visual. */
+export function sameViewport(a: GraphViewport, b: GraphViewport): boolean {
+	const close = (left: number, right: number): boolean => Math.abs(left - right) < 0.001;
+	return close(a.x, b.x) && close(a.y, b.y) && close(a.zoom, b.zoom);
 }
 
 /**

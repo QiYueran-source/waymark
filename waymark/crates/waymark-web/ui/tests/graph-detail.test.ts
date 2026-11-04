@@ -251,11 +251,21 @@ describe('the graph node detail', () => {
 			items: { 'wm-bug-login': detail }
 		});
 		const pane = screen.getByLabelText('Work items');
-		const expected = ['wm-bug-login', 'wm-task-child', 'wm-task-ship'].map(
-			(id) => `graph-select-${id}`
-		);
-		// Every node is exactly one tab stop, in drawing order, and nothing else
-		// in the pane competes with them.
+		const expected = [
+			// Each node's title, and — for a node with children — its fold control,
+			// in drawing order.
+			'graph-select-wm-bug-login',
+			'graph-toggle-wm-bug-login',
+			'graph-select-wm-task-child',
+			'graph-select-wm-task-ship',
+			// The canvas controls follow the drawing.
+			'graph-zoom-out',
+			'graph-zoom-in',
+			'graph-fit',
+			'graph-reset'
+		];
+		// Every stop in the pane is listed, in order: no invisible tab stops, and
+		// no control reachable only by pointer.
 		const stops = Array.from(pane.querySelectorAll<HTMLElement>('button, [tabindex]')).filter(
 			(element) => element.tabIndex >= 0
 		);

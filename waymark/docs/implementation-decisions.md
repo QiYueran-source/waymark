@@ -2588,17 +2588,70 @@ geometry makes the drawing deterministic and lets the suite assert real edge ele
   `Dashed line: dependency; the arrow points at the depended-on item`. The dashed swatch draws a dash
   pattern and an arrowhead so the meaning does not rest on the wording alone.
 
+## Navigating and folding the graph
+
+- **The fit is computed, not measured.** `fittedViewport(bounds, width, height)` in `graph.ts` takes
+  the drawing's own bounding box (`graphBounds`, from the dagre placement) and the canvas box and
+  returns `{x, y, zoom}`: the whole hierarchy centred, inside `MIN_GRAPH_ZOOM` (0.5) and
+  `MAX_GRAPH_ZOOM` (2), with `GRAPH_FIT_PADDING` (10%) of margin. Because it reads model geometry
+  rather than the DOM, the same drawing always fits the same way, and a stored viewport can be
+  compared with the fit exactly (`sameViewport`, 0.001 tolerance) — which is what makes "is the
+  drawing fitted?" an answerable question rather than a guess.
+- **A DOM without layout still fits.** `GraphView` measures its `.graph-pane` on mount; before that,
+  and in jsdom where `clientWidth`/`clientHeight` are 0, `GRAPH_NOMINAL_CANVAS` (960×640) stands in,
+  so first entry is a fit in every environment and the suite can assert the entry state. A real
+  browser measures the box and fits for real.
+- **Entry, not re-entry.** The viewport is applied once per mounted drawing — from `oninit` and from
+  the `GraphBridge` `$effect`, whichever arrives first, guarded by `initial !== null`. A remembered
+  viewport from this project is used when it parses and its zoom is in range; otherwise the drawing
+  is fitted. Re-applying later would yank the canvas out from under a reader.
+- **Gestures, with controls that repeat them.** `panOnDrag`, `panOnScroll`, `zoomOnPinch`, and
+  `zoomOnScroll={false}` mean: background drag pans, the wheel and two-trackpad-fingers pan,
+  ctrl+wheel (a trackpad pinch, or a browser pinch) zooms about the pointer, and a touch pan/pinch
+  works through the same handlers. `Zoom out`, `Zoom in`, `Fit to view`, and `Reset viewport` are
+  `data-testid` buttons in a `role="group"` labelled `Canvas`; `Reset viewport` re-applies the entry
+  fit *and* forgets the stored viewport, so a reload starts fitted rather than at the transform the
+  reader has just discarded. `Fit to view` re-applies it and remembers it.
+- **The readout is app state, not a library detail.** `data-testid="graph-viewport"` carries
+  `data-x`, `data-y`, `data-zoom`, and `data-fitted`, and says `Zoom 160% · whole graph in view` or
+  `… · panned` in words. The bound `viewport` from the renderer starts `undefined` and is written by
+  `apply()` before the drawing confirms it, so the readout, the fitted marker, and the stored
+  preference move together instead of lagging a frame behind the canvas.
+- **`GraphBridge.svelte` is the only bridge.** It renders nothing, sits inside `SvelteFlow` so it can
+  call `useSvelteFlow()`, and hands `{setViewport, getViewport, zoomIn, zoomOut}` up as a
+  `GraphFlow` value. Everything outside `GraphView`/`GraphBridge` deals in `WorkGraph` and
+  `GraphViewport` values, so the renderer and the layout engine stay replaceable and untested-through.
+- **Folding is presentation only.** `collapseGraph(graph, collapsed)` drops the descendants of any
+  collapsed node — every generation, not only the next — and the edges, dependency edges, and roots
+  that pointed at them, keeping the folded node itself and `unresolved` untouched. It is applied
+  exactly once, in `Explorer`'s `visibleGraph` seam, so the drawing and `graphOutline` cannot
+  disagree; no item is edited, no relation is re-parented, and nothing is re-read
+  (`['/api/health', '/api/tree?view=combined']`, all GET). Because parents precede children in the
+  model, one pass is enough.
+- **The fold control lives on the node.** Any node with children carries a real `<button
+  data-testid="graph-toggle-<id>">` with `aria-expanded`, `aria-controls`, an `Expand`/`Collapse`
+  accessible name, and a chevron; the card carries `data-collapsed="true"` and its line reads
+  `· folded`. A leaf has no such control. Collapsing is not the tree's expansion: the two are stored
+  and restored independently.
+- **Persistence, per project, on its own keys.** `<projectId>:collapsed` (a JSON array of ids) and
+  `<projectId>:viewport` (a JSON `{x, y, zoom}`), both on `PreferenceStore`, both separate from
+  `expanded:<view>` and `scroll:<view>`. One set and one viewport per project rather than per view, so
+  switching between `combined` and `grouped` does not reopen a folded branch or move the canvas.
+  Stored ids the current data does not contain match nothing and are ignored without error; a stored
+  viewport that does not parse, or whose zoom is out of range, is ignored and the drawing is fitted.
+  With browser storage unavailable, both controls keep working for the session and the existing
+  `persistence-notice` appears once.
+
 ## The graph's structured text alternative
 
 - **One model, two readings.** `graphOutline(graph: WorkGraph): OutlineEntry[]` in `graph.ts` turns
   the *same* `WorkGraph` the drawing renders into an ordered outline, and
   `GraphText.svelte` renders it without the graph library. Category scope, collapse, and the
   dependency overlay therefore cannot diverge between the two views: there is nothing to keep in
-  step. `Explorer` derives one `visibleGraph` — the filtered model today, and the filtered *and
-  collapsed* model once the graph's density control lands — and hands the same value to `GraphView`
-  and `graphOutline`; `collapseGraph(graph, collapsed)` is the pure helper that view applies. The
-  outline is only built while the alternative is on, and the alternative has no collapse control of
-  its own: it follows the drawing's.
+  step. `Explorer` derives one `visibleGraph` — the filtered *and collapsed* model — and hands the
+  same value to `GraphView` and `graphOutline`; `collapseGraph(graph, collapsed)` is the pure helper
+  applied at that single seam. The outline is only built while the alternative is on, and the
+  alternative has no collapse control of its own: it follows the drawing's.
 - **Relations are words, not geometry.** Each item entry carries `parent` (`"Parent: …"`, or
   `"Parent: none; this is a top-level item."`), `children` (`"Child: <title> (<id>)."`),
   `dependencies` (`"Depends on <title> (<id>)."`) and `dependents` (`"<title> (<id>) depends on this

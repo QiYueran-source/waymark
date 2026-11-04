@@ -22,19 +22,32 @@
 	import { MarkerType, Panel, Position, SvelteFlow } from '@xyflow/svelte';
 	import type { Edge, EdgeMarker, Node, NodeTypes } from '@xyflow/svelte';
 
+	import GraphBridge from './GraphBridge.svelte';
 	import GraphItemNode from './GraphItemNode.svelte';
 	import {
+		GRAPH_NOMINAL_CANVAS,
+		MAX_GRAPH_ZOOM,
+		MIN_GRAPH_ZOOM,
 		edgeLabel,
+		fittedViewport,
+		graphBounds,
 		graphNodeLabel,
+		sameViewport,
 		type GraphDependencyEdge,
+		type GraphFlow,
 		type GraphNodePayload,
+		type GraphViewport,
 		type WorkGraph
 	} from '$lib/graph';
 
 	let {
 		graph,
 		selectedId = null,
-		onSelect
+		onSelect,
+		onToggle,
+		restoredViewport = null,
+		onViewportChange,
+		onViewportReset
 	}: {
 		/**
 		 * The drawing to render. Whether the dependency overlay is included is
@@ -46,6 +59,18 @@
 		selectedId?: string | null;
 		/** Selecting a node; the trigger lets focus return after the panel closes. */
 		onSelect: (id: string, trigger?: HTMLElement) => void;
+		/** Collapsing or expanding a node; the item itself is never changed. */
+		onToggle: (id: string) => void;
+		/**
+		 * The viewport this project last left, if any. It is applied once, on
+		 * entry, instead of fitting; a stored viewport the drawing cannot use is
+		 * ignored and the drawing is fitted instead.
+		 */
+		restoredViewport?: GraphViewport | null;
+		/** Called when the reader finishes a pan or zoom, so it can be remembered. */
+		onViewportChange?: (viewport: GraphViewport) => void;
+		/** Resetting the viewport also forgets the remembered one. */
+		onViewportReset?: () => void;
 	} = $props();
 
 	/**
@@ -134,7 +159,9 @@
 					node,
 					graphY: y,
 					selected: node.id === selectedId,
-					onSelect
+					collapsed: node.collapsed === true,
+					onSelect,
+					onToggle
 				},
 				x: (center?.x ?? 0) - NODE_WIDTH / 2,
 				y
@@ -290,9 +317,151 @@
 	const edges: Edge[] = $derived([...hierarchyEdges, ...graph.dependencies.map(dependencyEdge)]);
 
 	const nodeTypes: NodeTypes = { workitem: GraphItemNode };
+
+	/**
+	 * The navigation layer.
+	 *
+	 * The drawing's box is measured by the browser, so the fitted viewport is
+	 * computed here from the model's geometry and that box: the same drawing
+	 * always fits the same way, and a viewport restored from storage can be
+	 * compared with the fit exactly. Until the box has a size — before mount,
+	 * and in a DOM without layout — a nominal canvas stands in, so the first
+	 * entry is still a fit rather than the unzoomed corner of the drawing.
+	 */
+	let canvasBox: HTMLElement | undefined = $state();
+
+	/** The pan/zoom API, once the drawing has mounted and handed it over. */
+	let flow: GraphFlow | null = $state(null);
+
+	/** Where the whole visible drawing sits, in drawing coordinates. */
+	const bounds = $derived(
+		graphBounds(placed.map(({ x, y }) => ({ x, y, width: NODE_WIDTH, height: NODE_HEIGHT })))
+	);
+
+	/** The viewport that shows the whole visible drawing, centred. */
+	const fitted = $derived(
+		fittedViewport(bounds, canvasWidth(canvasBox), canvasHeight(canvasBox))
+	);
+
+	/** The viewport this drawing entered at; the state "reset" returns to. */
+	let initial: GraphViewport | null = $state(null);
+
+	/**
+	 * The canvas's own transform, bound through the drawing.
+	 *
+	 * Every pan, wheel, pinch, and control moves this value, so the readout and
+	 * the "is it fitted" question are answered by what the canvas actually
+	 * shows. It is unset only until this view enters, because the drawing
+	 * reports a transform only once it has mounted and been given one.
+	 */
+	let canvasViewport: GraphViewport | undefined = $state(undefined);
+
+	/**
+	 * The transform this view asked for last, and has not yet seen reported.
+	 *
+	 * The drawing announces the end of every transform, including one it was
+	 * told to make, so this is what tells a reader's gesture from this view's
+	 * own move: only the former is worth remembering.
+	 */
+	let requested: GraphViewport | null = null;
+
+	/** What the reader sees now. */
+	const shown: GraphViewport = $derived(canvasViewport ?? initial ?? fitted);
+
+	/** True while the drawing shows the whole of itself, centred. */
+	const atFit = $derived(sameViewport(shown, fitted));
+
+	/** How wide the drawing's box is, or the nominal canvas if it has no size. */
+	function canvasWidth(box: HTMLElement | undefined): number {
+		const width = box?.clientWidth ?? 0;
+		return width > 0 ? width : GRAPH_NOMINAL_CANVAS.width;
+	}
+
+	function canvasHeight(box: HTMLElement | undefined): number {
+		const height = box?.clientHeight ?? 0;
+		return height > 0 ? height : GRAPH_NOMINAL_CANVAS.height;
+	}
+
+	/**
+	 * Move the drawing, and record where it was moved to.
+	 *
+	 * The record is written here rather than awaited from the drawing so the
+	 * readout, the fitted marker, and the stored preference move together, with
+	 * the drawing's own report confirming them a moment later.
+	 */
+	function apply(viewport: GraphViewport): void {
+		requested = viewport;
+		canvasViewport = viewport;
+		void flow?.setViewport(viewport);
+	}
+
+	/**
+	 * Enter at the remembered viewport when this project has a usable one, and
+	 * fit otherwise.
+	 *
+	 * Once per mounted drawing: re-entering after the reader has moved would
+	 * yank the view out from under them, so nothing re-applies it later.
+	 */
+	function enterViewport(): void {
+		if (flow === null || initial !== null) return;
+		initial = restoredViewport ?? fitted;
+		apply(initial);
+	}
+
+	// The drawing hands over its pan/zoom API through `GraphBridge`, and reports
+	// `oninit` once that API is ready; either signal is enough to enter.
+	$effect(() => {
+		if (flow !== null) enterViewport();
+	});
+
+	/** Fit the whole visible drawing, and remember that as the view. */
+	function fitToView(): void {
+		apply(fitted);
+		onViewportChange?.(fitted);
+	}
+
+	/**
+	 * Return to the state a first entry produces: the fitted drawing.
+	 *
+	 * The remembered pan and zoom are forgotten with it, so a reload starts
+	 * fitted rather than at the transform the reader has just discarded.
+	 */
+	function resetViewport(): void {
+		apply(fitted);
+		onViewportReset?.();
+	}
+
+	function zoomIn(): void {
+		void flow?.zoomIn();
+	}
+
+	function zoomOut(): void {
+		void flow?.zoomOut();
+	}
+
+	/**
+	 * The reader finished a gesture: remember where the drawing was left.
+	 *
+	 * A transform this view asked for is not the reader's choice, so it is not
+	 * written back; the store would only be told what it already holds.
+	 */
+	function handleMoveEnd(_event: unknown, viewport: GraphViewport): void {
+		if (requested !== null && sameViewport(viewport, requested)) {
+			requested = null;
+			return;
+		}
+		requested = null;
+		onViewportChange?.(viewport);
+	}
+
+	/** A readout is not a measurement log: three decimals is enough for both. */
+	function round(value: number, places = 1): string {
+		return String(Math.round(value * 10 ** places) / 10 ** places);
+	}
+
 </script>
 
-<div class="graph-pane" data-testid="graph">
+<div class="graph-pane" data-testid="graph" bind:this={canvasBox}>
 	<SvelteFlow
 		{nodes}
 		{edges}
@@ -305,8 +474,46 @@
 		edgesFocusable={false}
 		deleteKey={null}
 		zoomOnDoubleClick={false}
+		panOnDrag
+		panOnScroll
+		zoomOnScroll={false}
+		zoomOnPinch
+		minZoom={MIN_GRAPH_ZOOM}
+		maxZoom={MAX_GRAPH_ZOOM}
+		bind:viewport={canvasViewport}
+		oninit={enterViewport}
+		onmoveend={handleMoveEnd}
 		proOptions={{ hideAttribution: true }}
 	>
+		<GraphBridge onReady={(handle) => (flow = handle)} />
+
+		<Panel position="top-right">
+			<div class="graph-controls" data-testid="graph-controls">
+				<!-- Pan and zoom are the canvas's own gestures: dragging the
+				     background, the wheel, a trackpad pinch, or two fingers on a
+				     touch screen. These controls only repeat or undo them. -->
+				<div class="graph-controls-row" role="group" aria-label="Canvas">
+					<button type="button" data-testid="graph-zoom-out" onclick={zoomOut}>Zoom out</button>
+					<button type="button" data-testid="graph-zoom-in" onclick={zoomIn}>Zoom in</button>
+					<button type="button" data-testid="graph-fit" onclick={fitToView}>Fit to view</button>
+					<button type="button" data-testid="graph-reset" onclick={resetViewport}>
+						Reset viewport
+					</button>
+				</div>
+				<p
+					class="graph-readout"
+					data-testid="graph-viewport"
+					data-x={round(shown.x)}
+					data-y={round(shown.y)}
+					data-zoom={round(shown.zoom, 3)}
+					data-fitted={atFit ? 'true' : 'false'}
+					role="status"
+				>
+					Zoom {Math.round(shown.zoom * 100)}% · {atFit ? 'whole graph in view' : 'panned'}
+				</p>
+			</div>
+		</Panel>
+
 		<Panel position="top-left">
 			<div class="graph-legend" data-testid="graph-legend">
 				<span class="legend-entry" data-legend-kind="parent-child">

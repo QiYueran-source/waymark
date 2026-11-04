@@ -19,7 +19,8 @@
 	import UnresolvedList from './UnresolvedList.svelte';
 	import { ApiFailure, fetchHealth, fetchItem, fetchTree } from '$lib/api';
 	import type { Failure } from '$lib/failure';
-	import { buildGraph, graphOutline } from '$lib/graph';
+	import { buildGraph, collapseGraph, graphOutline } from '$lib/graph';
+	import type { GraphViewport } from '$lib/graph';
 	import {
 		allIds,
 		categoryScopeKeys,
@@ -72,6 +73,16 @@
 	let persistenceNotice = $state<string | null>(null);
 	let treePane: HTMLElement | undefined = $state();
 	let restoreToken = $state(0);
+	/**
+	 * The graph nodes the reader folded shut, by id.
+	 *
+	 * Kept apart from the tree's `expanded`: folding a branch in the drawing is
+	 * a different decision from folding a row in the list, and the two are
+	 * stored on different keys so neither can move the other.
+	 */
+	let collapsedIds = $state<string[]>([]);
+	/** The viewport this project last left, applied when the graph next mounts. */
+	let restoredViewport = $state<GraphViewport | null>(null);
 	/**
 	 * The category keys this project has in scope, in configured order, or `null`
 	 * before a grouped read has resolved them. `[]` is a real choice — the reader
@@ -156,23 +167,25 @@
 					contextIds
 				})
 	);
-
+	/** The folded set, as the model helper takes it. */
+	const collapsed: ReadonlySet<string> = $derived(new Set(collapsedIds));
 	/**
 	 * The one drawing both presentations read.
 	 *
 	 * Category scope and the dependency overlay already reach the model through
 	 * `buildGraph`, so they apply to the drawing and the outline alike. This is
-	 * the seam the graph's collapse state is applied at: whichever filtered and
-	 * collapsed model the drawing is given is also the one `graphOutline` reads,
-	 * so the two cannot disagree about which items are showing. There is no
-	 * second projection to keep in step.
+	 * also the seam the graph's collapse state is applied at: whichever filtered
+	 * and collapsed model the drawing is given is also the one `graphOutline`
+	 * reads, so the two cannot disagree about which items are showing. There is
+	 * no second projection to keep in step.
 	 *
-	 * TODO(wm-7k80455wfcks): apply that ticket's collapsed view here, e.g.
-	 * `const visibleGraph = $derived(collapseGraph(workGraph, collapsedNodes))`.
-	 * Until it lands, the graph has no collapse state and this is the complete
-	 * filtered model.
+	 * Collapsing is presentation only: the model is rebuilt from the same tree
+	 * payload and then filtered, so no item is read, written, or re-parented.
+	 * Ids this project no longer contains match nothing.
 	 */
-	const visibleGraph = $derived(workGraph);
+	const visibleGraph = $derived(
+		workGraph === null ? null : collapseGraph(workGraph, collapsed)
+	);
 
 	/**
 	 * The alternative's outline, built from the same model the drawing renders.
@@ -229,6 +242,11 @@
 			// where it meets this project's configured categories, which the
 			// payload carries. `null` stays `null` so the default is "everything".
 			categoryScope = store?.readCategories() ?? null;
+			// One fold set and one viewport per project, not per data view: the
+			// graph draws whichever view is selected, so switching the view must
+			// not reopen a branch or move the drawing.
+			collapsedIds = store?.readCollapsed() ?? [];
+			restoredViewport = store?.readViewport() ?? null;
 			restoreToken += 1;
 			syncNotice();
 		} catch (error) {
@@ -305,6 +323,36 @@
 	function collapseAll(): void {
 		expanded = [];
 		persist((current) => current.writeExpanded(view, expanded));
+	}
+
+	/**
+	 * Fold or unfold one node's descendants.
+	 *
+	 * Only the drawing changes. The stored set is written whole, so it survives
+	 * a reload and stays this project's own; folding never touches a work item.
+	 */
+	function toggleCollapse(id: string): void {
+		collapsedIds = collapsedIds.includes(id)
+			? collapsedIds.filter((entry) => entry !== id)
+			: [...collapsedIds, id];
+		persist((current) => current.writeCollapsed(collapsedIds));
+	}
+
+	/** Remember where the reader left the drawing, for this project only. */
+	function rememberViewport(viewport: GraphViewport): void {
+		restoredViewport = viewport;
+		persist((current) => current.writeViewport(viewport));
+	}
+
+	/**
+	 * Forget the remembered viewport.
+	 *
+	 * Resetting returns the drawing to its fitted state, so a reload must start
+	 * fitted too; keeping the old transform would resurrect what was discarded.
+	 */
+	function forgetViewport(): void {
+		restoredViewport = null;
+		persist((current) => current.clearViewport());
 	}
 
 	function toggleDependencies(): void {
@@ -568,7 +616,11 @@
 					<GraphView
 						graph={visibleGraph}
 						{selectedId}
+						{restoredViewport}
 						onSelect={(id, trigger) => void selectItem(id, trigger)}
+						onToggle={toggleCollapse}
+						onViewportChange={rememberViewport}
+						onViewportReset={forgetViewport}
 					/>
 				{:else}
 					<TreeView

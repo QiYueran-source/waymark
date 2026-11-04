@@ -12,6 +12,7 @@
  * show a concise notice.
  */
 
+import { MAX_GRAPH_ZOOM, MIN_GRAPH_ZOOM, type GraphViewport } from './graph';
 import type { PresentationName, ViewName } from './types';
 
 /** The preference namespace. Bump the version if the stored shape changes. */
@@ -53,6 +54,8 @@ export function preferenceKey(
 		| 'dependencies'
 		| 'scroll'
 		| 'categories'
+		| 'collapsed'
+		| 'viewport'
 		| 'graphAlternative',
 	view?: ViewName
 ): string {
@@ -95,6 +98,28 @@ function parseScroll(raw: string | null): number {
 	return Number.isFinite(value) && value >= 0 ? value : 0;
 }
 
+/**
+ * A stored viewport, or `null` when there is nothing usable to restore.
+ *
+ * Every value is checked: a record written by an older version, hand-edited, or
+ * truncated must not put the drawing somewhere it cannot be seen from.
+ */
+function parseViewport(raw: string | null): GraphViewport | null {
+	if (raw === null) return null;
+	try {
+		const parsed: unknown = JSON.parse(raw);
+		if (typeof parsed !== 'object' || parsed === null) return null;
+		const { x, y, zoom } = parsed as Record<string, unknown>;
+		if (typeof x !== 'number' || !Number.isFinite(x)) return null;
+		if (typeof y !== 'number' || !Number.isFinite(y)) return null;
+		if (typeof zoom !== 'number' || !Number.isFinite(zoom)) return null;
+		if (zoom < MIN_GRAPH_ZOOM || zoom > MAX_GRAPH_ZOOM) return null;
+		return { x, y, zoom };
+	} catch {
+		return null;
+	}
+}
+
 /** The project-scoped preference store, tolerant of unavailable storage. */
 export class PreferenceStore {
 	readonly projectId: ProjectId;
@@ -120,6 +145,19 @@ export class PreferenceStore {
 		} catch {
 			this.failed = true;
 			return null;
+		}
+	}
+
+	/** Remove one key; unavailable or failing storage only sets `failed`. */
+	private clear(key: string): void {
+		if (this.storage === null) {
+			this.failed = true;
+			return;
+		}
+		try {
+			this.storage.removeItem(key);
+		} catch {
+			this.failed = true;
 		}
 	}
 
@@ -212,6 +250,46 @@ export class PreferenceStore {
 
 	writeDependencies(view: ViewName, visible: boolean): void {
 		this.write(preferenceKey(this.projectId, 'dependencies', view), String(visible));
+	}
+
+	/**
+	 * The graph nodes the reader has collapsed, or `null` when this project has
+	 * none stored.
+	 *
+	 * One set per project, deliberately not per view: the graph draws whichever
+	 * view is selected, so collapsing a busy branch and then switching between
+	 * `combined` and `grouped` must not silently reopen it. Ids that the drawing
+	 * no longer contains are kept here and ignored where the set meets the
+	 * current data, which is what makes a stored set survive project changes.
+	 */
+	readCollapsed(): string[] | null {
+		return parseStringArray(this.read(preferenceKey(this.projectId, 'collapsed')));
+	}
+
+	writeCollapsed(ids: string[]): void {
+		this.write(preferenceKey(this.projectId, 'collapsed'), JSON.stringify(ids));
+	}
+
+	/**
+	 * The graph viewport the reader last left, or `null` when there is none.
+	 *
+	 * It is stored on its own key — never as the tree pane's scroll offset — so
+	 * the graph's pan and zoom survive a reload without moving the tree.
+	 */
+	readViewport(): GraphViewport | null {
+		return parseViewport(this.read(preferenceKey(this.projectId, 'viewport')));
+	}
+
+	writeViewport(viewport: GraphViewport): void {
+		this.write(
+			preferenceKey(this.projectId, 'viewport'),
+			JSON.stringify({ x: viewport.x, y: viewport.y, zoom: viewport.zoom })
+		);
+	}
+
+	/** Forget the stored viewport, so the next entry fits the drawing instead. */
+	clearViewport(): void {
+		this.clear(preferenceKey(this.projectId, 'viewport'));
 	}
 
 	readScroll(view: ViewName): number {

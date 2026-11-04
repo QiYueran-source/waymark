@@ -16,6 +16,8 @@
 <GraphNode
 	node={data.node}
 	selected={data.selected}
+	collapsed={data.collapsed}
 	graphY={data.graphY}
 	onSelect={data.onSelect}
+	onToggle={data.onToggle}
 />
