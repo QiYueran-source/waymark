@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-04T12:23:09Z
+updated_at: 2026-11-04T12:29:30Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -244,12 +244,50 @@ Codes with no exit class, used as warnings and findings: `OWNER_MISMATCH` (warni
 
 The following are the user's requested directions for the existing Web page. They are not a claim that the changes have been implemented or synchronized to a functional specification or implementation tickets.
 
-- Graph context nodes: for an unselected-category ancestor retained to preserve hierarchy (for example, a spec ancestor when only implement is selected), use the basic layout of an ordinary node. Distinguish the context node with a dashed outline around the entire card and place a prominent context indicator outside the outline, above or below it. The specific position remains open.
+- Graph context nodes: for an unselected-category ancestor retained to preserve hierarchy (for example, a spec ancestor when only implement is selected), use the basic layout of an ordinary node. Distinguish the context node with a dashed outline around the entire card and place a prominent context indicator outside the outline, above or below it. The specific position remains open. Superseded on 2026-11-04: the resolved rule keeps all node content inside the card; see Resolved Web page optimization.
 - Graph expansion controls: the user questioned the presence of the tree's Expand all and Collapse all buttons in graph presentation. The current buttons change tree expansion rather than the graph's separate collapse state; they should not misleadingly appear as graph controls. Per-node graph folding remains a separate capability.
 - Graph canvas: the user wants to avoid the small framed graph area and let the graph display across the available canvas instead. This concerns usable area, not merely the visual border; the precise relationship to global controls, details, and unresolved content remains open.
 - Project categories and controls: category options such as Implement, Map, and Spec are project-defined and may be numerous, so they should not occupy the page's top toolbar as a fixed set of inline options. The user proposed placing category selection together with zoom and other graph controls at the upper left of the canvas, with the relationship legend at the upper right. The scalable selector design and behavior outside the graphical presentation remain open.
 - Messages: the user requested that warnings, errors, and notices, including the case where no category is selected, be considered for centered presentation. Which message types should be centered, and how non-blocking warnings or lengthy diagnostics behave, remains open.
 - Relationship lines: the user observed sibling nodes connected not only by dashed arrows but also by solid lines with no arrow, one arrow, or two arrows, without clear annotation, and asked for an analysis. The current source defines solid parent-child lines and optional dashed dependency arrows, with an existing two-entry legend. A parent-child and dependency edge may both exist for the same pair, but overlap is only a hypothesis for the observed appearance, not a verified explanation; the screenshot or equivalent reproduction and the cause of one- and two-arrow solid appearances remain to be verified before assigning semantics or adding annotations.
+
+### Resolved Web page optimization
+
+Confirmed by the user on 2026-11-04. These extend the accepted Web specification; the specification and implementation tickets have not yet been synchronized.
+
+#### Graph canvas
+
+- The graph fills the content area below the toolbar: no inner fixed-height frame and no decorative border around the graph.
+- The right-side detail panel remains; opening it shrinks the graph to the remaining width and refits to that remaining canvas.
+- Unresolved relations sit in a collapsible bottom strip/drawer and never overlay graph nodes.
+- Resizing the window preserves the current viewport and never auto-fits. Fitting stays explicit; first graph entry and an explicit direction switch still fit, as already specified.
+- There is no separate full-screen graph mode and no hiding of the app header.
+
+#### Node content containment
+
+- Every graph node contains all of its content inside its card: category shape/name, state, title, blocked reason, and any context badge.
+- Text wraps within the node's width rather than extending past the card; a node grows vertically to fit its wrapped content.
+- The graph layout measures the rendered node height, so edges and spacing account for taller nodes.
+- This applies to ordinary and context nodes alike; no graph content is placed outside the node.
+
+#### Context nodes
+
+- A retained unselected-category ancestor keeps the ordinary node layout and is distinguished by a dashed outline around the entire card, without the hatch or the left state stripe.
+- The context indicator is a text badge inside the card, for example "Context — outside the selection"; it wraps within the card and the card grows to fit it.
+- The node's accessible name continues to state the context; the badge is its visual form.
+- This supersedes the earlier request to place the indicator outside the outline, above or below it.
+
+#### Graph-wide expansion
+
+- Expansion actions are presentation-scoped: tree presentation shows the tree's Expand all/Collapse all; graph presentation shows graph-wide Expand all/Collapse all in the graph's control area. Neither changes the other presentation's state.
+- The structured text alternative mirrors the graph's visible model. A collapsed branch appears as a "Collapsed — N children" row with its own expand control; the alternative also offers "Show all", so a keyboard or screen-reader user can expand a branch collapsed in the graph.
+
+#### Messages
+
+- Centered states are the blocking and empty ones: no category selected, selected categories with no active work, an empty project, a read failure, and a detail-load failure (centered within the detail panel).
+- Non-blocking notices (persistence failure, lock/refresh notices, other warnings) stay inline at the top and are not centered.
+- Long diagnostics use a centered, width-limited, scrollable block rather than a single line.
+- Unresolved relations are content, not a message, and stay in their own area.
 
 ### Reopened decisions: Web, MCP, and distribution
 
@@ -278,11 +316,8 @@ The following decisions extend the accepted specification. The Web implementatio
 
 ### Web page optimization: not yet specified
 
-- Context-node badge placement above versus below the dashed card, spacing and layout reservation, and reproduction of the reported visual defect.
-- Whether graph-wide expand/collapse actions should be provided separately, and how users of the graph's structured-list alternative can expand branches that were collapsed in the graph.
-- Whether the graph fills only the content area below the toolbar or a larger full-screen area; behavior with the details panel, viewport resizing, fit-to-view, unresolved relations, and narrow sidebar layouts.
 - Category selector's presentation and scaling for many project-defined categories; access in tree and structured-list presentations and when a filtered graph is empty; overlay placement, keyboard access, and avoiding obstruction of graph nodes and controls.
-- Whether all message types should be centered or only blocking/empty states; placement and scrolling of long diagnostics, non-blocking persistence notices, unresolved relations, and detail-specific errors.
+- Where the graph direction control sits relative to the zoom/fit controls, the category selector, and the legend.
 - Reproduce and identify the actual relationship line appearances, including apparently solid one- and two-arrow lines, before choosing any additional legend or edge annotations.
 
 ### Web, MCP, and distribution follow-up
