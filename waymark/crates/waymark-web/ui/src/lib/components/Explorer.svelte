@@ -196,6 +196,22 @@
 	);
 	/** The alternative is the graph presentation read as text. */
 	const readingAlternative = $derived(presentation === 'graph' && graphAlternative);
+	/**
+	 * Whether the drawing itself occupies the pane.
+	 *
+	 * Only then does the pane become the full-height flex column the canvas
+	 * fills; the structured alternative and the blocking states keep the
+	 * ordinary padded, scrollable pane.
+	 */
+	const showingGraphDrawing = $derived(
+		presentation === 'graph' &&
+			!graphAlternative &&
+			!loadingTree &&
+			readFailure === null &&
+			treeData !== null &&
+			!isEmpty &&
+			!isFilteredEmpty
+	);
 
 	const PERSISTENCE_NOTICE =
 		'Preferences could not be saved in this browser. The view still works, but these choices may reset when the page reloads.';
@@ -554,7 +570,7 @@
 	<main class="layout">
 		<section
 			class="tree-pane"
-			class:graph-pane-host={presentation === 'graph'}
+			class:graph-pane-host={showingGraphDrawing}
 			bind:this={treePane}
 			onscroll={handleScroll}
 			aria-label="Work items"
@@ -635,7 +651,10 @@
 						onSelect={(id, trigger) => void selectItem(id, trigger)}
 					/>
 				{/if}
-				{#if unresolved.length > 0 && !readingAlternative}
+				{#if presentation === 'tree' && unresolved.length > 0}
+					<!-- The tree shows its full unresolved panel. The drawing hosts
+					     the same list in its own collapsible bottom drawer, and the
+					     structured alternative states the reasons inline. -->
 					<UnresolvedList items={unresolved} />
 				{/if}
 			{/if}

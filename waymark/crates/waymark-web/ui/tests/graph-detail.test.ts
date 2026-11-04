@@ -189,7 +189,7 @@ describe('the graph node detail', () => {
 		await waitFor(() => expect(document.activeElement).toBe(trigger));
 	});
 
-	it('keeps the viewport, the layout, and the presentation across open and close', async () => {
+	it('keeps the layout and presentation, refits when the detail opens, and leaves the view alone after', async () => {
 		const rendered = await openGraph({
 			trees: { combined: combinedTree },
 			items: { 'wm-bug-login': detail }
@@ -202,13 +202,23 @@ describe('the graph node detail', () => {
 		const ys = () =>
 			cards().map((element) => `${element.dataset.nodeId}:${element.getAttribute('data-graph-y')}`);
 		const ysBefore = ys();
+		const readout = () => {
+			const element = screen.getByTestId('graph-viewport');
+			return {
+				x: Number(element.getAttribute('data-x')),
+				y: Number(element.getAttribute('data-y')),
+				zoom: Number(element.getAttribute('data-zoom')),
+				fitted: element.getAttribute('data-fitted') === 'true'
+			};
+		};
 
-		// Move the viewport away from its starting position, so "unchanged" is
-		// observable rather than the default.
+		// Move the viewport away from its fitted entry state, so the fit on
+		// open is observable rather than the default.
 		const flowPane = screen.getByTestId('graph').querySelector('.svelte-flow__pane') as HTMLElement;
 		await fireEvent.wheel(flowPane, { deltaY: -100, ctrlKey: true });
 		const transformBefore = viewport.style.transform;
 		expect(transformBefore).not.toBe('translate(0px, 0px) scale(1)');
+		expect(readout().fitted).toBe(false);
 		const scrollBefore = pane.scrollTop;
 
 		await fireEvent.click(nodeButton('wm-bug-login'));
@@ -217,7 +227,12 @@ describe('the graph node detail', () => {
 			expect(screen.getByTestId('detail-title').textContent).toBe('<b>Login</b> fails')
 		);
 
-		expect(viewport.style.transform).toBe(transformBefore);
+		// The detail panel takes width from the drawing, so the drawing refits
+		// to the canvas that remains.
+		await waitFor(() => expect(readout().fitted).toBe(true));
+		await waitFor(() => expect(viewport.style.transform).not.toBe(transformBefore));
+		const fittedTransform = viewport.style.transform;
+
 		expect(ys()).toEqual(ysBefore);
 		expect(card('wm-bug-login')).toBe(cardBefore);
 		expect(card('wm-bug-login').closest('.svelte-flow__node')).toBe(wrapperBefore);
@@ -231,7 +246,9 @@ describe('the graph node detail', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 		await waitFor(() => expect(screen.queryByTestId('detail-panel')).toBeNull());
 
-		expect(viewport.style.transform).toBe(transformBefore);
+		// Closing the panel widens the canvas again, but fitting stays explicit:
+		// the view the reader was left with is not moved a second time.
+		expect(viewport.style.transform).toBe(fittedTransform);
 		expect(ys()).toEqual(ysBefore);
 		expect(card('wm-bug-login').closest('.svelte-flow__node')).toBe(wrapperBefore);
 		expect(pane.scrollTop).toBe(scrollBefore);

@@ -28,9 +28,11 @@
 	import { Graph as DagreGraph, layout as dagreLayout } from '@dagrejs/dagre';
 	import { MarkerType, Panel, Position, SvelteFlow } from '@xyflow/svelte';
 	import type { Edge, EdgeMarker, Node, NodeTypes } from '@xyflow/svelte';
+	import { untrack } from 'svelte';
 
 	import GraphBridge from './GraphBridge.svelte';
 	import GraphItemNode from './GraphItemNode.svelte';
+	import UnresolvedList from './UnresolvedList.svelte';
 	import {
 		GRAPH_COLUMN_GAP,
 		GRAPH_MARGIN,
@@ -387,15 +389,68 @@
 	/** The pan/zoom API, once the drawing has mounted and handed it over. */
 	let flow: GraphFlow | null = $state(null);
 
+	/**
+	 * The drawing box's measured size.
+	 *
+	 * It is state, not a DOM read in a derivation, because the canvas can change
+	 * size without the model changing: the window resizes, or the detail panel
+	 * takes its width. A fresh fit is then computed against the canvas that
+	 * remains.
+	 */
+	let canvasSize = $state({ width: 0, height: 0 });
+
+	/** The last values taken from the DOM, so a measurement is recorded once. */
+	let lastCanvasSize = { width: 0, height: 0 };
+
+	/**
+	 * Take the drawing box's size from the DOM.
+	 *
+	 * Recording the size never applies a viewport: a resize preserves the
+	 * reader's pan and zoom, and fitting stays an explicit action.
+	 */
+	function measureCanvas(): void {
+		const box = canvasBox;
+		if (box === undefined) return;
+		const width = box.clientWidth;
+		const height = box.clientHeight;
+		if (width === lastCanvasSize.width && height === lastCanvasSize.height) return;
+		lastCanvasSize = { width, height };
+		canvasSize = { width, height };
+	}
+
+	/** How wide the drawing's box is, or the nominal canvas if it has no size. */
+	function canvasWidth(): number {
+		return canvasSize.width > 0 ? canvasSize.width : GRAPH_NOMINAL_CANVAS.width;
+	}
+
+	function canvasHeight(): number {
+		return canvasSize.height > 0 ? canvasSize.height : GRAPH_NOMINAL_CANVAS.height;
+	}
+
+	// Follow the box the drawing actually fills. The observer only re-measures;
+	// it never re-applies the viewport, so resizing cannot lose the reader's
+	// place. The window listener covers a DOM without ResizeObserver delivery.
+	$effect(() => {
+		const box = canvasBox;
+		if (box === undefined) return;
+		measureCanvas();
+		const observer =
+			typeof ResizeObserver === 'function' ? new ResizeObserver(() => measureCanvas()) : null;
+		observer?.observe(box);
+		window.addEventListener('resize', measureCanvas);
+		return () => {
+			observer?.disconnect();
+			window.removeEventListener('resize', measureCanvas);
+		};
+	});
+
 	/** Where the whole visible drawing sits, in drawing coordinates. */
 	const bounds = $derived(
 		graphBounds(placed.map(({ x, y, height }) => ({ x, y, width: NODE_WIDTH, height })))
 	);
 
 	/** The viewport that shows the whole visible drawing, centred. */
-	const fitted = $derived(
-		fittedViewport(bounds, canvasWidth(canvasBox), canvasHeight(canvasBox))
-	);
+	const fitted = $derived(fittedViewport(bounds, canvasWidth(), canvasHeight()));
 
 	/**
 	 * The floor for the reader's own zoom gestures and controls.
@@ -469,19 +524,8 @@
 	 */
 	const showsWholeGraph = $derived(
 		sameViewport(shown, fitted) &&
-			viewportContains(shown, bounds, canvasWidth(canvasBox), canvasHeight(canvasBox))
+			viewportContains(shown, bounds, canvasWidth(), canvasHeight())
 	);
-
-	/** How wide the drawing's box is, or the nominal canvas if it has no size. */
-	function canvasWidth(box: HTMLElement | undefined): number {
-		const width = box?.clientWidth ?? 0;
-		return width > 0 ? width : GRAPH_NOMINAL_CANVAS.width;
-	}
-
-	function canvasHeight(box: HTMLElement | undefined): number {
-		const height = box?.clientHeight ?? 0;
-		return height > 0 ? height : GRAPH_NOMINAL_CANVAS.height;
-	}
 
 	/**
 	 * Move the drawing, and record where it was moved to.
@@ -505,6 +549,9 @@
 	 */
 	function enterViewport(): void {
 		if (flow === null || initial !== null) return;
+		// Measure before fitting: entering with the detail panel already open
+		// fits the width that is actually left, not the one from before it.
+		measureCanvas();
 		initial = restoredViewport ?? fitted;
 		entryWasFit = restoredViewport === null;
 		entryMeasurements = measurementSignature(measuredHeights);
@@ -516,6 +563,37 @@
 	// `oninit` once that API is ready; either signal is enough to enter.
 	$effect(() => {
 		if (flow !== null) enterViewport();
+	});
+
+	/**
+	 * Whether the detail panel was open the last time this effect looked, or
+	 * `null` until the first look. Starting unknown means entering the graph
+	 * with a detail already open is not mistaken for the panel just opening.
+	 */
+	let detailWasOpen: boolean | null = null;
+
+	/**
+	 * Fit the remaining canvas when the detail panel opens.
+	 *
+	 * The detail is a side panel, so opening it takes width from the drawing and
+	 * the whole graph must be fitted to what is left. The panel is already in
+	 * the DOM when this effect runs, so reading the box measures the reduced
+	 * canvas. Closing does not fit: the drawing stays where the reader left it,
+	 * and panning afterwards is the reader's own view.
+	 */
+	$effect(() => {
+		const open = selectedId !== null;
+		if (detailWasOpen === null) {
+			detailWasOpen = open;
+			return;
+		}
+		if (open === detailWasOpen) return;
+		detailWasOpen = open;
+		if (!open) return;
+		untrack(() => {
+			measureCanvas();
+			apply(fitted);
+		});
 	});
 
 	/**
@@ -585,82 +663,93 @@
 
 </script>
 
-<div class="graph-pane" data-testid="graph" bind:this={canvasBox}>
-	<SvelteFlow
-		{nodes}
-		{edges}
-		{nodeTypes}
-		class="graph-canvas"
-		nodesDraggable={false}
-		nodesConnectable={false}
-		elementsSelectable={false}
-		nodesFocusable={false}
-		edgesFocusable={false}
-		deleteKey={null}
-		zoomOnDoubleClick={false}
-		panOnDrag
-		panOnScroll
-		zoomOnScroll={false}
-		zoomOnPinch
-		minZoom={zoomFloor}
-		maxZoom={MAX_GRAPH_ZOOM}
-		bind:viewport={canvasViewport}
-		oninit={enterViewport}
-		onmoveend={handleMoveEnd}
-		proOptions={{ hideAttribution: true }}
-	>
-		<GraphBridge onReady={(handle) => (flow = handle)} />
+<div class="graph-pane" data-testid="graph">
+	<!-- The box the fit is measured against: the drawing fills it, and the
+	     unresolved drawer below takes its own row instead of overlaying it. -->
+	<div class="graph-canvas-host" data-testid="graph-canvas" bind:this={canvasBox}>
+		<SvelteFlow
+			{nodes}
+			{edges}
+			{nodeTypes}
+			class="graph-canvas"
+			nodesDraggable={false}
+			nodesConnectable={false}
+			elementsSelectable={false}
+			nodesFocusable={false}
+			edgesFocusable={false}
+			deleteKey={null}
+			zoomOnDoubleClick={false}
+			panOnDrag
+			panOnScroll
+			zoomOnScroll={false}
+			zoomOnPinch
+			minZoom={zoomFloor}
+			maxZoom={MAX_GRAPH_ZOOM}
+			bind:viewport={canvasViewport}
+			oninit={enterViewport}
+			onmoveend={handleMoveEnd}
+			proOptions={{ hideAttribution: true }}
+		>
+			<GraphBridge onReady={(handle) => (flow = handle)} />
 
-		<Panel position="top-right">
-			<div class="graph-controls" data-testid="graph-controls">
-				<!-- Pan and zoom are the canvas's own gestures: dragging the
-				     background, the wheel, a trackpad pinch, or two fingers on a
-				     touch screen. These controls only repeat or undo them. -->
-				<div class="graph-controls-row" role="group" aria-label="Canvas">
-					<button type="button" data-testid="graph-zoom-out" onclick={zoomOut}>Zoom out</button>
-					<button type="button" data-testid="graph-zoom-in" onclick={zoomIn}>Zoom in</button>
-					<button type="button" data-testid="graph-fit" onclick={fitToView}>Fit to view</button>
-					<button type="button" data-testid="graph-reset" onclick={resetViewport}>
-						Reset viewport
-					</button>
-				</div>
-				<p
-					class="graph-readout"
-					data-testid="graph-viewport"
-					data-x={round(shown.x)}
-					data-y={round(shown.y)}
-					data-zoom={round(shown.zoom, 3)}
-					data-fitted={showsWholeGraph ? 'true' : 'false'}
-					role="status"
-				>
-					Zoom {Math.round(shown.zoom * 100)}% · {showsWholeGraph
-						? 'whole graph in view'
-						: 'panned'}
-				</p>
-			</div>
-		</Panel>
-
-		<Panel position="top-left">
-			<div class="graph-legend" data-testid="graph-legend">
-				<span class="legend-entry" data-legend-kind="parent-child">
-					<svg class="legend-edge" viewBox="0 0 24 8" aria-hidden="true" focusable="false">
-						<line x1="1" y1="4" x2="23" y2="4" />
-					</svg>
-					<span>Solid line: parent-child</span>
-				</span>
-				<span class="legend-entry" data-legend-kind="dependency">
-					<svg
-						class="legend-edge dashed"
-						viewBox="0 0 24 8"
-						aria-hidden="true"
-						focusable="false"
+			<Panel position="top-right">
+				<div class="graph-controls" data-testid="graph-controls">
+					<!-- Pan and zoom are the canvas's own gestures: dragging the
+					     background, the wheel, a trackpad pinch, or two fingers on a
+					     touch screen. These controls only repeat or undo them. -->
+					<div class="graph-controls-row" role="group" aria-label="Canvas">
+						<button type="button" data-testid="graph-zoom-out" onclick={zoomOut}>Zoom out</button>
+						<button type="button" data-testid="graph-zoom-in" onclick={zoomIn}>Zoom in</button>
+						<button type="button" data-testid="graph-fit" onclick={fitToView}>Fit to view</button>
+						<button type="button" data-testid="graph-reset" onclick={resetViewport}>
+							Reset viewport
+						</button>
+					</div>
+					<p
+						class="graph-readout"
+						data-testid="graph-viewport"
+						data-x={round(shown.x)}
+						data-y={round(shown.y)}
+						data-zoom={round(shown.zoom, 3)}
+						data-fitted={showsWholeGraph ? 'true' : 'false'}
+						role="status"
 					>
-						<line x1="1" y1="4" x2="16" y2="4" stroke-dasharray="4 3" />
-						<polygon points="16,1 23,4 16,7" />
-					</svg>
-					<span>Dashed line: dependency; the arrow points at the depended-on item</span>
-				</span>
-			</div>
-		</Panel>
-	</SvelteFlow>
+						Zoom {Math.round(shown.zoom * 100)}% · {showsWholeGraph
+							? 'whole graph in view'
+							: 'panned'}
+					</p>
+				</div>
+			</Panel>
+
+			<Panel position="top-left">
+				<div class="graph-legend" data-testid="graph-legend">
+					<span class="legend-entry" data-legend-kind="parent-child">
+						<svg class="legend-edge" viewBox="0 0 24 8" aria-hidden="true" focusable="false">
+							<line x1="1" y1="4" x2="23" y2="4" />
+						</svg>
+						<span>Solid line: parent-child</span>
+					</span>
+					<span class="legend-entry" data-legend-kind="dependency">
+						<svg
+							class="legend-edge dashed"
+							viewBox="0 0 24 8"
+							aria-hidden="true"
+							focusable="false"
+						>
+							<line x1="1" y1="4" x2="16" y2="4" stroke-dasharray="4 3" />
+							<polygon points="16,1 23,4 16,7" />
+						</svg>
+						<span>Dashed line: dependency; the arrow points at the depended-on item</span>
+					</span>
+				</div>
+			</Panel>
+		</SvelteFlow>
+		</div>
+
+	{#if graph.unresolved.length > 0}
+
+		<!-- Unresolved relations are content, not a notice: they take their own
+		     row at the bottom of the pane so no node is ever covered. -->
+		<UnresolvedList items={graph.unresolved} collapsible />
+	{/if}
 </div>
