@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
 import DetailPanel from '$lib/components/DetailPanel.svelte';
-import { detail, failure } from './fixtures';
+import { detail, failure, incompleteProjectionSummary, validationFinding } from './fixtures';
 
 function renderDetail(overrides: Record<string, unknown> = {}) {
 	const onSelect = vi.fn();
@@ -183,5 +183,38 @@ describe('item detail', () => {
 		const alert = screen.getByTestId('detail-failure');
 		expect(alert.textContent).toContain('plain diagnostic');
 		expect(alert.textContent).toContain('"reason":"damaged"');
+	});
+
+	it('names the offending document and field when the whole projection blocks the read', () => {
+		renderDetail({
+			detail: null,
+			failure: {
+				code: 'INCOMPLETE_PROJECTION',
+				message: 'incomplete',
+				diagnostics: [
+					incompleteProjectionSummary({ documents: 1 }),
+					validationFinding('work/tasks/wm-broken.md', 'created_at', 'is required')
+				]
+			}
+		});
+		const documents = screen.getByTestId('detail-failure-documents');
+		expect(documents.textContent).toContain('work/tasks/wm-broken.md');
+		expect(documents.textContent).toContain('created_at');
+		expect(documents.textContent).toContain('is required');
+		// The detail read is read-only too, so the guidance is the same.
+		expect(screen.getByTestId('detail-failure-guidance').textContent).toContain(
+			'waymark validate'
+		);
+		expect(screen.queryByTestId('detail-body')).toBeNull();
+		expect(screen.getByTestId('detail-failure').textContent).toContain('No detail is shown');
+	});
+
+	it('offers no projection guidance for a failure that is not about documents', () => {
+		renderDetail({
+			detail: null,
+			failure: { code: 'ITEM_NOT_FOUND', message: 'no item with that id', diagnostics: [] }
+		});
+		expect(screen.queryByTestId('detail-failure-guidance')).toBeNull();
+		expect(screen.queryByTestId('detail-failure-documents')).toBeNull();
 	});
 });

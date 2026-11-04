@@ -2240,6 +2240,28 @@ takes the `ArchiveRange` and `Projection` explicitly because those are caller ch
   to collide with a real category). `visibleRoots`, `summarize`, and `countNodes`
   are pure helpers in `tree.ts`, and Explorer calls them; the persistence notice
   is raised by one `persist()` wrapper around every preference write.
+- **The read-failure block groups diagnostics by the codes the projection sent.**
+  `failure.ts::readDiagnostics` sorts a failure's diagnostics into the causes a
+  reader can act on, using `Finding.code` and `Location.kind` — never a pattern
+  matched against message text. `INCOMPLETE_PROJECTION` *with* a location is the
+  inventory's own uncertainty finding (`projection::inventory_finding`), so it is
+  the uncertain-path group; the same code *without* a location is the
+  count-bearing summary of the whole projection, which names no document and is
+  therefore set aside rather than listed as a cause. Every other located finding
+  is a document problem, including the `DUPLICATE_ID` and `PARSE_ERROR` the
+  inventory reuses for a case-variant path: a path that claims a live ID, or is
+  not the lowercase form of its own, still names a document to repair. A finding
+  located at a config key or a relationship keeps its own group instead of being
+  folded into either document cause, and a diagnostic that is not a finding at
+  all (a bare string, or an object without a string `code` and `message`) is
+  rendered verbatim by the existing `diagnosticText`, so no version skew can make
+  the block throw or silently drop what the service said. The guidance line
+  ("This view is read-only… Run `waymark validate`") is gated on the failure
+  actually being a blocked projection, so a transport failure such as
+  `PROJECT_NOT_FOUND` never claims that project documents need repair. Groups are
+  lists of findings, not of documents: one document can contribute several field
+  findings, and the block states no document count it cannot know. No envelope
+  field, endpoint, or write path was added to support any of this.
 
 # Review fixes — adapters
 

@@ -872,6 +872,59 @@ code {
 	overflow-wrap: anywhere;
 }
 
+/* Findings that name a document or a path: one per row, place first. */
+.problems {
+	display: grid;
+	gap: 0.45rem;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.problem {
+	display: grid;
+	gap: 0.1rem;
+	padding-left: 0.6rem;
+	border-left: 2px solid var(--line-strong);
+	font-size: 0.83rem;
+	overflow-wrap: anywhere;
+}
+
+.problem-place {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 0.15rem 0.45rem;
+}
+
+/* The code is the finding's identity, not decoration: it keeps its own slot. */
+.problem-code {
+	color: var(--alert);
+	font-size: 0.76rem;
+	font-weight: 650;
+}
+
+.problem-where {
+	font-weight: 600;
+}
+
+.problem-field {
+	color: var(--muted);
+	font-size: 0.8rem;
+}
+
+.problem-message {
+	color: var(--ink);
+}
+
+.failure-guidance {
+	margin: 0.15rem 0 0;
+	padding-top: 0.45rem;
+	border-top: 1px solid var(--line-strong);
+	font-size: 0.84rem;
+	overflow-wrap: anywhere;
+}
+
 /* Detail ------------------------------------------------------------------ */
 
 .detail {

@@ -10,10 +10,15 @@ import {
 	detail,
 	emptyTree,
 	failure,
+	finding,
 	groupedTree,
 	groupedTreeWithEmptyCategory,
+	incompleteProjectionSummary,
+	inventoryUncertaintyFinding,
 	makeFetch,
-	unresolvedTree
+	parseErrorFinding,
+	unresolvedTree,
+	validationFinding
 } from './fixtures';
 
 async function renderLoaded(options: Parameters<typeof makeFetch>[0]) {
@@ -94,11 +99,212 @@ describe('read failure', () => {
 		expect(readFailure.getAttribute('role')).toBe('alert');
 	});
 
+	it('names the offending document and field when a validation finding blocks the projection', async () => {
+		const api = makeFetch({
+			treeFailure: failure(
+				'INCOMPLETE_PROJECTION',
+				'a complete, fresh projection is required but the projection is scoped and fresh',
+				[
+					incompleteProjectionSummary({ documents: 1 }),
+					validationFinding('work/tasks/wm-broken.md', 'status', 'unknown status "started"')
+				]
+			)
+		});
+		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await screen.findByTestId('read-failure');
+
+		const documents = screen.getByTestId('read-failure-documents');
+		expect(documents.textContent).toContain('work/tasks/wm-broken.md');
+		// The document is named in the finding's own sentence, and the field gets
+		// its own label, so a reader can go straight to the line that is wrong.
+		expect(documents.textContent).toContain('field');
+		expect(documents.textContent).toContain('status');
+		expect(documents.textContent).toContain('unknown status "started"');
+
+		// The projection's own count-bearing summary is not a document problem, so
+		// it is not listed as one.
+		expect(documents.textContent).not.toContain('the projection is scoped');
+
+		const guidance = screen.getByTestId('read-failure-guidance').textContent ?? '';
+		expect(guidance).toContain('read-only');
+		expect(guidance).toContain('waymark validate');
+
+		// Findings are rendered as prose, never as a wall of JSON.
+		expect(screen.queryByTestId('read-failure-diagnostics')).toBeNull();
+		expect(screen.queryByTestId('node-wm-bug-login')).toBeNull();
+		expect(screen.queryByTestId('empty-state')).toBeNull();
+	});
+
+	it('names the document and the first failing field when several fields are wrong', async () => {
+		// The message the projection actually sends for a multi-field validation
+		// failure: the document and the issue count in prose, the first offending
+		// field in the location. The path is still on screen, and the guidance
+		// points at the command that lists every issue.
+		const api = makeFetch({
+			treeFailure: failure(
+				'INCOMPLETE_PROJECTION',
+				'a complete, fresh projection is required but the projection is scoped and fresh',
+				[
+					incompleteProjectionSummary({ documents: 1 }),
+					finding({
+						code: 'VALIDATION_ERROR',
+						location: { kind: 'field', field: 'created_at' },
+						message: 'work item document work/tasks/wm-broken.md: 2 validation issues'
+					})
+				]
+			)
+		});
+		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await screen.findByTestId('read-failure');
+
+		const documents = screen.getByTestId('read-failure-documents');
+		expect(documents.textContent).toContain('work/tasks/wm-broken.md');
+		expect(documents.textContent).toContain('created_at');
+		expect(documents.textContent).toContain('2 validation issues');
+		expect(screen.getByTestId('read-failure-guidance').textContent).toContain('waymark validate');
+	});
+
+	it('separates documents that could not be read from uncertain inventory paths', async () => {
+		const both = makeFetch({
+			treeFailure: failure('INCOMPLETE_PROJECTION', 'incomplete', [
+				incompleteProjectionSummary({ documents: 2, uncertain: 1 }),
+				parseErrorFinding('work/tasks/wm-broken.md', 'missing field `status`'),
+				finding({
+					code: 'IO_ERROR',
+					location: { kind: 'file', path: 'work/bugs/wm-unreadable.md' },
+					message: 'cannot read work/bugs/wm-unreadable.md: permission denied'
+				}),
+				inventoryUncertaintyFinding('work/bugs/wm-orphan.md', 'not a stable ID')
+			])
+		});
+		const first = render(Explorer, { fetchImpl: both.fetchImpl, storage: localStorage });
+		await screen.findByTestId('read-failure');
+
+		const documents = screen.getByTestId('read-failure-documents');
+		expect(documents.textContent).toContain('work/tasks/wm-broken.md');
+		expect(documents.textContent).toContain('PARSE_ERROR');
+		expect(documents.textContent).toContain('work/bugs/wm-unreadable.md');
+		expect(documents.textContent).toContain('IO_ERROR');
+
+		const uncertain = screen.getByTestId('read-failure-uncertain');
+		expect(uncertain.textContent).toContain('work/bugs/wm-orphan.md');
+		expect(uncertain.textContent).toContain('not a stable ID');
+		// Each cause keeps its own heading and its own findings.
+		expect(uncertain.textContent).not.toContain('work/tasks/wm-broken.md');
+		expect(documents.textContent).not.toContain('work/bugs/wm-orphan.md');
+		first.unmount();
+
+		const unreadableOnly = makeFetch({
+			treeFailure: failure('INCOMPLETE_PROJECTION', 'incomplete', [
+				incompleteProjectionSummary({ documents: 1, uncertain: 0 }),
+				parseErrorFinding('work/tasks/wm-broken.md', 'missing field `status`')
+			])
+		});
+		render(Explorer, { fetchImpl: unreadableOnly.fetchImpl, storage: localStorage });
+		await screen.findByTestId('read-failure');
+		expect(screen.queryByTestId('read-failure-uncertain')).toBeNull();
+	});
+
+	it('reports uncertain inventory paths even when no document failed to load', async () => {
+		const api = makeFetch({
+			treeFailure: failure('INCOMPLETE_PROJECTION', 'incomplete', [
+				incompleteProjectionSummary({ documents: 0, uncertain: 1 }),
+				inventoryUncertaintyFinding('work/bugs/wm-Orphan.md', 'the stem is not lowercase')
+			])
+		});
+		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await screen.findByTestId('read-failure');
+
+		const uncertain = screen.getByTestId('read-failure-uncertain');
+		expect(uncertain.textContent).toContain('work/bugs/wm-Orphan.md');
+		expect(uncertain.textContent).toContain('the inventory is uncertain');
+		expect(screen.queryByTestId('read-failure-documents')).toBeNull();
+	});
+
+	it('renders plain-string and foreign diagnostics without inventing findings', async () => {
+		const api = makeFetch({
+			treeFailure: failure('INCOMPLETE_PROJECTION', 'incomplete', [
+				'plain diagnostic',
+				{ code: 42, message: null },
+				{ path: 'work/tasks/wm-broken.md', reason: 'parse' }
+			])
+		});
+		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await screen.findByTestId('read-failure');
+
+		const diagnostics = screen.getByTestId('read-failure-diagnostics');
+		expect(diagnostics.textContent).toContain('plain diagnostic');
+		expect(diagnostics.textContent).toContain('"reason":"parse"');
+		expect(screen.queryByTestId('read-failure-documents')).toBeNull();
+		expect(screen.queryByTestId('read-failure-uncertain')).toBeNull();
+		// Guidance is still true: the projection code says the read was blocked.
+		expect(screen.getByTestId('read-failure-guidance').textContent).toContain('waymark validate');
+	});
+
+	it('keeps the inventory findings that reuse a document code in the document group', async () => {
+		// A case variant of a live ID is reported as DUPLICATE_ID, and a
+		// non-lowercase stem with no counterpart as PARSE_ERROR: the projection
+		// reuses those codes on purpose, so they stay document findings here and
+		// their paths are still named.
+		const api = makeFetch({
+			treeFailure: failure('INCOMPLETE_PROJECTION', 'incomplete', [
+				incompleteProjectionSummary({ documents: 0, uncertain: 2 }),
+				finding({
+					code: 'DUPLICATE_ID',
+					location: { kind: 'file', path: 'work/tasks/wm-AAAAAAAAAA12.md' },
+					message:
+						'the case variant work/tasks/wm-AAAAAAAAAA12.md claims the same ID as work/tasks/wm-aaaaaaaaaa12.md'
+				}),
+				finding({
+					code: 'PARSE_ERROR',
+					location: { kind: 'file', path: 'work/tasks/wm-AAAAAAAAAA99.md' },
+					message:
+						'the document path work/tasks/wm-AAAAAAAAAA99.md is not the lowercase form of its stable ID'
+				})
+			])
+		});
+		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await screen.findByTestId('read-failure');
+
+		const documents = screen.getByTestId('read-failure-documents');
+		expect(documents.textContent).toContain('work/tasks/wm-AAAAAAAAAA12.md');
+		expect(documents.textContent).toContain('DUPLICATE_ID');
+		expect(documents.textContent).toContain('work/tasks/wm-AAAAAAAAAA99.md');
+		expect(documents.textContent).toContain('PARSE_ERROR');
+		// Nothing is dropped into the fallback list just because it is unusual.
+		expect(screen.queryByTestId('read-failure-diagnostics')).toBeNull();
+	});
+
+	it('files located findings that name no document under their own heading', async () => {
+		const api = makeFetch({
+			treeFailure: failure('INCOMPLETE_PROJECTION', 'incomplete', [
+				incompleteProjectionSummary({ documents: 0, uncertain: 0 }),
+				finding({
+					code: 'CONFIG_INVALID',
+					location: { kind: 'config_key', key: 'categories' },
+					message: 'the key "categories" is invalid'
+				})
+			])
+		});
+		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await screen.findByTestId('read-failure');
+
+		const other = screen.getByTestId('read-failure-other');
+		expect(other.textContent).toContain('CONFIG_INVALID');
+		expect(other.textContent).toContain('categories');
+		expect(screen.queryByTestId('read-failure-documents')).toBeNull();
+		expect(screen.queryByTestId('read-failure-uncertain')).toBeNull();
+	});
+
 	it('shows a health read failure when the service cannot be read at all', async () => {
 		const api = makeFetch({ healthFailure: failure('PROJECT_NOT_FOUND', 'no project here') });
 		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
 		await screen.findByTestId('read-failure');
 		expect(screen.getByTestId('read-failure-code').textContent).toContain('PROJECT_NOT_FOUND');
+		// A transport failure is not a blocked projection, so the block offers no
+		// project-repair advice it cannot stand behind.
+		expect(screen.queryByTestId('read-failure-guidance')).toBeNull();
+		expect(screen.getByTestId('read-failure').textContent).not.toContain('waymark validate');
 	});
 });
 
