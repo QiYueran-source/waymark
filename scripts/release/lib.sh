@@ -147,16 +147,3 @@ archive_version() {
     printf '%s\n' "${rest%-*-*}"
 }
 
-# The data object of a `waymark --json` envelope as one JSON document.
-envelope_data() {
-    local file="$1" out="$2"
-    python3 - "$file" "$out" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as handle:
-    document = json.load(handle)
-with open(sys.argv[2], "w", encoding="utf-8") as handle:
-    json.dump(document.get("data", document), handle)
-PY
-}
