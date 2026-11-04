@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-04T01:49:12Z
+updated_at: 2026-11-04T01:51:18Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -207,6 +207,9 @@ Codes with no exit class, used as warnings and findings: `OWNER_MISMATCH` (warni
 - The integration effort first produces an implementable specification and route; implementation follows after the map is complete.
 - Reuse the existing `waymark-mcp` server rather than building a second MCP server. The integration work covers its installation, configuration, and connection to hosts. MCP retains its existing read and write capabilities; the read-only restriction applies to the sidebar, not to MCP.
 - Provide the DSH sidebar plugin first. Do not implement a VS Code or Cursor plugin in this effort; Cursor is expected to reuse the VS Code extension approach if those hosts are addressed later. Consider future host integration in the design without promising compatibility that has not been verified. These decisions were confirmed by the user on 2026-11-04.
+- The DSH view is a right-sidebar tab associated with an active session, so it can be used alongside the conversation. The right sidebar is unavailable without an active session.
+- The sidebar follows the current DSH session workspace to the corresponding Waymark project rather than maintaining a separate project list. On session or workspace changes it follows the new context. If no Waymark project is found, explain the condition without automatically initializing one.
+- Initial DSH sidebar support targets the DSH server and browser running on the same machine. Supporting a remote browser requires separate future work and a security-reviewed access design. These decisions were confirmed by the user on 2026-11-04.
 
 ### Reopened decisions: Web, MCP, and distribution
 
