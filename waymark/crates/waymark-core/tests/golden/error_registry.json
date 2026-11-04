@@ -107,6 +107,14 @@
     "retryable": false
   },
   {
+    "code": "GIT_UNAVAILABLE",
+    "details": [],
+    "exit": null,
+    "finding": "info",
+    "location_kinds": [],
+    "retryable": false
+  },
+  {
     "code": "HAS_ACTIVE_CHILDREN",
     "details": [
       "id",

@@ -17,6 +17,10 @@
 //! - configuration findings, including path conflicts between category
 //!   directories (`CONFIG_INVALID`);
 //! - a non-blocking lock probe (`LOCK_HELD`, info, no wait, no holder identity);
+//! - Git availability, as one finding per missing cause
+//!   (`NOT_A_GIT_REPOSITORY` for the repository, `GIT_UNAVAILABLE` for the
+//!   executable). The probe only reads the filesystem and `PATH`: it never
+//!   installs Git and never initializes a repository;
 //! - malformed and oversized frontmatter, unreadable documents, duplicate IDs,
 //!   case variants, ID/path disagreements, and unsupported generations, all from
 //!   the projection's failures (`PARSE_ERROR`, `VALIDATION_ERROR`,
@@ -50,6 +54,7 @@ use serde_json::{json, Value};
 use crate::config::Config;
 use crate::envelope::{Completeness, Finding, Meta, Source};
 use crate::error::{Code, ExitClass, Severity, WaymarkError};
+use crate::git::GitProbe;
 use crate::id::WorkItemId;
 use crate::location::Location;
 use crate::model::{FieldKey, Status, WorkItem, FORMAT_GENERATION};
@@ -65,6 +70,7 @@ pub const SCOPE: &[&str] = &[
     "projection",
     "inventory",
     "lock",
+    "git",
 ];
 
 /// The scope of a configuration-only report.
@@ -371,6 +377,11 @@ fn run(
             lock_path.to_string(),
         )));
     }
+
+    // Git is optional. The probe walks the filesystem and `PATH` and reports
+    // one informational finding per missing cause; a diagnostic run must never
+    // install Git or initialize a repository to "repair" the environment.
+    findings.extend(GitProbe::detect(project).findings());
 
     let projection = Projection::load(project)?;
 

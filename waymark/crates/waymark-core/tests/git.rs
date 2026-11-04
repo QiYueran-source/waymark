@@ -310,12 +310,15 @@ fn a_brand_new_untracked_item_still_has_a_working_tree_diff() {
 }
 
 #[test]
-fn a_project_outside_a_repository_reports_an_informational_finding_and_succeeds() {
+fn a_project_outside_a_repository_reports_only_the_repository_finding() {
     let dir = tempfile::tempdir().expect("a temporary directory");
     let root = utf8(&dir);
     let project = Project::init(&root, InitOptions::default()).expect("init succeeds");
+    // Isolate the cause: an executable is present, the repository is not.
+    let probe = git::GitProbe::from_parts(None, Some(Utf8PathBuf::from("/nonexistent/git")));
 
-    let report = git::history(&project, &HistoryRequest::new()).expect("history succeeds");
+    let report = git::history(&project, &HistoryRequest::new().with_probe(probe.clone()))
+        .expect("history succeeds");
     assert!(report.commits.is_empty());
     assert!(
         report.repository_root.is_none(),
@@ -326,13 +329,23 @@ fn a_project_outside_a_repository_reports_an_informational_finding_and_succeeds(
     assert_eq!(finding.code, Code::NotAGitRepository);
     assert_eq!(finding.severity, Severity::Info);
     assert!(!finding.fixable);
+    assert!(
+        finding.location.is_none(),
+        "the registry declares no location kind for NOT_A_GIT_REPOSITORY"
+    );
+    assert!(
+        finding.message.contains("repository"),
+        "the message names the missing repository: {}",
+        finding.message
+    );
 
-    let report = git::diff(&project, &DiffRequest::new()).expect("diff succeeds");
+    let report = git::diff(&project, &DiffRequest::new().with_probe(probe)).expect("diff succeeds");
     assert!(report.patch.is_empty());
     assert!(report.empty);
     assert_eq!(report.meta.diagnostics.len(), 1);
     assert_eq!(report.meta.diagnostics[0].code, Code::NotAGitRepository);
     assert_eq!(report.meta.diagnostics[0].severity, Severity::Info);
+    assert!(report.meta.diagnostics[0].location.is_none());
     assert_eq!(
         report.meta.freshness,
         Freshness::Unknown,
@@ -342,7 +355,7 @@ fn a_project_outside_a_repository_reports_an_informational_finding_and_succeeds(
 }
 
 #[test]
-fn a_missing_git_binary_is_informational_even_inside_a_repository() {
+fn a_missing_git_binary_is_git_unavailable_even_inside_a_repository() {
     let Some((_dir, project, _id, _relative)) = project_in_repository() else {
         return;
     };
@@ -356,11 +369,77 @@ fn a_missing_git_binary_is_informational_even_inside_a_repository() {
         .expect("history succeeds");
     assert!(report.commits.is_empty());
     assert_eq!(report.meta.diagnostics.len(), 1);
-    assert_eq!(report.meta.diagnostics[0].code, Code::NotAGitRepository);
+    let finding = &report.meta.diagnostics[0];
+    assert_eq!(finding.code, Code::GitUnavailable);
+    assert_eq!(finding.severity, Severity::Info);
+    assert!(!finding.fixable);
+    assert!(
+        finding.location.is_none(),
+        "a missing binary is not a document location"
+    );
+    assert!(
+        finding.message.contains("PATH"),
+        "the message names the missing executable: {}",
+        finding.message
+    );
 
     let report = git::diff(&project, &DiffRequest::new().with_probe(probe)).expect("diff succeeds");
     assert!(report.empty);
-    assert_eq!(report.meta.diagnostics[0].code, Code::NotAGitRepository);
+    assert_eq!(report.meta.diagnostics.len(), 1);
+    assert_eq!(report.meta.diagnostics[0].code, Code::GitUnavailable);
+    assert_eq!(report.meta.diagnostics[0].severity, Severity::Info);
+}
+
+#[test]
+fn a_missing_repository_and_executable_report_both_findings() {
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let root = utf8(&dir);
+    let project = Project::init(&root, InitOptions::default()).expect("init succeeds");
+    let probe = git::GitProbe::unavailable();
+    assert!(probe.repository().is_none());
+    assert!(probe.executable().is_none());
+
+    let report = git::history(&project, &HistoryRequest::new().with_probe(probe.clone()))
+        .expect("history succeeds with an empty payload");
+    assert!(report.commits.is_empty());
+    assert_eq!(
+        report
+            .meta
+            .diagnostics
+            .iter()
+            .map(|finding| finding.code)
+            .collect::<Vec<_>>(),
+        vec![Code::NotAGitRepository, Code::GitUnavailable],
+        "one finding per missing cause, each naming its own"
+    );
+    assert!(report
+        .meta
+        .diagnostics
+        .iter()
+        .any(|finding| finding.message.contains("repository")));
+    assert!(report
+        .meta
+        .diagnostics
+        .iter()
+        .any(|finding| finding.message.contains("PATH")));
+    for finding in &report.meta.diagnostics {
+        assert_eq!(finding.severity, Severity::Info);
+        assert!(!finding.fixable);
+        assert!(finding.location.is_none());
+    }
+
+    let report = git::diff(&project, &DiffRequest::new().with_probe(probe))
+        .expect("diff succeeds with an empty payload");
+    assert!(report.empty);
+    assert_eq!(
+        report
+            .meta
+            .diagnostics
+            .iter()
+            .map(|finding| finding.code)
+            .collect::<Vec<_>>(),
+        vec![Code::NotAGitRepository, Code::GitUnavailable]
+    );
 }
 
 #[test]

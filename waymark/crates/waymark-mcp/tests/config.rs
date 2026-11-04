@@ -101,6 +101,15 @@ async fn validate_and_doctor_return_the_shared_diagnostic_report() {
             !envelope["data"]["scope"].as_array().unwrap().is_empty(),
             "{tool}"
         );
+        // The fixture is a temporary project outside any repository, so the
+        // absent-repository cause travels through the same envelope.
+        let git = findings
+            .iter()
+            .find(|finding| finding["code"] == "NOT_A_GIT_REPOSITORY")
+            .unwrap_or_else(|| panic!("{tool} reports the Git environment: {findings:?}"));
+        assert_eq!(git["severity"], "info", "{tool}");
+        assert_eq!(git["fixable"], false, "{tool}");
+        assert!(git["location"].is_null(), "{tool}");
     }
 
     client.shutdown().await;

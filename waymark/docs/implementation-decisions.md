@@ -106,16 +106,19 @@ classification source for *domain* failures; the adapter owns the one failure cl
 in `tests/registry.rs` and `tests/errors.rs` pins the absence, and the CLI has its own
 `adapter_failure_envelope` builder in `envelope.rs` so even this failure keeps the shared shape.
 
-## The registry has 37 codes; the brief's "39" is a miscount
+## The registry has 38 codes; the brief's "39" was a miscount
 
-**Choice:** `Code` has exactly the 37 rows of the specification's **Error registry** table, from
-`ITEM_NOT_FOUND` through `TIMESTAMP_INCOHERENT`, with the six finding-only codes included.
+**Choice:** `Code` has exactly the 38 rows of the specification's **Error registry** table, from
+`ITEM_NOT_FOUND` through `TIMESTAMP_INCOHERENT`, with the seven finding-only codes included. T2 froze 37
+rows; the Git-availability follow-up added `GIT_UNAVAILABLE` (see **Git history and diff (T11)** below),
+so the current total is 38.
 
 **Why:** the table is authoritative and the brief defers to it ("exactly the codes in the spec's Error
-registry table"). Counting the table gives 37; counting it plus `USAGE_ERROR` gives 38, and the brief's
-parenthetical listed the six finding-only codes correctly, so the total was simply transcribed wrong.
-No code was invented to reach 39, and none was dropped: the golden snapshot names all 37 and a
-consistency test fails if the enum and the snapshot disagree in either direction.
+registry table"). Counting the table at T2 gave 37; counting it plus `USAGE_ERROR` gives 38, and the
+brief's parenthetical listed the finding-only codes correctly, so the original total was simply
+transcribed wrong. No code was invented to match the brief's number, and none was dropped: the golden
+snapshot names all 38 and a consistency test fails if the enum and the snapshot disagree in either
+direction.
 
 ## One `Spec` row per code, read by every accessor
 
@@ -137,7 +140,7 @@ its code does not declare.
 **Why:** "typed details" is only real if a missing key is a test failure rather than a consumer's
 runtime surprise. The optional subset is data rather than a convention because exactly one code needs
 it: `ITEM_NOT_FOUND` carries `{id, relation?}` — a direct lookup names no relation, a relationship
-resolution does. Encoding `?` as registry metadata keeps the check strict for the other 36 codes.
+resolution does. Encoding `?` as registry metadata keeps the check strict for the other 37 codes.
 
 ## The golden snapshot is generated, then reviewed
 
@@ -902,18 +905,33 @@ application audit log or authenticated attribution exists. Shelling out also mak
 what the user's Git sees (their aliases for objects, their repository config, their worktrees) instead of
 reimplementing plumbing through a binding that could disagree.
 
-### Absence is a finding, not a failure
+### Absence is a finding, not a failure, and one finding names each cause
 
 **Choice:** `GitProbe::detect` walks up to a `.git` directory **or** file (a linked worktree's
-`gitdir:` pointer is read and resolved) and searches `PATH` for `git`. When either is missing, both
-operations return `Ok` with an empty payload and one `NOT_A_GIT_REPOSITORY` finding at severity `info`,
-`fixable: false`, on `_meta.diagnostics`. Bad input (an unknown item, a `..` path filter) is still an
+`gitdir:` pointer is read and resolved) and searches `PATH` for `git`. `GitProbe::findings()` returns
+one finding per missing cause: `NOT_A_GIT_REPOSITORY` when no repository contains the project and
+`GIT_UNAVAILABLE` when no `git` executable is found, repository first. When both are missing, both
+findings are reported. Both are severity `info`, `fixable: false`, carry no location, and land on
+`_meta.diagnostics` beside an empty payload. Bad input (an unknown item, a `..` path filter) is still an
 error.
 
-**Why:** the registry already declares `NOT_A_GIT_REPOSITORY` with no exit class and finding severity
-`info`. A tracker that refuses to list history because a checkout is not a repository would break the
-"migration is permitted outside a Git repository" rule for the same reason; and a brand-new repository
-with no commits is likewise an empty success, not an error.
+**Why:** the two causes have different recovery actions — install Git, or open the project inside a
+checkout — so a combined message would leave the caller unable to tell which one to act on, and the
+specification names both codes. Neither finding carries a location because the registry declares no
+location kind for either code: a missing environment is not a document problem. A tracker that refuses
+to list history because a checkout is not a repository would break the "migration is permitted outside a
+Git repository" rule for the same reason; and a brand-new repository with no commits is likewise an
+empty success, not an error.
+
+### `doctor` and `validate` report the Git environment and never repair it
+
+**Choice:** the diagnostic run appends `GitProbe::detect(project).findings()` to its findings and lists
+`git` in its scope. It never runs a package manager, installs Git, or initializes a repository, and no
+project byte changes.
+
+**Why:** the specification puts the same probe in `doctor` so a user learns about the environment before
+running history. Reporting is the whole job: an environment defect is not a document defect, so there is
+nothing for the repair machinery to do and nothing that may be auto-fixed.
 
 ### Scope, pathspecs, and rename following
 
@@ -1941,11 +1959,13 @@ document/configuration rewrites (a category-key migration's value rewrites can r
   is the domain's `VALIDATION_ERROR`.** The adapter does not duplicate that
   rule; it only normalizes a supplied item ID. `limit` defaults to the core's 20
   and `0` means unlimited.
-- **Outside a repository both tools are successful reports.** The domain returns
-  an empty report with the informational `NOT_A_GIT_REPOSITORY` finding in
-  `_meta.diagnostics`; the adapter surfaces that as `isError: false` and
-  `ok: true`, exactly as the CLI exits successfully. Turning it into a business
-  failure would invent a rule the domain does not have.
+- **Outside a repository, or without a `git` executable, both tools are
+  successful reports.** The domain returns an empty report with one
+  informational finding per missing cause in `_meta.diagnostics`
+  (`NOT_A_GIT_REPOSITORY`, `GIT_UNAVAILABLE`, or both); the adapter surfaces
+  that as `isError: false` and `ok: true`, exactly as the CLI exits successfully.
+  Turning it into a business failure would invent a rule the domain does not
+  have.
 
 ## Tests and CLI/MCP parity
 

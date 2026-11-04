@@ -223,6 +223,7 @@ fn every_typed_constructor_fills_exactly_the_registered_details_keys() {
             "migration_available",
             WaymarkError::migration_available(&[id(), other()]),
         ),
+        ("git_unavailable", WaymarkError::git_unavailable()),
         ("not_a_git_repository", WaymarkError::not_a_git_repository()),
         (
             "dangling_reference",

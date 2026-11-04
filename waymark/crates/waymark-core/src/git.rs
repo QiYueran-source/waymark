@@ -11,9 +11,11 @@
 //!
 //! A project may live outside a repository, and `git` may be missing from `PATH`.
 //! Neither is a failure: [`GitProbe`] reports the environment, and both
-//! operations return an ordinary report with an empty payload and a
-//! `NOT_A_GIT_REPOSITORY` **informational finding** in `_meta.diagnostics`. The
-//! command still succeeds. Bad *input* (an unknown item, a malformed path
+//! operations return an ordinary report with an empty payload and one
+//! informational finding per missing cause in `_meta.diagnostics`:
+//! `NOT_A_GIT_REPOSITORY` for the missing repository and `GIT_UNAVAILABLE` for
+//! the missing executable. When both are missing, both findings are reported.
+//! The command still succeeds. Bad *input* (an unknown item, a malformed path
 //! filter) is still an error.
 //!
 //! # Scope
@@ -40,9 +42,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::envelope::{Completeness, Finding, Freshness, Meta, Source};
-use crate::error::{Code, ValidationIssue, WaymarkError};
+use crate::error::{ValidationIssue, WaymarkError};
 use crate::id::WorkItemId;
-use crate::location::Location;
 use crate::store::Project;
 use crate::time::Timestamp;
 
@@ -155,27 +156,23 @@ impl GitProbe {
         self.repository.is_some() && self.executable.is_some()
     }
 
-    /// Why history and diff are unavailable, as one informational finding.
+    /// Why history and diff are unavailable, one finding per missing cause.
     ///
     /// Empty when the probe is available: an available environment has nothing
-    /// to report.
-    pub fn findings(&self, project: &Project) -> Vec<Finding> {
-        let mut missing: Vec<&str> = Vec::new();
+    /// to report. The repository finding comes first, then the executable
+    /// finding, so a report with both causes reads in the order they can be
+    /// acted on. Neither finding carries a location: both are environment
+    /// facts, not document problems, and the registry declares no location kind
+    /// for either code.
+    pub fn findings(&self) -> Vec<Finding> {
+        let mut findings = Vec::new();
         if self.repository.is_none() {
-            missing.push("no Git repository contains the project");
+            findings.push(Finding::from_error(&WaymarkError::not_a_git_repository()));
         }
         if self.executable.is_none() {
-            missing.push("no `git` executable was found on PATH");
+            findings.push(Finding::from_error(&WaymarkError::git_unavailable()));
         }
-        if missing.is_empty() {
-            return Vec::new();
-        }
-        let message = format!(
-            "{}; history and diff are unavailable, and Waymark keeps no separate history",
-            missing.join(" and ")
-        );
-        vec![Finding::new(Code::NotAGitRepository, message)
-            .with_location(Location::file(project.root().to_string()))]
+        findings
     }
 }
 
@@ -487,7 +484,8 @@ impl DiffReport {
 /// Commit history for one work item, one path filter, or the storage root.
 ///
 /// Outside a repository, or without a `git` binary, the report is empty and
-/// carries a `NOT_A_GIT_REPOSITORY` informational finding; it is not an error.
+/// carries the matching informational finding(s) — `NOT_A_GIT_REPOSITORY`,
+/// `GIT_UNAVAILABLE`, or both; it is not an error.
 pub fn history(project: &Project, request: &HistoryRequest) -> Result<HistoryReport, WaymarkError> {
     let scope = resolve_history_scope(project, request)?;
     let probe = request
@@ -509,7 +507,7 @@ pub fn history(project: &Project, request: &HistoryRequest) -> Result<HistoryRep
     };
 
     if !probe.is_available() {
-        report.meta = unavailable_meta(&probe, project);
+        report.meta = unavailable_meta(&probe);
         return Ok(report);
     }
 
@@ -547,7 +545,7 @@ pub fn history(project: &Project, request: &HistoryRequest) -> Result<HistoryRep
 /// working tree.
 ///
 /// Outside a repository, or without a `git` binary, the patch is empty and the
-/// report carries a `NOT_A_GIT_REPOSITORY` informational finding.
+/// report carries the matching informational finding(s) for each missing cause.
 pub fn diff(project: &Project, request: &DiffRequest) -> Result<DiffReport, WaymarkError> {
     let scope = resolve_diff_scope(project, request)?;
     let probe = request
@@ -578,7 +576,7 @@ pub fn diff(project: &Project, request: &DiffRequest) -> Result<DiffReport, Waym
     };
 
     if !probe.is_available() {
-        report.meta = unavailable_meta(&probe, project);
+        report.meta = unavailable_meta(&probe);
         return Ok(report);
     }
 
@@ -769,12 +767,12 @@ fn available_meta(scoped: bool) -> Meta {
     }
 }
 
-fn unavailable_meta(probe: &GitProbe, project: &Project) -> Meta {
+fn unavailable_meta(probe: &GitProbe) -> Meta {
     Meta {
         source: Source::DirectFile,
         completeness: Completeness::Scoped,
         freshness: Freshness::Unknown,
-        diagnostics: probe.findings(project),
+        diagnostics: probe.findings(),
         warnings: Vec::new(),
     }
 }
