@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-04T12:08:29Z
+updated_at: 2026-11-04T12:23:09Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -284,7 +284,6 @@ The following decisions extend the accepted specification. The Web implementatio
 - Category selector's presentation and scaling for many project-defined categories; access in tree and structured-list presentations and when a filtered graph is empty; overlay placement, keyboard access, and avoiding obstruction of graph nodes and controls.
 - Whether all message types should be centered or only blocking/empty states; placement and scrolling of long diagnostics, non-blocking persistence notices, unresolved relations, and detail-specific errors.
 - Reproduce and identify the actual relationship line appearances, including apparently solid one- and two-arrow lines, before choosing any additional legend or edge annotations.
-- Whether and how these page improvements and the separately planned graph-direction switch gate the DSH sidebar specification and implementation.
 
 ### Web, MCP, and distribution follow-up
 
