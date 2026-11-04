@@ -507,6 +507,18 @@ describe('project identity across spellings and moves', () => {
 });
 
 describe('malformed stored values', () => {
+	it('keeps a fitted viewport below the user zoom floor', () => {
+		// A large graph fits below 0.5; that is a legitimate remembered view, not
+		// a malformed value, so reopening the project must restore it.
+		const storage = memoryStorage();
+		const store = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+		storage.setItem(
+			preferenceKey(store.projectId, 'viewport'),
+			JSON.stringify({ x: 12, y: 8, zoom: 0.3 })
+		);
+		expect(store.readViewport()).toEqual({ x: 12, y: 8, zoom: 0.3 });
+	});
+
 	it('falls back to the default for every parser', () => {
 		const storage = memoryStorage();
 		const store = new PreferenceStore(storage, projectIdFor('/projects/alpha'));

@@ -12,7 +12,7 @@
  * show a concise notice.
  */
 
-import { MAX_GRAPH_ZOOM, MIN_GRAPH_ZOOM, type GraphViewport } from './graph';
+import { MAX_GRAPH_ZOOM, MIN_FIT_ZOOM, type GraphViewport } from './graph';
 import type { PresentationName, ViewName } from './types';
 
 /** The preference namespace. Bump the version if the stored shape changes. */
@@ -144,7 +144,9 @@ function parseViewport(raw: string | null): GraphViewport | null {
 		if (typeof x !== 'number' || !Number.isFinite(x)) return null;
 		if (typeof y !== 'number' || !Number.isFinite(y)) return null;
 		if (typeof zoom !== 'number' || !Number.isFinite(zoom)) return null;
-		if (zoom < MIN_GRAPH_ZOOM || zoom > MAX_GRAPH_ZOOM) return null;
+		// A fit may legitimately be below the reader's zoom floor, so the
+		// accepted range is the fit floor, not MIN_GRAPH_ZOOM.
+		if (zoom < MIN_FIT_ZOOM || zoom > MAX_GRAPH_ZOOM) return null;
 		return { x, y, zoom };
 	} catch {
 		return null;

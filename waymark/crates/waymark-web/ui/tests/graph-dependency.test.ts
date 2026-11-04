@@ -84,8 +84,8 @@ describe('dependency edges in the graph', () => {
 		await waitFor(() => expect(edges('dependency')).toHaveLength(2));
 
 		const labelByFrom: Record<string, string> = {
-			'wm-dep-fix': 'Dependency: Fix the login form → Login fails (depends on)',
-			'wm-dep-ship': 'Dependency: Ship the release → Login fails (depends on)'
+			'wm-dep-fix': 'Dependency: Fix the login form → Login fails (depends on, across categories)',
+			'wm-dep-ship': 'Dependency: Ship the release → Login fails (depends on, across categories)'
 		};
 		for (const edge of edges('dependency')) {
 			const path = edgePath(edge);

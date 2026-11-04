@@ -130,7 +130,7 @@ describe('the category filter governs the graph', () => {
 		expect(marker.getAttribute('aria-hidden')).toBe('true');
 		expect(textOf(marker)).toBe('Context — outside the selection');
 		expect(screen.getByTestId('graph-select-wm-bug-mid').getAttribute('aria-label')).toBe(
-			'Middle bug — context, outside the selection'
+			'Middle bug — Bugs, Blocked (context, outside the selection)'
 		);
 
 		// Selected work carries neither cue.

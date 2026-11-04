@@ -163,7 +163,7 @@ describe('context rows', () => {
 		// focusing the title announces the item and why it is on screen.
 		const title = screen.getByTestId('select-wm-bug-login');
 		expect(title.getAttribute('aria-label')).toBe(
-			'Login fails — context, outside the selection'
+			'Login fails — Bugs, Blocked (context, outside the selection)'
 		);
 		// And the marker is visible text, not colour or an icon alone. It is
 		// hidden from assistive technology because the name above already says it.

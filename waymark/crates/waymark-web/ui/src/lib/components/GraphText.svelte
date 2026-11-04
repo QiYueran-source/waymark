@@ -13,6 +13,7 @@
 	 * which selects the item exactly as a graph card does, and passes itself so
 	 * the existing focus-return path can put focus back on it.
 	 */
+	import { activateOnKey } from '$lib/keys';
 	import type { OutlineEntry, OutlineItemEntry } from '$lib/graph';
 
 	let {
@@ -39,15 +40,15 @@
 	 * Select from the keyboard.
 	 *
 	 * The title is a real button, so the browser would activate it on Enter and
-	 * Space itself; handling the keys here keeps selection in one place and
-	 * makes it observable, and preventing the default stops a duplicate.
+	 * Space itself; the shared helper keeps selection in one place and makes it
+	 * observable, and preventing the default stops a duplicate.
 	 */
 	function onTitleKeydown(
 		event: KeyboardEvent & { currentTarget: EventTarget & HTMLButtonElement }
 	): void {
-		if (event.key !== 'Enter' && event.key !== ' ') return;
-		event.preventDefault();
-		onSelect(event.currentTarget.dataset.nodeId ?? '', event.currentTarget);
+		activateOnKey(event, (trigger) => {
+			onSelect(trigger.dataset.nodeId ?? '', trigger);
+		});
 	}
 </script>
 

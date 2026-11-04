@@ -245,7 +245,7 @@ describe('the graph node detail', () => {
 		]);
 	});
 
-	it('is operable by keyboard alone, with a visible focus indicator', async () => {
+	it('is operable by keyboard alone, with an ordered tab run of real buttons and a visible focus ring', async () => {
 		await openGraph({
 			trees: { combined: combinedTree },
 			items: { 'wm-bug-login': detail }
@@ -265,23 +265,35 @@ describe('the graph node detail', () => {
 			'graph-reset'
 		];
 		// Every stop in the pane is listed, in order: no invisible tab stops, and
-		// no control reachable only by pointer.
+		// no control reachable only by pointer. jsdom can assert this ordered run
+		// (DOM order filtered by tabindex), which is the tab order a browser uses;
+		// it cannot synthesise a real Tab press, so this test does not pretend to.
 		const stops = Array.from(pane.querySelectorAll<HTMLElement>('button, [tabindex]')).filter(
 			(element) => element.tabIndex >= 0
 		);
 		expect(stops.map((element) => element.dataset.testid)).toEqual(expected);
-		for (const id of ['wm-bug-login', 'wm-task-child', 'wm-task-ship']) {
-			const button = nodeButton(id);
-			expect(button.tagName).toBe('BUTTON');
-			expect(button.getAttribute('type')).toBe('button');
-			expect(button.tabIndex).toBe(0);
+		// jsdom only matches `:focus-visible` after a keyboard event, so this
+		// press sets the modality. It proves nothing about tab order — the
+		// ordered list above is what does that — but it lets each stop be
+		// checked for the shipped focus ring.
+		await fireEvent.keyDown(document.body, { key: 'Tab' });
+		for (const stop of stops) {
+			expect(stop.tagName).toBe('BUTTON');
+			expect(stop.getAttribute('type')).toBe('button');
+			expect(stop.tabIndex).toBe(0);
+			stop.focus();
+			expect(document.activeElement).toBe(stop);
+			const stopRing = outlineRulesFor(stop);
+			expect(stopRing.off).toEqual([]);
+			expect(
+				stopRing.on.some((declaration) => declaration.includes('solid')),
+				`${stop.dataset.testid} has no visible focus rule`
+			).toBe(true);
 		}
 
-		// Tab onto the first node. A keyboard user gets a real ring: the button
-		// matches `:focus-visible`, and the shipped stylesheet draws an outline
-		// for that state. Nothing in the drawing turns it off.
+		// A keyboard user who lands on the first node gets a real ring, and the
+		// card shows focus within.
 		const trigger = nodeButton('wm-bug-login');
-		await fireEvent.keyDown(document.body, { key: 'Tab' });
 		trigger.focus();
 		expect(document.activeElement).toBe(trigger);
 		expect(trigger.matches(':focus-visible')).toBe(true);

@@ -2,9 +2,13 @@
 	/**
 	 * The graph presentation: the same active tree, drawn top to bottom.
 	 *
-	 * This is the only module under `ui/src` that imports the drawing library or
-	 * the layout engine, so both stay replaceable and the rest of the app keeps
-	 * dealing in `WorkGraph` values. Placement is computed from the model — one
+	 * This is the only module under `ui/src` that imports the drawing library's
+	 * components and the layout engine; its child `GraphBridge.svelte` imports
+	 * the library's `useSvelteFlow` hook to hand the pan/zoom API up. Both stay
+	 * inside this layer, no dagre or library type escapes it, and the rest of
+	 * the app keeps dealing in `WorkGraph` values. The library stylesheet is
+	 * imported here too, so the app shell imports no graph library at all.
+	 * Placement is computed from the model — one
 	 * row per generation, a parent's row above its children's — and handed to
 	 * the renderer as fixed geometry. Nothing here measures the DOM to decide
 	 * where a node goes, so the same input always produces the same drawing.
@@ -18,6 +22,9 @@
 	 * state of the renderer's own. The only interactive element is the app-owned
 	 * title button inside each card.
 	 */
+	// The graph's structural styles belong to the graph layer, not the app
+	// shell: the shell must not import a graph library, even for its CSS.
+	import '@xyflow/svelte/dist/base.css';
 	import { Graph as DagreGraph, layout as dagreLayout } from '@dagrejs/dagre';
 	import { MarkerType, Panel, Position, SvelteFlow } from '@xyflow/svelte';
 	import type { Edge, EdgeMarker, Node, NodeTypes } from '@xyflow/svelte';
@@ -27,12 +34,14 @@
 	import {
 		GRAPH_NOMINAL_CANVAS,
 		MAX_GRAPH_ZOOM,
+		MIN_FIT_ZOOM,
 		MIN_GRAPH_ZOOM,
 		edgeLabel,
 		fittedViewport,
 		graphBounds,
 		graphNodeLabel,
 		sameViewport,
+		viewportContains,
 		type GraphDependencyEdge,
 		type GraphFlow,
 		type GraphNodePayload,
@@ -308,8 +317,7 @@
 				'data-from': edge.from,
 				'data-to': edge.to,
 				'data-edge-kind': 'dependency',
-				'data-arrow': 'target',
-				'data-cross-category': String(edge.crossCategory)
+				'data-arrow': 'target'
 			}
 		};
 	}
@@ -343,6 +351,18 @@
 		fittedViewport(bounds, canvasWidth(canvasBox), canvasHeight(canvasBox))
 	);
 
+	/**
+	 * The floor for the reader's own zoom gestures and controls.
+	 *
+	 * Normally [`MIN_GRAPH_ZOOM`]. When the drawing is so large that even its
+	 * fit is below that floor, the floor would make the first Zoom out press
+	 * clamp *up* (zoom in); the reader's range is then opened down to the fit
+	 * floor instead, which is still a bound and never a jump.
+	 */
+	const zoomFloor = $derived(
+		fitted.zoom < MIN_GRAPH_ZOOM ? MIN_FIT_ZOOM : MIN_GRAPH_ZOOM
+	);
+
 	/** The viewport this drawing entered at; the state "reset" returns to. */
 	let initial: GraphViewport | null = $state(null);
 
@@ -368,8 +388,19 @@
 	/** What the reader sees now. */
 	const shown: GraphViewport = $derived(canvasViewport ?? initial ?? fitted);
 
-	/** True while the drawing shows the whole of itself, centred. */
-	const atFit = $derived(sameViewport(shown, fitted));
+	/**
+	 * True while the canvas shows the fitted view and that view really contains
+	 * every drawn node.
+	 *
+	 * Both halves matter: a pan is not the fit even when the cards still happen
+	 * to be on screen, and a fit that had to clamp (a drawing larger than any
+	 * usable zoom can contain) is not the whole graph. This is measured against
+	 * the drawing's bounds rather than inferred from "we called fit".
+	 */
+	const showsWholeGraph = $derived(
+		sameViewport(shown, fitted) &&
+			viewportContains(shown, bounds, canvasWidth(canvasBox), canvasHeight(canvasBox))
+	);
 
 	/** How wide the drawing's box is, or the nominal canvas if it has no size. */
 	function canvasWidth(box: HTMLElement | undefined): number {
@@ -478,7 +509,7 @@
 		panOnScroll
 		zoomOnScroll={false}
 		zoomOnPinch
-		minZoom={MIN_GRAPH_ZOOM}
+		minZoom={zoomFloor}
 		maxZoom={MAX_GRAPH_ZOOM}
 		bind:viewport={canvasViewport}
 		oninit={enterViewport}
@@ -506,10 +537,12 @@
 					data-x={round(shown.x)}
 					data-y={round(shown.y)}
 					data-zoom={round(shown.zoom, 3)}
-					data-fitted={atFit ? 'true' : 'false'}
+					data-fitted={showsWholeGraph ? 'true' : 'false'}
 					role="status"
 				>
-					Zoom {Math.round(shown.zoom * 100)}% · {atFit ? 'whole graph in view' : 'panned'}
+					Zoom {Math.round(shown.zoom * 100)}% · {showsWholeGraph
+						? 'whole graph in view'
+						: 'panned'}
 				</p>
 			</div>
 		</Panel>

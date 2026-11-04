@@ -1,5 +1,5 @@
 import { cleanup } from '@testing-library/svelte';
-import { afterEach } from 'vitest';
+import { afterEach, beforeEach } from 'vitest';
 
 // jsdom implements neither of these. The graph view needs both before it can
 // mount: the rendering library reads a media query for its reduced-motion
@@ -26,7 +26,13 @@ if (typeof globalThis.ResizeObserver !== 'function') {
 }
 
 // Svelte Testing Library mounts into the shared jsdom document; unmount between
-// tests so ids, `aria-current`, and localStorage handlers do not leak.
+// tests so ids, `aria-current`, and localStorage handlers do not leak. Clearing
+// before a test as well as after it also drops anything an asynchronously
+// finished gesture wrote after the previous test's cleanup ran.
+beforeEach(() => {
+	localStorage.clear();
+});
+
 afterEach(() => {
 	cleanup();
 	localStorage.clear();

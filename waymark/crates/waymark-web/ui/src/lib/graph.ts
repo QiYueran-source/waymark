@@ -120,9 +120,19 @@ export interface GraphViewport {
 	zoom: number;
 }
 
-/** The zoom range a fitted viewport stays inside. */
+/** The zoom range the reader's own gestures and controls stay inside. */
 export const MIN_GRAPH_ZOOM = 0.5;
 export const MAX_GRAPH_ZOOM = 2;
+
+/**
+ * The lowest zoom a fitted viewport may use.
+ *
+ * A fit must show the whole hierarchy, so it cannot stop at the reader's zoom
+ * floor: a large project would overflow while the readout claimed it was all
+ * visible. The fit therefore has a much wider floor, and only a drawing too
+ * large even for that is reported as not fully in view.
+ */
+export const MIN_FIT_ZOOM = 0.05;
 
 /** The share of the canvas the fitted drawing leaves free at its edges. */
 export const GRAPH_FIT_PADDING = 0.1;
@@ -145,8 +155,6 @@ export const GRAPH_NOMINAL_CANVAS = { width: 960, height: 640 };
  */
 export interface GraphFlow {
 	setViewport(viewport: GraphViewport): Promise<boolean> | boolean | void;
-	/** The canvas's current transform, as the drawing holds it. */
-	getViewport(): GraphViewport;
 	zoomIn(): Promise<boolean> | boolean | void;
 	zoomOut(): Promise<boolean> | boolean | void;
 }
@@ -246,14 +254,14 @@ export function buildGraph(data: TreeData, options: BuildGraphOptions = {}): Wor
 	return {
 		nodes,
 		edges,
-		dependencies: options.dependenciesVisible ? dependencyEdges(nodes) : [],
+		dependencies: options.dependenciesVisible ? dependencyOverlayEdges(nodes) : [],
 		roots,
 		unresolved: data.unresolved
 	};
 }
 
 /** One dashed edge per dependency of a drawn item whose target is drawn too. */
-function dependencyEdges(nodes: GraphNode[]): GraphDependencyEdge[] {
+function dependencyOverlayEdges(nodes: GraphNode[]): GraphDependencyEdge[] {
 	const drawn = new Map(nodes.map((node) => [node.id, node]));
 	const edges: GraphDependencyEdge[] = [];
 	for (const node of nodes) {
@@ -315,7 +323,8 @@ export function edgeLabel(graph: WorkGraph, edge: AnyGraphEdge): string {
 	const from = graph.nodes.find((node) => node.id === edge.from);
 	const to = graph.nodes.find((node) => node.id === edge.to);
 	if (edge.kind === 'dependency') {
-		return `Dependency: ${from?.title ?? edge.from} → ${edge.toTitle} (depends on)`;
+		const across = edge.crossCategory ? ', across categories' : '';
+		return `Dependency: ${from?.title ?? edge.from} → ${edge.toTitle} (depends on${across})`;
 	}
 	return `Parent-child: ${from?.title ?? edge.from} → ${to?.title ?? edge.to}`;
 }
@@ -447,6 +456,11 @@ export function graphBounds(
  * so the same drawing always fits the same way and the viewport can be
  * restored exactly. An empty drawing — or a canvas that has not been measured
  * yet — yields the neutral viewport rather than an infinite zoom.
+ *
+ * The lower bound is [`MIN_FIT_ZOOM`], not the reader's [`MIN_GRAPH_ZOOM`]: a
+ * fit that cannot contain the drawing is not a fit. [`viewportContains`] answers
+ * whether the result really holds every node, so the readout never has to assume
+ * it does.
  */
 export function fittedViewport(
 	bounds: GraphBounds | null,
@@ -460,7 +474,7 @@ export function fittedViewport(
 	const padY = Math.floor((height - height / (1 + GRAPH_FIT_PADDING)) * 0.5);
 	const zoom = clamp(
 		Math.min((width - padX * 2) / bounds.width, (height - padY * 2) / bounds.height),
-		MIN_GRAPH_ZOOM,
+		MIN_FIT_ZOOM,
 		MAX_GRAPH_ZOOM
 	);
 	return {
@@ -468,6 +482,34 @@ export function fittedViewport(
 		y: height / 2 - (bounds.y + bounds.height / 2) * zoom,
 		zoom
 	};
+}
+
+/**
+ * Whether `viewport` really shows every corner of `bounds` inside the canvas.
+ *
+ * This is the claim "whole graph in view", so it is measured rather than
+ * inferred from "we called fit": a viewport that was clamped, or one the reader
+ * has panned or zoomed away from, is not fitted. A half-pixel tolerance absorbs
+ * the rounded margins the fit computes.
+ */
+export function viewportContains(
+	viewport: GraphViewport,
+	bounds: GraphBounds | null,
+	width: number,
+	height: number
+): boolean {
+	if (bounds === null || width <= 0 || height <= 0) return false;
+	const tolerance = 0.5;
+	const left = viewport.x + bounds.x * viewport.zoom;
+	const top = viewport.y + bounds.y * viewport.zoom;
+	const right = viewport.x + (bounds.x + bounds.width) * viewport.zoom;
+	const bottom = viewport.y + (bounds.y + bounds.height) * viewport.zoom;
+	return (
+		left >= -tolerance &&
+		top >= -tolerance &&
+		right <= width + tolerance &&
+		bottom <= height + tolerance
+	);
 }
 
 function clamp(value: number, min: number, max: number): number {

@@ -67,8 +67,10 @@ function placeIn(location: Record<string, unknown>): {
 		// A document path, and the field inside it when the finding names one.
 		case 'file':
 			return { where: fileLabel(location), field: null, aboutDocument: true };
+		// A field location has carried its document path since the projection
+		// started recording it; the path and the field are shown separately.
 		case 'field':
-			return { where: null, field: textOf(location.field), aboutDocument: true };
+			return { where: fileLabel(location), field: textOf(location.field), aboutDocument: true };
 		// Two documents claim one ID; the finding's message names the counterparts.
 		case 'work_item':
 			return { where: textOf(location.id), field: null, aboutDocument: true };

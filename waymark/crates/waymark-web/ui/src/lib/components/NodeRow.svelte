@@ -1,6 +1,7 @@
 <script lang="ts">
 	import Shape from './Shape.svelte';
 	import ReferenceList from './ReferenceList.svelte';
+	import { CONTEXT_NOTE } from '$lib/graph';
 	import type { DependencyEdge, ReferenceNode } from '$lib/tree';
 	import { shapeFor, stateLabel, statusLabel, type TreeNode } from '$lib/types';
 
@@ -37,7 +38,6 @@
 	} = $props();
 
 	const shape = $derived(shapeFor(node.category));
-	const CONTEXT_NOTE = 'context, outside the selection';
 </script>
 
 <li
@@ -103,7 +103,9 @@
 					type="button"
 					data-testid={`select-${node.id}`}
 					aria-current={selected ? 'true' : undefined}
-					aria-label={context ? `${node.title} — ${CONTEXT_NOTE}` : undefined}
+					aria-label={context
+						? `${node.title} — ${node.category.name}, ${stateLabel(node.state)} (${CONTEXT_NOTE})`
+						: undefined}
 					onclick={(event) => onSelect(node.id, event.currentTarget)}
 				>
 					{node.title}

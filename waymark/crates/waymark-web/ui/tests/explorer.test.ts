@@ -23,6 +23,13 @@ import {
 	validationFinding
 } from './fixtures';
 
+/**
+ * The one sentence the projection's summary finding and its error both use.
+ * Counts are part of it, so a fixture that changes them changes this string.
+ */
+const INCOMPLETE_SENTENCE =
+	'a complete, fresh projection is required but the projection is incomplete: 1 document(s) could not be read and 0 item-shaped path(s) are uncertain';
+
 async function renderLoaded(options: Parameters<typeof makeFetch>[0]) {
 	const api = makeFetch(options);
 	const view = render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
@@ -103,29 +110,28 @@ describe('read failure', () => {
 
 	it('names the offending document and field when a validation finding blocks the projection', async () => {
 		const api = makeFetch({
-			treeFailure: failure(
-				'INCOMPLETE_PROJECTION',
-				'a complete, fresh projection is required but the projection is scoped and fresh',
-				[
-					incompleteProjectionSummary({ documents: 1 }),
-					validationFinding('work/tasks/wm-broken.md', 'status', 'unknown status "started"')
-				]
-			)
+			treeFailure: failure('INCOMPLETE_PROJECTION', INCOMPLETE_SENTENCE, [
+				incompleteProjectionSummary({ documents: 1 }),
+				validationFinding('work/tasks/wm-broken.md', 'status', 'unknown status "started"')
+			])
 		});
 		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
 		await screen.findByTestId('read-failure');
 
 		const documents = screen.getByTestId('read-failure-documents');
 		expect(documents.textContent).toContain('work/tasks/wm-broken.md');
-		// The document is named in the finding's own sentence, and the field gets
-		// its own label, so a reader can go straight to the line that is wrong.
+		// The document path comes from the location itself, not only from the
+		// message, and the field keeps its own label.
+		expect(documents.querySelector('.problem-where')?.textContent).toBe(
+			'work/tasks/wm-broken.md'
+		);
 		expect(documents.textContent).toContain('field');
-		expect(documents.textContent).toContain('status');
+		expect(documents.querySelector('.problem-field')?.textContent).toContain('status');
 		expect(documents.textContent).toContain('unknown status "started"');
 
 		// The projection's own count-bearing summary is not a document problem, so
 		// it is not listed as one.
-		expect(documents.textContent).not.toContain('the projection is scoped');
+		expect(documents.textContent).not.toContain('item-shaped path(s)');
 
 		const guidance = screen.getByTestId('read-failure-guidance').textContent ?? '';
 		expect(guidance).toContain('read-only');
@@ -143,18 +149,14 @@ describe('read failure', () => {
 		// field in the location. The path is still on screen, and the guidance
 		// points at the command that lists every issue.
 		const api = makeFetch({
-			treeFailure: failure(
-				'INCOMPLETE_PROJECTION',
-				'a complete, fresh projection is required but the projection is scoped and fresh',
-				[
-					incompleteProjectionSummary({ documents: 1 }),
-					finding({
-						code: 'VALIDATION_ERROR',
-						location: { kind: 'field', field: 'created_at' },
-						message: 'work item document work/tasks/wm-broken.md: 2 validation issues'
-					})
-				]
-			)
+			treeFailure: failure('INCOMPLETE_PROJECTION', INCOMPLETE_SENTENCE, [
+				incompleteProjectionSummary({ documents: 1 }),
+				finding({
+					code: 'VALIDATION_ERROR',
+					location: { kind: 'field', field: 'created_at' },
+					message: 'work item document work/tasks/wm-broken.md: 2 validation issues'
+				})
+			])
 		});
 		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
 		await screen.findByTestId('read-failure');
@@ -163,6 +165,9 @@ describe('read failure', () => {
 		expect(documents.textContent).toContain('work/tasks/wm-broken.md');
 		expect(documents.textContent).toContain('created_at');
 		expect(documents.textContent).toContain('2 validation issues');
+		// A field location without a path is still accepted (the wire shape is
+		// additive); the document stays named by the message.
+		expect(documents.querySelector('.problem-where')).toBeNull();
 		expect(screen.getByTestId('read-failure-guidance').textContent).toContain('waymark validate');
 	});
 

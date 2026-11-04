@@ -4,7 +4,16 @@ import { describe, expect, it } from 'vitest';
 import Explorer from '$lib/components/Explorer.svelte';
 import { preferenceKey, projectIdFor } from '$lib/storage';
 import { GRAPH_NOMINAL_CANVAS, MAX_GRAPH_ZOOM, MIN_GRAPH_ZOOM } from '$lib/graph';
-import { ROOT_A, ROOT_B, hierarchyTree, makeFetch } from './fixtures';
+import {
+	BUG,
+	ROOT_A,
+	ROOT_B,
+	TASK,
+	hierarchyTree,
+	makeFetch,
+	treeNode
+} from './fixtures';
+import type { CombinedTree, TreeNode } from '$lib/types';
 
 /**
  * Navigating and folding the drawing.
@@ -32,6 +41,29 @@ async function openGraph(options: FetchOptions) {
 	await screen.findByTestId('graph');
 	await waitFor(() => expect(cards().length).toBeGreaterThan(0));
 	return rendered;
+}
+
+/**
+ * One root with `depth` generations under it, tall enough that fitting it needs
+ * a zoom below the floor the user controls otherwise stop at.
+ */
+function tallChain(depth: number): CombinedTree {
+	let child: TreeNode | null = null;
+	for (let level = depth - 1; level >= 0; level -= 1) {
+		child = treeNode({
+			id: `wm-tall-${level}`,
+			title: `Generation ${level}`,
+			category: level % 2 === 0 ? BUG : TASK,
+			parent: level === 0 ? null : `wm-tall-${level - 1}`,
+			children: child === null ? [] : [child]
+		});
+	}
+	return {
+		view: 'combined',
+		roots: [child as TreeNode],
+		unresolved: [],
+		categories: [BUG, TASK]
+	};
 }
 
 /** The graph's node cards, in document order. */
@@ -158,6 +190,23 @@ describe('the drawing on entry', () => {
 		}
 	});
 
+	it('fits a hierarchy too tall for the user zoom floor, with every card in view', async () => {
+		// Twelve generations: at the old 0.5 fit floor the drawing would be
+		// 800 px tall in a 640 px canvas, so the bottom cards would be cut off
+		// while the readout still claimed the whole graph was visible.
+		await openGraph({ trees: { combined: tallChain(12) } });
+		const shown = viewport();
+		expect(shown.zoom).toBeLessThan(MIN_GRAPH_ZOOM);
+		expect(shown.zoom).toBeGreaterThan(0);
+		expect(shown.fitted).toBe(true);
+
+		const box = bounds();
+		expect(box.left).toBeGreaterThanOrEqual(0);
+		expect(box.top).toBeGreaterThanOrEqual(0);
+		expect(box.right).toBeLessThanOrEqual(GRAPH_NOMINAL_CANVAS.width);
+		expect(box.bottom).toBeLessThanOrEqual(GRAPH_NOMINAL_CANVAS.height);
+	});
+
 	it('centres the drawing rather than pinning it to a corner', async () => {
 		await openGraph({ trees: { combined: hierarchyTree } });
 		const shown = viewport();
@@ -276,6 +325,27 @@ describe('panning and zooming', () => {
 			await fireEvent.click(screen.getByTestId('graph-zoom-out'));
 		}
 		await waitFor(() => expect(viewport().zoom).toBe(MIN_GRAPH_ZOOM));
+	});
+
+	it('zooms out, rather than in, from a large fitted graph', async () => {
+		// A fit below the reader's zoom floor must still leave Zoom out pointing
+		// away from the drawing, not snap it up to the floor.
+		await openGraph({ trees: { combined: tallChain(12) } });
+		const entry = viewport();
+		expect(entry.zoom).toBeLessThan(MIN_GRAPH_ZOOM);
+
+		await fireEvent.click(screen.getByTestId('graph-zoom-out'));
+		await waitFor(() => expect(viewport().zoom).not.toBe(entry.zoom));
+		expect(viewport().zoom).toBeLessThan(entry.zoom);
+		// The canvas reports the finished gesture asynchronously and the app
+		// remembers it then; wait for that write so this test leaves no pending
+		// storage update for the next one.
+		await waitFor(() => {
+			const stored = JSON.parse(
+				localStorage.getItem(preferenceKey(projectIdFor(ROOT_A), 'viewport')) ?? 'null'
+			);
+			expect(stored?.zoom).toBeCloseTo(viewport().zoom, 3);
+		});
 	});
 
 	it('returns to the fitted entry state on reset, and forgets what was stored', async () => {
@@ -397,6 +467,15 @@ describe('folding a branch', () => {
 		expect(screen.getByTestId('graph-toggle-wm-h-root')).not.toBeNull();
 	});
 
+	it('never points aria-controls at an element that does not exist', async () => {
+		await openGraph({ trees: { combined: hierarchyTree } });
+		for (const control of screen.getAllByTestId(/^graph-toggle-/)) {
+			expect(control.getAttribute('aria-expanded')).not.toBeNull();
+			const target = control.getAttribute('aria-controls');
+			if (target !== null) expect(document.getElementById(target)).not.toBeNull();
+		}
+	});
+
 	it('folds the structured text alternative the same way', async () => {
 		await openGraph({ trees: { combined: hierarchyTree } });
 		await fireEvent.click(screen.getByTestId('graph-toggle-wm-h-child'));
@@ -433,9 +512,12 @@ describe('what the graph remembers', () => {
 		const second = await renderLoaded({ trees: { combined: hierarchyTree } });
 		await screen.findByTestId('graph');
 		await waitFor(() => expect(cards().length).toBeGreaterThan(0));
-		// The branch is still folded, and the canvas is where it was left.
+		// The branch is still folded, and the canvas is where it was left. The
+		// remembered viewport is applied when the drawing hands over its
+		// pan/zoom API, which can trail the node render; wait for it rather than
+		// asserting the fitted entry state that is showing until then.
 		expect(drawnIds()).not.toContain('wm-h-grandchild');
-		expect(viewport().x).toBeCloseTo(moved.x, 1);
+		await waitFor(() => expect(viewport().x).toBeCloseTo(moved.x, 1));
 		expect(viewport().y).toBeCloseTo(moved.y, 1);
 		expect(viewport().zoom).toBeCloseTo(moved.zoom, 3);
 		second.unmount();

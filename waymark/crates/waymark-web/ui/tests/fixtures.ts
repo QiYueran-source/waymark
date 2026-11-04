@@ -467,18 +467,18 @@ export function incompleteProjectionSummary(
 	const uncertain = options.uncertain ?? 0;
 	return finding({
 		code: 'INCOMPLETE_PROJECTION',
-		message: `the projection is scoped and fresh: ${documents} document(s) could not be read and ${uncertain} item-shaped path(s) are uncertain`
+		message: `a complete, fresh projection is required but the projection is incomplete: ${documents} document(s) could not be read and ${uncertain} item-shaped path(s) are uncertain`
 	});
 }
 
 /**
- * A field-level validation finding for the document at `path`, as `parse.rs`
- * builds it: the location is the field, and the document is named in prose.
+ * A field-level validation finding for the document at `path`, as the projection
+ * builds it: the location names the field and the document it belongs to.
  */
 export function validationFinding(path: string, field: string, reason: string): Finding {
 	return finding({
 		code: 'VALIDATION_ERROR',
-		location: { kind: 'field', field },
+		location: { kind: 'field', field, path },
 		message: `work item document ${path}: ${field}: ${reason}`
 	});
 }

@@ -11,8 +11,9 @@
 	 * drag handle, no field, and no menu, because the graph is read-only.
 	 */
 	import Shape from './Shape.svelte';
+	import { activateOnKey } from '$lib/keys';
 	import { stateLabel, statusLabel, type WorkState } from '$lib/types';
-	import { CONTEXT_NOTE, type GraphNode } from '$lib/graph';
+	import { graphNodeLabel, type GraphNode } from '$lib/graph';
 
 	let {
 		node,
@@ -43,16 +44,14 @@
 	 * Activate the node from the keyboard.
 	 *
 	 * The title is a real button, so a browser would activate it on Enter and
-	 * Space on its own; handling the keys here keeps the selection in one place
-	 * and makes it observable without a pointer. Preventing the default stops
+	 * Space on its own; the shared helper keeps the selection in one place and
+	 * makes it observable without a pointer, and preventing the default stops
 	 * the browser's own activation from firing a second, duplicate selection.
 	 */
 	function onTitleKeydown(
 		event: KeyboardEvent & { currentTarget: EventTarget & HTMLButtonElement }
 	): void {
-		if (event.key !== 'Enter' && event.key !== ' ') return;
-		event.preventDefault();
-		onSelect(node.id, event.currentTarget);
+		activateOnKey(event, (trigger) => onSelect(node.id, trigger));
 	}
 </script>
 
@@ -95,7 +94,7 @@
 			type="button"
 			data-testid={`graph-select-${node.id}`}
 			aria-current={selected ? 'true' : undefined}
-			aria-label={context ? `${node.title} — ${CONTEXT_NOTE}` : undefined}
+			aria-label={context ? graphNodeLabel(node) : undefined}
 			onclick={(event) => onSelect(node.id, event.currentTarget)}
 			onkeydown={onTitleKeydown}
 		>
@@ -110,7 +109,6 @@
 				type="button"
 				data-testid={`graph-toggle-${node.id}`}
 				aria-expanded={collapsed ? 'false' : 'true'}
-				aria-controls={`graph-node-${node.id}`}
 				aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${node.title}`}
 				onclick={() => onToggle(node.id)}
 			>

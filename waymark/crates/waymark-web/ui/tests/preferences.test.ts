@@ -693,7 +693,7 @@ describe('read-only traffic', () => {
 		await fireEvent.click(screen.getByLabelText('Structured list'));
 		await screen.findByTestId('graph-text');
 		await fireEvent.click(screen.getByTestId('graph-text-select-wm-bug-login'));
-			await waitFor(() => expect(screen.getByTestId('detail-panel')).not.toBeNull());
+		await waitFor(() => expect(screen.getByTestId('detail-panel')).not.toBeNull());
 
 		expect(requests.length).toBeGreaterThan(0);
 		expect(requests.every((request) => request.method === 'GET')).toBe(true);

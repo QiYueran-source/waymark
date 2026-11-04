@@ -1,7 +1,6 @@
 <script lang="ts">
-	// The graph's structural styles come from the drawing library; the palette
-	// and the card styling stay in app.css.
-	import '@xyflow/svelte/dist/base.css';
+	// The palette and layout of the app; graph-library styles live with the
+	// graph component, so this shell imports no graph library at all.
 	import '../app.css';
 
 	let { children } = $props();

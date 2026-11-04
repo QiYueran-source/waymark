@@ -19,7 +19,6 @@
 	$effect(() => {
 		onReady({
 			setViewport: (viewport) => flow.setViewport(viewport),
-			getViewport: () => flow.getViewport(),
 			zoomIn: () => flow.zoomIn(),
 			zoomOut: () => flow.zoomOut()
 		});

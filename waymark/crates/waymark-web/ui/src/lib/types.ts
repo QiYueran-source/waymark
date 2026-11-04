@@ -151,6 +151,10 @@ export function unresolvedReason(item: UnresolvedItem): string {
 			return `its parent ${item.parent} is archived`;
 		case 'parent_cycle':
 			return `its parent ${item.parent} forms a cycle`;
+		default:
+			// A reason this build does not know still needs words: rendering
+			// `undefined` would leave the reader with a blank explanation.
+			return 'its parent relation is unresolved';
 	}
 }
 

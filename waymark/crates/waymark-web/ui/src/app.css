@@ -932,8 +932,10 @@ code {
 }
 
 /* A folded node says so on the card, so a branch that hides work is visible
-   even when its control is not under the pointer. */
-.graph-node[data-collapsed='true'] .graph-node-line::after {
+   even when its control is not under the pointer. The card has two
+   `.graph-node-line` rows (head and state); only the state row follows the
+   heading, so `~` keeps the note from being printed twice. */
+.graph-node[data-collapsed='true'] .graph-node-heading ~ .graph-node-line::after {
 	content: '· folded';
 	color: var(--muted);
 	font-size: 0.72rem;

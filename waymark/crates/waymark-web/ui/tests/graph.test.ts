@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
 	MAX_GRAPH_ZOOM,
+	MIN_FIT_ZOOM,
 	MIN_GRAPH_ZOOM,
 	buildGraph,
 	collapseGraph,
@@ -11,10 +12,12 @@ import {
 	graphNodeLabel,
 	graphOutline,
 	sameViewport,
+	viewportContains,
 	type OutlineEntry,
 	type OutlineItemEntry
 } from '$lib/graph';
 import { allIds, filterGroups, visibleRoots } from '$lib/tree';
+import { unresolvedReason, type UnresolvedItem } from '$lib/types';
 import {
 	BUG,
 	TASK,
@@ -178,8 +181,18 @@ describe('dependency edges in the graph model', () => {
 		const graph = buildGraph(dependencyTree, WITH_DEPENDENCIES);
 		const edge = graph.dependencies[0];
 		expect(edgeLabel(graph, edge)).toBe(
+			'Dependency: Fix the login form → Login fails (depends on, across categories)'
+		);
+	});
+
+	it('says when a dependency crosses categories, and only then', () => {
+		const graph = buildGraph(dependencyTree, WITH_DEPENDENCIES);
+		const cross = graph.dependencies[0];
+		const sameCategory = { ...cross, crossCategory: false };
+		expect(edgeLabel(graph, sameCategory)).toBe(
 			'Dependency: Fix the login form → Login fails (depends on)'
 		);
+		expect(edgeLabel(graph, cross)).toContain('across categories');
 	});
 });
 
@@ -264,10 +277,23 @@ describe('the fitted viewport', () => {
 		);
 	});
 
-	it('clamps a huge drawing to the minimum zoom', () => {
-		expect(fittedViewport({ x: 0, y: 0, width: 100000, height: 100000 }, 800, 600).zoom).toBe(
-			MIN_GRAPH_ZOOM
-		);
+	it('clamps a huge drawing to the fit floor, and says it is not all visible', () => {
+		const huge = { x: 0, y: 0, width: 100000, height: 100000 };
+		const viewport = fittedViewport(huge, 800, 600);
+		expect(viewport.zoom).toBe(MIN_FIT_ZOOM);
+		// Even the widest fit cannot contain an arbitrarily large drawing, and
+		// the app must not claim otherwise.
+		expect(viewportContains(viewport, huge, 800, 600)).toBe(false);
+	});
+
+	it('fits a drawing too tall for the user zoom floor', () => {
+		// 1400 px of drawing in a 600 px canvas needs about 0.4: the fit has its
+		// own floor, well below the range the user controls stop at.
+		const tall = { x: 0, y: 0, width: 800, height: 1400 };
+		const viewport = fittedViewport(tall, 800, 600);
+		expect(viewport.zoom).toBeLessThan(MIN_GRAPH_ZOOM);
+		expect(viewport.y + (tall.y + tall.height) * viewport.zoom).toBeLessThanOrEqual(600);
+		expect(viewport.y + tall.y * viewport.zoom).toBeGreaterThanOrEqual(0);
 	});
 
 	it('is deterministic, so reset returns to the same viewport', () => {
@@ -275,6 +301,16 @@ describe('the fitted viewport', () => {
 		expect(
 			sameViewport(fittedViewport(bounds, 800, 600), fittedViewport(bounds, 800, 600))
 		).toBe(true);
+	});
+
+	it('reports containment only when every corner is inside the canvas', () => {
+		const fit = fittedViewport(bounds, 800, 600);
+		expect(viewportContains(fit, bounds, 800, 600)).toBe(true);
+		// Panned far enough, the same drawing no longer fits.
+		expect(
+			viewportContains({ ...fit, x: fit.x + 400 }, bounds, 800, 600)
+		).toBe(false);
+		expect(viewportContains(fit, null, 800, 600)).toBe(false);
 	});
 
 	it('falls back to the neutral viewport for an empty drawing or an unmeasured canvas', () => {
@@ -517,5 +553,16 @@ describe('archive and unresolved entries in the graph model', () => {
 		for (const id of ['wm-orphan', 'wm-cycle-a', 'wm-cycle-b', 'wm-missing']) {
 			expect(drawn.has(id)).toBe(false);
 		}
+	});
+
+	it('still explains a reason from a vocabulary this build does not know', () => {
+		const item = {
+			id: 'wm-future',
+			title: 'Future relation',
+			category: BUG,
+			parent: 'wm-gone',
+			reason: 'parent_quarantined'
+		} as unknown as UnresolvedItem;
+		expect(unresolvedReason(item)).toBe('its parent relation is unresolved');
 	});
 });
