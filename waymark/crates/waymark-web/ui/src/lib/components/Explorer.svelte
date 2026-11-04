@@ -130,7 +130,14 @@
 				? { ...treeData, groups }
 				: treeData
 	);
-	const workGraph = $derived(graphData === null ? null : buildGraph(graphData));
+	/**
+	 * The graph model. The dependency overlay is a model decision, so the toggle
+	 * travels with the build: while it is off the graph holds no dependency edge
+	 * at all, and switching it on costs no read.
+	 */
+	const workGraph = $derived(
+		graphData === null ? null : buildGraph(graphData, { dependenciesVisible })
+	);
 
 	const PERSISTENCE_NOTICE =
 		'Preferences could not be saved in this browser. The view still works, but these choices may reset when the page reloads.';
