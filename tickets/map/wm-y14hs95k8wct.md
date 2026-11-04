@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-04T02:32:24Z
+updated_at: 2026-11-04T06:26:33Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -218,6 +218,11 @@ Codes with no exit class, used as warnings and findings: `OWNER_MISMATCH` (warni
 - Initial DSH sidebar support targets the DSH server and browser running on the same machine. Supporting a remote browser requires separate future work and a security-reviewed access design. These decisions were confirmed by the user on 2026-11-04.
 - For this planning effort, do not add project-wide tracker fields just to distinguish decision-ticket type or claim state; the user does not need that distinction for now. Keep work items in Waymark and use its native parent and dependency relations.
 - Keep research results local for now; do not push branches or open pull requests. These planning-process decisions were confirmed by the user on 2026-11-04.
+
+### Graph layout direction discussion
+
+- The proposed direction switch applies to the graph presentation, not the tree list. Retain the existing top-to-bottom layout and offer a left-to-right alternative: parents on the left, children on the right, with items at the same level arranged vertically. The user confirmed the scope on 2026-11-04.
+- This planning discussion aims to settle the direction-switch control, state retention, and behavior across relevant scenarios for a later functional specification. It does not itself implement the feature or update the functional specification or implementation tickets. Confirmed on 2026-11-04.
 
 ### Reopened decisions: Web, MCP, and distribution
 
