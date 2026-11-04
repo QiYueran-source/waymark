@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-04T01:47:16Z
+updated_at: 2026-11-04T01:49:12Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -204,7 +204,9 @@ Codes with no exit class, used as warnings and findings: `OWNER_MISMATCH` (warni
 ### DSH sidebar integration
 
 - The DSH sidebar plugin reuses the existing Waymark Web logic and remains strictly read-only; it must not offer work-item mutations. Confirmed by the user on 2026-11-04.
-- The integration effort includes MCP integration, building on Waymark's existing MCP capability. Deliver the DSH plugin first; do not provide a VS Code plugin initially. The status and timing of Cursor integration and the exact MCP integration package remain to be clarified. Confirmed by the user on 2026-11-04.
+- The integration effort first produces an implementable specification and route; implementation follows after the map is complete.
+- Reuse the existing `waymark-mcp` server rather than building a second MCP server. The integration work covers its installation, configuration, and connection to hosts. MCP retains its existing read and write capabilities; the read-only restriction applies to the sidebar, not to MCP.
+- Provide the DSH sidebar plugin first. Do not implement a VS Code or Cursor plugin in this effort; Cursor is expected to reuse the VS Code extension approach if those hosts are addressed later. Consider future host integration in the design without promising compatibility that has not been verified. These decisions were confirmed by the user on 2026-11-04.
 
 ### Reopened decisions: Web, MCP, and distribution
 
