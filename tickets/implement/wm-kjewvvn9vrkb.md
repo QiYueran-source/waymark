@@ -3,11 +3,12 @@ schema: 1
 id: wm-kjewvvn9vrkb
 title: Graph dependency overlay draws dashed directed edges
 category: implement
-status: open
+status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-04T01:04:01Z
-updated_at: 2026-11-04T01:04:01Z
+updated_at: 2026-11-04T11:30:23Z
+closed_at: 2026-11-04T11:30:23Z
 parent: wm-7k3m4p9x2cqd
 dependencies:
   - wm-tfj5kjrjkwrm

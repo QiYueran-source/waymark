@@ -3,11 +3,12 @@ schema: 1
 id: wm-577fs5mjdfe3
 title: Incomplete-projection message names the actual shortfall
 category: implement
-status: open
+status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-04T01:02:47Z
-updated_at: 2026-11-04T01:02:47Z
+updated_at: 2026-11-04T11:30:23Z
+closed_at: 2026-11-04T11:30:23Z
 ---
 ## What to build
 

@@ -3,11 +3,12 @@ schema: 1
 id: wm-rmncxnace770
 title: Web read failure names the offending document and the fix
 category: implement
-status: open
+status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-04T01:01:42Z
-updated_at: 2026-11-04T01:01:42Z
+updated_at: 2026-11-04T11:30:23Z
+closed_at: 2026-11-04T11:30:23Z
 ---
 ## What to build
 

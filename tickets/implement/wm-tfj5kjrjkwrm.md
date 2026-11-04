@@ -3,11 +3,12 @@ schema: 1
 id: wm-tfj5kjrjkwrm
 title: Graph presentation renders the hierarchy
 category: implement
-status: open
+status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-04T01:03:55Z
-updated_at: 2026-11-04T01:03:55Z
+updated_at: 2026-11-04T11:30:23Z
+closed_at: 2026-11-04T11:30:23Z
 parent: wm-7k3m4p9x2cqd
 dependencies:
   - wm-y0cjx82t4982

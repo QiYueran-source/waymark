@@ -3,11 +3,12 @@ schema: 1
 id: wm-gpjeb92dgz4w
 title: Filtering keeps required ancestors as marked temporary context
 category: implement
-status: open
+status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-04T01:03:49Z
-updated_at: 2026-11-04T01:03:49Z
+updated_at: 2026-11-04T11:30:23Z
+closed_at: 2026-11-04T11:30:23Z
 parent: wm-7k3m4p9x2cqd
 dependencies:
   - wm-9060dq38kwb2

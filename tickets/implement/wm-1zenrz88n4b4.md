@@ -3,11 +3,12 @@ schema: 1
 id: wm-1zenrz88n4b4
 title: Graph has an accessible structured alternative
 category: implement
-status: open
+status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-04T01:04:29Z
-updated_at: 2026-11-04T01:04:42Z
+updated_at: 2026-11-04T11:30:23Z
+closed_at: 2026-11-04T11:30:23Z
 parent: wm-7k3m4p9x2cqd
 dependencies:
   - wm-kjewvvn9vrkb

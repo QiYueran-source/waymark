@@ -3,11 +3,12 @@ schema: 1
 id: wm-2e3712xbs4fd
 title: Graph filtering, archive exclusion, and unresolved display
 category: implement
-status: open
+status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-04T01:04:22Z
-updated_at: 2026-11-04T01:04:22Z
+updated_at: 2026-11-04T11:30:23Z
+closed_at: 2026-11-04T11:30:23Z
 parent: wm-7k3m4p9x2cqd
 dependencies:
   - wm-gpjeb92dgz4w
