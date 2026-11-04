@@ -152,6 +152,9 @@ This specification records only the decisions that are settled. Areas still unde
 128. As a project member, I want dependency overlays to be optional and remembered per view, so that I can switch between structure and blocking.
 129. As a project member, I want the Web view to remain usable with no categories configured, so that a brand-new project is still legible.
 130. As a maintainer, I want newer or invalid data to be rejected rather than guessed at, so that a downgrade can never corrupt it.
+131. As a terminal user, I want CLI work-state colours only when my terminal supports them and never as the only signal, so that state stays readable in pipes, logs, and for colour-blind readers.
+132. As a user without Git installed, I want history and diff to succeed with an empty result and an informative finding, so that the tracker remains usable on machines without Git.
+133. As a maintainer, I want doctor and validate to report unavailable Git before I run history, so that I learn the environment gap at a diagnosable point.
 
 ## Implementation Decisions
 
@@ -181,7 +184,7 @@ This specification records only the decisions that are settled. Areas still unde
 | `custom_fields` | map of declared keys to typed values | optional; absent means none | custom-field edit and schema migration | no | yes |
 | `archived_at` | UTC RFC 3339 timestamp | optional | archive only | no | yes |
 | `archive_reason` | free-form string | optional | archive only | no | yes |
-| format generation marker | declared generation value; field name and value shape not yet specified | required | version migration only | no | yes |
+| `schema` | unsigned integer format generation; current value `1` | required | version migration only | no | yes |
 
 - The following values are computed from the projection and are never persisted: `ready` (boolean), `blocked` (boolean), `blocked_by` (list of stable IDs, including unresolved targets), `children` (list of stable IDs), `dependents` (list of stable IDs), archive state (derived from `archived_at`), and relationship diagnostics. They are not writable through any interface.
 - Canonical serialization is strict and deterministic. Emit only the declared fields, in one fixed key order, with one canonical scalar representation. Relationship lists are sorted by stable ID and deduplicated. Unset optional fields are omitted, never written as `null`. Absent relationship lists mean empty lists; absent custom fields mean no custom values. A non-empty body ends in exactly one newline; an empty body has zero length; leading and internal body whitespace is untouched. Re-serializing an unchanged work item is byte-identical.
@@ -272,10 +275,10 @@ This specification records only the decisions that are settled. Areas still unde
 - The query vocabulary is finite: presence (`exists` or `missing`); equality and inequality; ordering comparison for strings and integers; case-sensitive prefix and substring matching for strings; whole-list equality and inequality; and explicit element `contains`. There are no arbitrary expressions, nested paths, or nested query semantics.
 - Query operands must match the declared field type. There is no implicit conversion; a mismatch is a strict type error.
 - Only strings and integers sort. Booleans and lists do not. Missing values sort after present values in both ascending and descending order, and the stable ID breaks ties.
-- Field projection accepts either a named set of fields or all set fields. Unknown names return a structured error and unset fields are omitted. Which field names projection accepts is not yet specified.
+- Field projection accepts either a named set of fields or all set fields. Unknown names return a structured error and unset fields are omitted. The accepted names are exactly `schema`, `id`, `title`, `category`, `status`, `owner`, `creator`, `created_at`, `updated_at`, `closed_at`, `parent`, `dependencies`, `soft_links`, `custom_fields`, `archived_at`, `archive_reason`, `needs_migration`, `ready`, `blocked`, `blocked_by`, `children`, and `dependents`; individual custom-field keys are not projection names, and `custom_fields` selects the whole map. An empty list is rejected, `--fields` conflicts with `--compact`, and `id` and `status` are always present in a projected row.
 - Collection queries are active-only by default. An explicit archived-only range selects archived items; there is no implicit active-plus-archived collection. `show` is the explicit single-ID read exception.
 - Structured list and query reads frontmatter and custom fields and never the body. Search reads title, frontmatter, and body, follows the same archive-range rules, matches case-insensitively, ranks title hits first, and returns no snippets. The cheap list text filter matches only ID and title and never reads the body.
-- `list`, `ready`, and `blocked` share one filter set, one sort vocabulary, and one pagination model: status, category, owner, custom-field predicates, cheap text, parent, leaves-only, and archive range, with sort field, descending flag, limit, offset, projection, and compact output. Default ordering is `rank`: status group (`open`, then `in_progress`, then `closed`), then dependency topological order, then stable ID; the final tie-break within a topological level is not yet specified.
+- `list`, `ready`, and `blocked` share one filter set, one sort vocabulary, and one pagination model: status, category, owner, custom-field predicates, cheap text, parent, leaves-only, and archive range, with sort field, descending flag, limit, offset, projection, and compact output. Default ordering is `rank`: status group (`open`, then `in_progress`, then `closed`), then dependency topological order, then stable ID; the final tie-break within a topological level is the stable ID ascending, in ascending and descending sorts alike (only the primary key reverses).
 - CLI `limit` defaults to 100 and MCP `limit` defaults to 50; `0` means unlimited; `offset` skips whole results. Pagination is snapshot-local, not a cross-call cursor. A page cannot skip or repeat items within one snapshot.
 - `query` is the structured form of `list` and exists only in the CLI, because the MCP list request is already structured.
 - `tree` reads the hierarchy from an optional root item to a bounded depth; `tree --depth 1` covers children and `list --leaves` covers leaves, so neither has a separate command. `dep tree` reads the dependency tree of one item to a bounded depth, with a flat form.
@@ -293,15 +296,17 @@ This specification records only the decisions that are settled. Areas still unde
 - MCP takes structured values and an explicit required change map with set and clear entries; it rejects null and never launches an editor.
 - Each operation changes only its own data area plus `updated_at` when the effective value changes. An unchanged request performs no write and no timestamp update.
 - Every edit rejects archived items with `ITEM_ARCHIVED`, emits an `OWNER_MISMATCH` warning when the operator differs from the owner without blocking the write, uses fingerprint conflict detection, and performs one atomic document replacement per target.
-- There is no interactive terminal editor in this version. The CLI accepts direct body text or a body file, mutually exclusive; MCP accepts structured body input. Exact MCP schemas and return values remain unspecified.
+- There is no interactive terminal editor in this version. The CLI accepts direct body text or a body file, mutually exclusive; MCP accepts structured body input.
+- MCP schemas are frozen. `waymark_set_title` takes `{id, title, dry_run?, lock_timeout_ms?}` and returns `{id, path, changed, written, item}`. `waymark_replace_body` takes `{id, body, dry_run?, lock_timeout_ms?}`, where `body` is required, an empty string clears it, and there is no "leave unchanged" form. `waymark_update_custom_fields` takes `{id, custom_fields: {set: {key: value}, clear: [key]}, dry_run?, lock_timeout_ms?}` and returns `{id, path, changed, written, item, changed_fields}`; `set` and `clear` are two fields, not a tagged union, and null, unknown, duplicate, conflicting, and required-field clears are `VALIDATION_ERROR`.
 - The three edit operations return the complete resulting work item plus a `changed` flag; custom-field updates also return the changed field names. Editing is single-target, with no batch variant, no implicit multi-ID form, and no mixed-operation array.
+- There is no composite edit request. Changing title, body, and fields together is three separate calls, each atomic per document with its own lock, fingerprint check, and `updated_at`; there is no cross-area transaction and no all-or-nothing guarantee across the calls, and a partial failure leaves the earlier calls applied. Creation remains the one request that sets several areas at once, and it is atomic because it is a single document write plus its soft-link partners in one batch.
 - Only title, body, and custom fields are editable through ordinary editing. Status, owner, category, parent, dependencies, soft links, and archive have dedicated operations. System and identity fields are never editable.
 
 ### Interfaces and machine contracts
 
 - Every domain rule lives in one shared function library. The CLI and the MCP server are adapters over it and cannot diverge. Any future interface reuses it.
 - CLI and MCP have equal capability coverage. Neither is a reduced surface. Dry runs, complete prevalidation, locks, conflict handling, and structured errors are shared rather than adapter-specific. The adapters may differ only in interaction and transport representation. Capability coverage includes project initialization, configuration reading and writing, validation and diagnostics, work-item creation, reading, editing, moving, and archiving, lifecycle and relationship operations, collection and tree queries with explicit archive ranges, custom-field queries, readiness and blocked views, statistics, migration, Git history and diff where available, and generated agent documentation.
-- Project-maintenance capabilities are not split by adapter: initialization, configuration inspection and validation, diagnostics, migration, projection synchronization, and Git history and diff access are eligible for both. There is no import or export.
+- Project-maintenance capabilities are not split by adapter: initialization, configuration inspection and validation, diagnostics, migration, and Git history and diff access are eligible for both. Projection synchronization is an internal shared-library behavior performed automatically per operation, not an adapter surface. There is no import or export.
 - Waymark is a general-purpose tracker. Wayfinder-specific map, decision-ticket, claim-prompt, and frontier semantics do not belong in its core. Generic tree and leaf queries do; a leaf is a work item with no children.
 
 CLI command catalog:
@@ -350,7 +355,10 @@ CLI command catalog:
 | `archive` | item ID, optional reason, optional dry-run | archive result with changed items |
 
 - `start`, `close`, and `reopen` may exist as CLI conveniences over the status operation; they are not separate domain capabilities, and MCP exposes the structured status operation rather than one tool per alias. Whether these aliases exist is a command-tree presentation choice.
-- MCP exposes no separate query tool because its list request is already structured. It exposes no separate children or leaves tool; depth and filters express them. Projection synchronization exists in the shared library; whether it remains a public command and what it reports is not yet specified.
+- Human output keeps a stable text layout: collections render `id`, padded `status`, `state`, and `title` on one line, with indented `needs migration` and `blocked by …` lines and an `N of M match (offset X, limit Y)` footer; a single item renders labeled blocks; edits render one confirmation line; diagnosis, tree, and stats keep sectioned prose. No header row is added. Human prose goes to stderr; stdout carries JSON, `show --raw` documents, and raw `git diff` patches.
+- Colour is added only for a terminal: `--color=auto|always|never`, default `auto`, with `NO_COLOR` honoured. Colour never changes the text and never carries meaning alone. The CLI and Web share the semantic states `ready`, `in_progress`, `blocked`, and `closed` and the same green/blue/red/grey mapping; each medium encodes it itself (ANSI or CSS) and the hex values are not a shared contract. Category identity stays shape-based in the Web and is not colour-coded.
+- MCP exposes no separate query tool because its list request is already structured. It exposes no separate children or leaves tool; depth and filters express them. There is no public `sync` command or tool: the projection lives only in memory and is rebuilt or refreshed per operation; a CLI invocation builds one and discards it, while long-lived MCP and Web contexts perform lightweight inventory checks before each call. A refresh failure after a successful write leaves the documents committed, reports that synchronization needs recovery, and the next operation rebuilds. `doctor` and `validate` report completeness and freshness but add no rebuild flag.
+- MCP transport is stdio only, and the server advertises tools only: no resources, resource templates, prompts, or subscriptions in v1. Tool names follow `waymark_<verb>_<noun>`; the published names are the contract and renaming one is a breaking change.
 
 MCP tool catalog:
 
@@ -462,6 +470,7 @@ Error registry:
 | `PROJECT_NOT_FOUND` | 5 | no | none | none | `{searched}` | no Waymark project was found while searching |
 | `IO_ERROR` | 5 | no | error | file | `{path, operation}` | a filesystem operation failed |
 | `GIT_ERROR` | 5 | no | none | none | `{operation, reason}` | a Git operation failed |
+| `GIT_UNAVAILABLE` | none | no | info | none | `{}` | no `git` executable was found on `PATH`; history and diff degrade to empty |
 | `LOCK_TIMEOUT` | 5 | yes | none | none | `{lock_path, waited_ms}` | the lock wait expired; nothing was written |
 | `LOCK_FAILED` | 5 | no | none | none | `{lock_path, reason}` | the lock file cannot be opened, locked, or is not a regular file |
 | `SNAPSHOT_UNSTABLE` | 5 | yes | none | none | `{retries}` | a reader could not obtain a stable snapshot after bounded retries |
@@ -497,6 +506,7 @@ Error registry:
 - There is no separate compatibility-review command: `validate` and `doctor` perform the review against the current configuration, and a migration dry run previews the change.
 - Migration uses dedicated error codes because the recovery action differs: `MIGRATION_PATH_CONFLICT` for an existing, overlapping, or case-colliding target; `MIGRATION_UNSUPPORTED_GENERATION` when the installed release cannot write the requested generation; `MIGRATION_PRECONDITION_FAILED` for incomplete projections or fingerprint disagreement. Failures during execution are `MIGRATION_FAILED` with per-target outcomes.
 - Every migration preserves archive metadata in frontmatter and the canonical serialization rules; a migrated file remains a valid work-item document under the new generation.
+- All three classes return one shared report: `{migration: version|schema|storage, description, dry_run, affected: [{id, path}], targets: [{path, outcome, error?}], moves: [{from, to, outcome, error?}], rewritten: [{id, path, from, to}], count, written, config_changed, previous_revision, revision}`. A dry run sends the same request with `dry_run: true` and returns the same shape with `written: false` and targets marked `skipped`; a real run marks each target `applied` or `failed`. Requests carry exactly one action: version `{target_generation}`; schema `{action: {kind: remove_field, key} | {kind: add_required_field, key, type, default?}}`; storage `{action: {kind: root, path} | {kind: category_path, key, path} | {kind: category_key, from, to}}`; all plus `dry_run` and optional `lock_timeout_ms`. CLI flags map one-to-one.
 
 Version migration:
 
@@ -526,6 +536,7 @@ Storage migration:
 - `doctor` and `validate` cover: malformed or oversized frontmatter; duplicate IDs, case variants, and multiple files for one ID; ID/path mismatch; invalid fields and undeclared custom fields; missing or archived relationship targets, reported as `DANGLING_REFERENCE`; dependency and parent cycles; unsupported or future versions; stale or invalid projections; source inventory and fingerprint changes, including new, deleted, moved, and uncertain files; path conflicts; projection incompleteness; timestamp incoherence, reported as `TIMESTAMP_INCOHERENT`; and items needing migration, reported as `MIGRATION_AVAILABLE`.
 - `doctor` is diagnostic-only for business data. It never deletes a relationship, modifies body or custom fields, restores an item, or infers user intent. Cache and projection rebuild is the only safe internal repair, and every repair reports what changed and what remains.
 - `doctor` probes the lock with a non-blocking try-lock. When the lock is held it reports `LOCK_HELD` as an info-level, non-fixable finding, never waits, and never reports holder identity.
+- `doctor` also probes Git availability and reports `GIT_UNAVAILABLE` or `NOT_A_GIT_REPOSITORY` as info-level, non-fixable findings; it never installs Git or initializes a repository.
 - Cycle detection returns a structured cycle path or diagnostic and never panics. A scan that cannot validate the complete graph fails explicitly rather than validating a partial graph as complete.
 - Local reads may succeed for valid files while another file is broken. Global graph queries, archive, migration, and multi-target relationship writes require a complete projection and fail explicitly with `INCOMPLETE_PROJECTION` on parse errors or uncertainty.
 - `validate` reviews the whole project against the current configuration and reports findings; it performs the compatibility review that would otherwise need a separate command.
@@ -580,6 +591,9 @@ Storage migration:
 - Git checkout, revert, and reset are interpreted entirely from current authoritative files. Fingerprint changes invalidate old projections; no hidden restore log exists and no other file is automatically repaired. Reintroduced archived targets and old relationships are diagnosed from current content.
 - The specification defines capabilities and behaviour, not delivery phases or a release schedule.
 - There is no import or export capability and no cross-work-item batch surface.
+- Git is optional. A probe checks both a containing repository and a `git` executable on `PATH`. If either is missing, history and diff succeed with an empty payload, an informational finding, and the usual exit code; no tracker operation is blocked or degraded.
+- `GIT_UNAVAILABLE` reports a missing `git` executable and `NOT_A_GIT_REPOSITORY` reports that no repository contains the project. When both are missing, both findings are reported, each naming its cause. Both are info severity, non-fixable, and never change the exit code; `doctor` and `validate` report them without installing Git or initializing a repository.
+- Both adapters expose history `{item?, path?, limit?}` and diff `{item?, commit?}` with the same parameters. History defaults `limit` to 20, where `0` means unlimited; `item` and `path` are mutually exclusive; each invalid combination is rejected by both adapters, with the CLI reporting it as `USAGE_ERROR` and MCP as `VALIDATION_ERROR`. The CLI renders human lines or the raw patch and MCP returns the shared envelope. No Git capability exists in only one adapter; Git-based stats, blame, and status are not part of v1.
 
 ## Testing Decisions
 
@@ -608,7 +622,7 @@ Storage migration:
 - Windows support and concurrent access over network filesystems.
 - Delivery phases, release sequencing, and rollout plans; detailed build, packaging, installation and distribution design is handled separately from the Web implementation.
 - TUI, daemon, external tracker synchronization, notifications, and plugins.
-- Anything listed under Not yet specified below.
+- Anything the Waymark design map still records as undecided.
 
 ## Further Notes
 
@@ -618,16 +632,6 @@ Use the project glossary terms: work item, category, owner, executor, creator, o
 
 Clove is a behavioural reference for typed errors, canonical error-code mapping, versioned envelopes, diagnostics, cycle reporting, and the frontmatter-plus-body document model — not a feature checklist.
 
-### Not yet specified
+### Resolved interface details
 
-These areas remain undecided. The specification must not infer an answer, and no implementation should settle them implicitly:
-
-- the frontmatter field name and value shape that carry the format generation;
-- whether projection synchronization stays a public command, folds into diagnostics, or is implied by per-operation inventory checks, and what it reports;
-- MCP transport specifics: stdio versus HTTP, the tool-name convention, and whether resources or subscriptions are exposed;
-- the concrete shape of human-readable CLI output, and whether the CLI and Web share work-state colours and markers;
-- the exact MCP schema and return values for title, body, and custom-field operations;
-- whether a composite edit operation exists at all, and whether cross-domain edits are atomic;
-- which field names field projection accepts, and the final deterministic tie-break for rank ordering within a topological level;
-- the full request and response envelopes for the three migration classes, and the machine-readable shape of dry-run output;
-- whether Git capabilities are exposed with identical parameters through both adapters.
+All earlier interface details — the format-generation field, projection synchronization, MCP transport and tool naming, human-readable CLI output and colour, MCP edit schemas, composite editing, field projection and the rank tie-break, migration envelopes, and Git parity — were resolved on 2026-11-04; the Waymark design map (`wm-y14hs95k8wct`) records those decisions. Distribution, packaging, and release automation remain outside this specification and are handled separately.

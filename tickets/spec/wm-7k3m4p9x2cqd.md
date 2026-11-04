@@ -3,11 +3,12 @@ schema: 1
 id: wm-7k3m4p9x2cqd
 title: Waymark Web tree, category filtering, and graph overview
 category: spec
-status: open
+status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-04T00:57:47Z
-updated_at: 2026-11-04T12:37:45Z
+updated_at: 2026-11-04T12:57:16Z
+closed_at: 2026-11-04T12:57:16Z
 ---
 # Waymark Web Tree, Category Filtering, and Graph Overview
 

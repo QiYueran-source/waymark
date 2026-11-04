@@ -349,7 +349,7 @@ The following decisions extend the accepted specification. The Web implementatio
 
 ### Resolved remaining interface decisions
 
-Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps and settle the Git-availability question they raised; where they overlap the provisional choices in `waymark/docs/implementation-decisions.md`, these rules win. The functional specification is not yet synchronized.
+Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps and settle the Git-availability question they raised; where they overlap the provisional choices in `waymark/docs/implementation-decisions.md`, these rules win. Synchronized to `wm-srxj8ztv1zfz` on 2026-11-04 (133 user stories; registry 38 codes).
 
 #### Format generation field
 
@@ -419,14 +419,14 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 
 ## Not yet specified
 
-### Web, MCP, and distribution follow-up
+### Distribution follow-up
 
-- The exact compatible rmcp and Web-stack versions and feature combinations; verify the resolved Rust dependency graph against the supported Rust version. If no suitable rmcp combination supports Rust 1.85, determine whether and how far to raise that minimum.
 - The precise feature flags and artifact names, frontend asset verification and provenance, and further sequencing details for the separate packaging/distribution work.
-- Implementation details for loopback HTTP validation, including canonical handling of IPv6 and default ports and tests for malformed, repeated, or missing headers, within the accepted Host/Origin rules above.
 - The separate packaging/download/release map, its decision tickets, specification and implementation tickets have yet to be created.
 
-Before the Web, MCP, and distribution follow-up above, every original decision ticket had been closed and indexed under Decisions so far. The replacement `wm-srxj8ztv1zfz` was accepted with 130 user stories, the absorbed command and tool catalog, and the frozen error registry; the interface working document was retired to `.inbox/superpower/`. The map remains the decision record and implementation tickets are cut from the specification, not from this map. The Web implementation and behavior follow-up above is reflected in that specification and T12; the MCP interface decisions and the formal distribution follow-up remain to be synchronized. The nine earlier interface details were resolved on 2026-11-04; see Resolved remaining interface decisions above.
+Version compatibility is resolved at the declared level: `rmcp` 0.8.5 with `transport-io`, the Web packages pinned in the frontend lockfile, every locked dependency that declares `rust-version` at or below 1.85.0, and `rust-version = "1.85"` in the workspace. A real build with Rust 1.85 remains a release-time check for the distribution effort; this environment could not install that toolchain. Loopback HTTP validation details (IPv6 and default-port canonicalisation, malformed, repeated, or missing header tests) are implementation and test details within the accepted Host/Origin rules and need no product decision.
+
+Before the Distribution follow-up above, every original decision ticket had been closed and indexed under Decisions so far. The replacement `wm-srxj8ztv1zfz` was accepted with 133 user stories, the absorbed command and tool catalog, and the frozen error registry; the interface working document was retired to `.inbox/superpower/`. The map remains the decision record and implementation tickets are cut from the specification, not from this map. The Web implementation and behavior follow-up above is reflected in that specification and T12; the MCP interface decisions were synchronized on 2026-11-04, and the formal distribution follow-up remains deferred. The nine earlier interface details were resolved on 2026-11-04; see Resolved remaining interface decisions above.
 
 ## Out of scope
 
