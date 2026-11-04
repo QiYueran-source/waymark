@@ -3,10 +3,11 @@ schema: 1
 id: wm-wtb2rpjn12bm
 title: Only blocking and empty states are centred
 category: implement
-status: open
+status: closed
 owner: frank
 created_at: 2026-11-04T12:57:13Z
-updated_at: 2026-11-04T12:57:13Z
+updated_at: 2026-11-04T14:50:18Z
+closed_at: 2026-11-04T14:50:18Z
 parent: wm-7k3m4p9x2cqd
 ---
 ## What to build

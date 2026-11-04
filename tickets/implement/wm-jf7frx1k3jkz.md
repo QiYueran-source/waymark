@@ -3,10 +3,11 @@ schema: 1
 id: wm-jf7frx1k3jkz
 title: Graph direction switch between top-to-bottom and left-to-right
 category: implement
-status: open
+status: closed
 owner: frank
 created_at: 2026-11-04T12:57:12Z
-updated_at: 2026-11-04T12:57:12Z
+updated_at: 2026-11-04T14:50:19Z
+closed_at: 2026-11-04T14:50:19Z
 parent: wm-7k3m4p9x2cqd
 ---
 ## What to build

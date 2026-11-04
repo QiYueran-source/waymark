@@ -3,10 +3,11 @@ schema: 1
 id: wm-djmdzgybexeh
 title: CLI work-state colours for a terminal
 category: implement
-status: open
+status: closed
 owner: frank
 created_at: 2026-11-04T12:57:12Z
-updated_at: 2026-11-04T12:57:12Z
+updated_at: 2026-11-04T14:50:18Z
+closed_at: 2026-11-04T14:50:18Z
 parent: wm-srxj8ztv1zfz
 ---
 ## What to build

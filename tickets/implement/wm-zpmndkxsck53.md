@@ -3,10 +3,11 @@ schema: 1
 id: wm-zpmndkxsck53
 title: Graph node content stays inside the card and context is a badge
 category: implement
-status: open
+status: closed
 owner: frank
 created_at: 2026-11-04T12:57:12Z
-updated_at: 2026-11-04T12:57:12Z
+updated_at: 2026-11-04T14:50:18Z
+closed_at: 2026-11-04T14:50:18Z
 parent: wm-7k3m4p9x2cqd
 ---
 ## What to build

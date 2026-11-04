@@ -3,10 +3,11 @@ schema: 1
 id: wm-zm3h5tcnp44t
 title: Relationship lines stay distinguishable at any zoom
 category: implement
-status: open
+status: closed
 owner: frank
 created_at: 2026-11-04T12:57:13Z
-updated_at: 2026-11-04T12:57:13Z
+updated_at: 2026-11-04T14:50:19Z
+closed_at: 2026-11-04T14:50:19Z
 parent: wm-7k3m4p9x2cqd
 ---
 ## What to build
