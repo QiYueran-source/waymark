@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 
 import Explorer from '$lib/components/Explorer.svelte';
@@ -617,13 +617,15 @@ describe('category selection', () => {
 		expect(screen.queryByTestId('group-task')).toBeNull();
 		expect(screen.getByTestId('filtered-empty-state')).not.toBeNull();
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Select all categories' }));
+		// The toolbar's control, not the recovery action the empty pane repeats.
+		const filter = screen.getByTestId('category-filter');
+		await fireEvent.click(within(filter).getByRole('button', { name: 'Select all categories' }));
 		expect(screen.getByTestId('group-bug')).not.toBeNull();
 		expect(screen.getByTestId('group-task')).not.toBeNull();
 		expect(pressed('docs')).toBe('true');
 		expect(screen.queryByTestId('filtered-empty-state')).toBeNull();
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Clear all categories' }));
+		await fireEvent.click(within(filter).getByRole('button', { name: 'Clear all categories' }));
 		expect(screen.queryByTestId('group-bug')).toBeNull();
 		expect(screen.queryByTestId('group-task')).toBeNull();
 		expect(pressed('bug')).toBe('false');

@@ -1,14 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildGraph, edgeLabel } from '$lib/graph';
+import { buildGraph, edgeLabel, graphNodeLabel } from '$lib/graph';
+import { allIds, filterGroups, visibleRoots } from '$lib/tree';
 import {
 	BUG,
 	TASK,
 	combinedTree,
+	deepGroupedTree,
 	dependencyTree,
+	groupedDependencyTree,
 	groupedTree,
 	hierarchyTree,
-	unresolvedTree
+	unresolvedTree,
+	unresolvedReasonsTree
 } from './fixtures';
 
 const WITH_DEPENDENCIES = { dependenciesVisible: true } as const;
@@ -156,5 +160,107 @@ describe('dependency edges in the graph model', () => {
 		expect(edgeLabel(graph, edge)).toBe(
 			'Dependency: Fix the login form → Login fails (depends on)'
 		);
+	});
+});
+
+describe('category filtering in the graph model', () => {
+	/** The graph Explorer draws for a category scope: the same filtered payload. */
+	function scopedGraph(selected: string[]) {
+		const filtered = filterGroups(deepGroupedTree.groups, new Set(selected));
+		const data = { ...deepGroupedTree, groups: filtered.groups };
+		return {
+			graph: buildGraph(data, { contextIds: filtered.contextIds }),
+			filtered,
+			data
+		};
+	}
+
+	it('shows exactly the items the filtered by-category tree shows, in the same order', () => {
+		for (const scope of [['task'], ['bug'], ['bug', 'task'], ['docs'], []]) {
+			const { graph, data } = scopedGraph(scope);
+			const treeIds = allIds(visibleRoots(data));
+			expect(graph.nodes.map((node) => node.id)).toEqual(treeIds);
+			expect(graph.roots).toEqual(visibleRoots(data).map((node) => node.id));
+		}
+	});
+
+	it('marks a required unselected ancestor as context', () => {
+		const { graph } = scopedGraph(['task']);
+		const byId = new Map(graph.nodes.map((node) => [node.id, node]));
+		expect(byId.get('wm-docs-umbrella')?.context).toBe(true);
+		expect(byId.get('wm-bug-mid')?.context).toBe(true);
+		expect(byId.get('wm-task-leaf')?.context).toBe(false);
+	});
+
+	it('does not promote a selected child under an unselected parent to a root', () => {
+		const { graph } = scopedGraph(['task']);
+		const byId = new Map(graph.nodes.map((node) => [node.id, node]));
+		// The task keeps its real parent and depth; the ancestor stays a root.
+		expect(byId.get('wm-task-leaf')?.parentId).toBe('wm-bug-mid');
+		expect(byId.get('wm-task-leaf')?.depth).toBe(2);
+		expect(graph.roots).toEqual(['wm-docs-umbrella', 'wm-task-ship']);
+		expect(byId.get('wm-docs-umbrella')?.parentId).toBeNull();
+		// No synthetic root is invented for the kept chain.
+		expect(graph.nodes.every((node) => node.id !== 'root')).toBe(true);
+	});
+
+	it('marks nothing when every category is in scope', () => {
+		const { graph, filtered } = scopedGraph(['bug', 'docs', 'task']);
+		expect(filtered.contextIds.size).toBe(0);
+		expect(graph.nodes.every((node) => node.context === false)).toBe(true);
+	});
+
+	it('says context in the accessible name of a context node, with the tree wording', () => {
+		const { graph } = scopedGraph(['task']);
+		const contextNode = graph.nodes.find((node) => node.id === 'wm-bug-mid');
+		const selectedNode = graph.nodes.find((node) => node.id === 'wm-task-leaf');
+		expect(contextNode && graphNodeLabel(contextNode)).toContain(
+			'context, outside the selection'
+		);
+		expect(selectedNode && graphNodeLabel(selectedNode)).not.toContain('context');
+	});
+
+	it('drops a dependency edge whose target the filtered drawing does not contain', () => {
+		// `wm-dep-ship` (Tasks) depends on `wm-dep-bug` (Bugs), which is not an
+		// ancestor of it: a task-only scope leaves the dependent drawn and the
+		// target out, so the edge goes rather than pointing at nothing.
+		const filtered = filterGroups(groupedDependencyTree.groups, new Set(['task']));
+		const graph = buildGraph(
+			{ ...groupedDependencyTree, groups: filtered.groups },
+			{ dependenciesVisible: true, contextIds: filtered.contextIds }
+		);
+		expect(graph.nodes.map((node) => node.id)).toEqual(['wm-scope-task']);
+		// One target was filtered out, the other is archived; both yield no edge.
+		expect(graph.dependencies).toEqual([]);
+		expect(graph.unresolved).toEqual([]);
+	});
+});
+
+describe('archive and unresolved entries in the graph model', () => {
+	it('never draws an archived item: not a node, a dependency target, or a placeholder', () => {
+		const graph = buildGraph(dependencyTree, WITH_DEPENDENCIES);
+		expect(graph.nodes.map((node) => node.id)).not.toContain('wm-dep-archived');
+		expect(graph.dependencies.flatMap((edge) => [edge.from, edge.to])).not.toContain(
+			'wm-dep-archived'
+		);
+		expect(graph.unresolved.map((item) => item.id)).not.toContain('wm-dep-archived');
+		// `wm-dep-ship` still depends on the bug that is drawn.
+		expect(graph.dependencies.map((edge) => edge.id)).toContain(
+			'dependency:wm-dep-ship->wm-dep-bug'
+		);
+	});
+
+	it('lists missing-parent and parent-cycle items as unresolved, never as roots', () => {
+		const graph = buildGraph(unresolvedReasonsTree);
+		expect(graph.unresolved.map((item) => [item.id, item.reason])).toEqual([
+			['wm-orphan', 'parent_missing'],
+			['wm-cycle-a', 'parent_cycle'],
+			['wm-cycle-b', 'parent_cycle']
+		]);
+		expect(graph.roots).toEqual(['wm-bug-login']);
+		const drawn = new Set(graph.nodes.map((node) => node.id));
+		for (const id of ['wm-orphan', 'wm-cycle-a', 'wm-cycle-b', 'wm-missing']) {
+			expect(drawn.has(id)).toBe(false);
+		}
 	});
 });

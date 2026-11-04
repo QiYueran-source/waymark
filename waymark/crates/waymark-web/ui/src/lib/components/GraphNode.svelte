@@ -10,7 +10,7 @@
 	 */
 	import Shape from './Shape.svelte';
 	import { stateLabel, statusLabel, type WorkState } from '$lib/types';
-	import type { GraphNode } from '$lib/graph';
+	import { CONTEXT_NOTE, type GraphNode } from '$lib/graph';
 
 	let {
 		node,
@@ -28,6 +28,8 @@
 
 	const stateWord = $derived(stateLabel(node.state));
 	const state: WorkState = $derived(node.state);
+	/** The tree's own phrase, so both presentations mark context the same way. */
+	const context = $derived(node.context);
 
 	/**
 	 * Activate the node from the keyboard.
@@ -51,18 +53,29 @@
 <div
 	class="graph-node"
 	class:selected
+	class:context
 	data-testid={`graph-node-${node.id}`}
 	data-node-id={node.id}
 	data-state={node.state}
 	data-depth={node.depth}
 	data-parent-id={node.parentId ?? ''}
 	data-graph-y={Math.round(graphY)}
+	data-context={context ? 'true' : undefined}
 >
 	<div class="graph-node-line">
 		<span class="category">
 			<Shape shape={node.shape} label={`${node.category.name} category`} size={12} />
 			<span class="category-name">{node.category.name}</span>
 		</span>
+		{#if context}
+			<!-- Visible text, so the marking survives greyscale and a screenshot;
+			     hidden from assistive technology because the title's name says it. -->
+			<span
+				class="context-marker"
+				data-testid={`graph-context-marker-${node.id}`}
+				aria-hidden="true">Context — outside the selection</span
+			>
+		{/if}
 		<span class="lifecycle-status">{statusLabel(node.status)}</span>
 	</div>
 
@@ -72,6 +85,7 @@
 		type="button"
 		data-testid={`graph-select-${node.id}`}
 		aria-current={selected ? 'true' : undefined}
+		aria-label={context ? `${node.title} — ${CONTEXT_NOTE}` : undefined}
 		onclick={(event) => onSelect(node.id, event.currentTarget)}
 		onkeydown={onTitleKeydown}
 	>
