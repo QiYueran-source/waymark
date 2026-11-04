@@ -826,11 +826,104 @@ code {
 	font-weight: 650;
 }
 
+/* The card's title and its fold control sit on one line. */
+.graph-node-heading {
+	display: flex;
+	align-items: flex-start;
+	gap: 0.3rem;
+	min-width: 0;
+}
+
+/* The fold control is secondary to the title, but never invisible: folding a
+   busy branch is the main way to make a large drawing readable. */
+.graph-node-toggle {
+	flex: none;
+	display: grid;
+	place-items: center;
+	width: 1.15rem;
+	height: 1.15rem;
+	margin-top: 0.05rem;
+	padding: 0;
+	border: 1px solid transparent;
+	border-radius: 3px;
+	background: transparent;
+	color: var(--muted);
+}
+
+.graph-node-toggle svg {
+	width: 0.6rem;
+	height: 0.6rem;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.6;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+
+.graph-node-toggle:hover {
+	background: var(--panel-2);
+	border-color: var(--line-strong);
+	color: var(--ink);
+}
+
+/* A folded node says so on the card, so a branch that hides work is visible
+   even when its control is not under the pointer. */
+.graph-node[data-collapsed='true'] .graph-node-line::after {
+	content: '· folded';
+	color: var(--muted);
+	font-size: 0.72rem;
+	letter-spacing: 0.02em;
+}
+
 /* A blocked node keeps its reason in the card; the row stays scannable. */
 .graph-node .blocked-reason {
 	max-width: none;
 	font-size: 0.76rem;
 	line-height: 1.25;
+}
+
+/* The canvas controls: pan and zoom are gestures, so these only repeat or
+   undo them. The readout states the current transform in words. */
+.graph-controls {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 0.3rem;
+}
+
+.graph-controls-row {
+	display: flex;
+	gap: 2px;
+	padding: 2px;
+	background: var(--panel);
+	border: 1px solid var(--line);
+	border-radius: 4px;
+}
+
+.graph-controls-row button {
+	min-height: 1.7rem;
+	padding: 0.2rem 0.5rem;
+	border: 0;
+	border-radius: 3px;
+	background: transparent;
+	color: var(--muted);
+	font-size: 0.79rem;
+}
+
+.graph-controls-row button:hover {
+	background: var(--panel-2);
+	color: var(--ink);
+}
+
+.graph-readout {
+	margin: 0;
+	padding: 0.16rem 0.4rem;
+	background: var(--panel);
+	border: 1px solid var(--line);
+	border-radius: 3px;
+	color: var(--muted);
+	font-size: 0.74rem;
+	font-variant-numeric: tabular-nums;
 }
 
 /* One panel, two line treatments: solid is hierarchy, dashed is dependency. */

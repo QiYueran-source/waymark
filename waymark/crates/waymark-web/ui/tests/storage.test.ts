@@ -48,6 +48,15 @@ describe('project identifier', () => {
 		// The category scope belongs to the project, not to one tree view: the
 		// grouped tree and the graph filter by the same selection.
 		expect(preferenceKey(namespace, 'categories')).toBe(`${namespace}:categories`);
+		// The graph's own state is never stored under the tree's keys.
+		expect(preferenceKey(namespace, 'collapsed')).toBe(`${namespace}:collapsed`);
+		expect(preferenceKey(namespace, 'viewport')).toBe(`${namespace}:viewport`);
+		expect(preferenceKey(namespace, 'expanded', 'combined')).not.toBe(
+			preferenceKey(namespace, 'collapsed')
+		);
+		expect(preferenceKey(namespace, 'scroll', 'combined')).not.toBe(
+			preferenceKey(namespace, 'viewport')
+		);
 	});
 
 	it('refuses a raw project root where a project id is required', () => {
@@ -110,6 +119,23 @@ describe('PreferenceStore', () => {
 		expect(storage.getItem(preferenceKey(store.projectId, 'presentation'))).toBe('graph');
 	});
 
+	it('remembers the graph collapse set and viewport, apart from tree state', () => {
+		const storage = memoryStorage();
+		const store = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+		store.writeCollapsed(['wm-h-root']);
+		store.writeViewport({ x: 12.5, y: -3, zoom: 0.75 });
+		store.writeExpanded('combined', ['wm-h-child']);
+		store.writeScroll('combined', 140);
+
+		const reopened = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+		expect(reopened.readCollapsed()).toEqual(['wm-h-root']);
+		expect(reopened.readViewport()).toEqual({ x: 12.5, y: -3, zoom: 0.75 });
+		// The tree's own expansion and scroll are untouched by the graph.
+		expect(reopened.readExpanded('combined')).toEqual(['wm-h-child']);
+		expect(reopened.readScroll('combined')).toBe(140);
+		expect(reopened.readCollapsed()).not.toEqual(reopened.readExpanded('combined'));
+	});
+
 	it('remembers an empty category selection as a real choice', () => {
 		const storage = memoryStorage();
 		const store = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
@@ -132,6 +158,8 @@ describe('PreferenceStore', () => {
 		expect(beta.readPresentation()).toBe('tree');
 		expect(beta.readDependencies('combined')).toBe(false);
 		expect(beta.readCategories()).toBeNull();
+		expect(beta.readCollapsed()).toBeNull();
+		expect(beta.readViewport()).toBeNull();
 		expect(alpha.projectId).not.toBe(beta.projectId);
 	});
 
@@ -143,11 +171,15 @@ describe('PreferenceStore', () => {
 		storage.setItem(preferenceKey(store.projectId, 'expanded', 'combined'), '{not json');
 		storage.setItem(preferenceKey(store.projectId, 'scroll', 'combined'), '-4');
 		storage.setItem(preferenceKey(store.projectId, 'categories'), '{"bug":true}');
+		storage.setItem(preferenceKey(store.projectId, 'collapsed'), '{not json');
+		storage.setItem(preferenceKey(store.projectId, 'viewport'), '{"x":"left"}');
 		expect(store.readView()).toBe('combined');
 		expect(store.readPresentation()).toBe('tree');
 		expect(store.readExpanded('combined')).toBeNull();
 		expect(store.readScroll('combined')).toBe(0);
 		expect(store.readCategories()).toBeNull();
+		expect(store.readCollapsed()).toBeNull();
+		expect(store.readViewport()).toBeNull();
 	});
 
 	it('drops non-string entries from a malformed category scope', () => {
@@ -165,11 +197,17 @@ describe('PreferenceStore', () => {
 		expect(store.readView()).toBe('combined');
 		expect(store.readPresentation()).toBe('tree');
 		expect(store.readCategories()).toBeNull();
+		expect(store.readCollapsed()).toBeNull();
+		expect(store.readViewport()).toBeNull();
 		expect(() => store.writeView('grouped')).not.toThrow();
 		expect(() => store.writePresentation('graph')).not.toThrow();
 		expect(() => store.writeCategories(['bug'])).not.toThrow();
+		expect(() => store.writeCollapsed(['wm-h-root'])).not.toThrow();
+		expect(() => store.writeViewport({ x: 10, y: 20, zoom: 1.5 })).not.toThrow();
 		expect(store.readView()).toBe('combined');
 		expect(store.readCategories()).toBeNull();
+		expect(store.readCollapsed()).toBeNull();
+		expect(store.readViewport()).toBeNull();
 	});
 
 	it('reports a write failure instead of throwing', () => {

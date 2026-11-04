@@ -18,7 +18,8 @@
 	import UnresolvedList from './UnresolvedList.svelte';
 	import { ApiFailure, fetchHealth, fetchItem, fetchTree } from '$lib/api';
 	import type { Failure } from '$lib/failure';
-	import { buildGraph } from '$lib/graph';
+	import { buildGraph, collapseGraph } from '$lib/graph';
+	import type { GraphViewport } from '$lib/graph';
 	import {
 		allIds,
 		categoryScopeKeys,
@@ -64,6 +65,16 @@
 	let persistenceNotice = $state<string | null>(null);
 	let treePane: HTMLElement | undefined = $state();
 	let restoreToken = $state(0);
+	/**
+	 * The graph nodes the reader folded shut, by id.
+	 *
+	 * Kept apart from the tree's `expanded`: folding a branch in the drawing is
+	 * a different decision from folding a row in the list, and the two are
+	 * stored on different keys so neither can move the other.
+	 */
+	let collapsedIds = $state<string[]>([]);
+	/** The viewport this project last left, applied when the graph next mounts. */
+	let restoredViewport = $state<GraphViewport | null>(null);
 	/**
 	 * The category keys this project has in scope, in configured order, or `null`
 	 * before a grouped read has resolved them. `[]` is a real choice — the reader
@@ -138,6 +149,18 @@
 	const workGraph = $derived(
 		graphData === null ? null : buildGraph(graphData, { dependenciesVisible })
 	);
+	/** The folded set, as the model helper takes it. */
+	const collapsed: ReadonlySet<string> = $derived(new Set(collapsedIds));
+	/**
+	 * The drawing, with folded branches closed up.
+	 *
+	 * Collapsing is presentation only: the graph is rebuilt from the same tree
+	 * payload and then filtered, so no item is read, written, or re-parented.
+	 * Ids this project no longer contains simply match nothing.
+	 */
+	const visibleGraph = $derived(
+		workGraph === null ? null : collapseGraph(workGraph, collapsed)
+	);
 
 	const PERSISTENCE_NOTICE =
 		'Preferences could not be saved in this browser. The view still works, but these choices may reset when the page reloads.';
@@ -184,6 +207,11 @@
 			// where it meets this project's configured categories, which the
 			// payload carries. `null` stays `null` so the default is "everything".
 			categoryScope = store?.readCategories() ?? null;
+			// One fold set and one viewport per project, not per data view: the
+			// graph draws whichever view is selected, so switching the view must
+			// not reopen a branch or move the drawing.
+			collapsedIds = store?.readCollapsed() ?? [];
+			restoredViewport = store?.readViewport() ?? null;
 			restoreToken += 1;
 			syncNotice();
 		} catch (error) {
@@ -247,6 +275,36 @@
 	function collapseAll(): void {
 		expanded = [];
 		persist((current) => current.writeExpanded(view, expanded));
+	}
+
+	/**
+	 * Fold or unfold one node's descendants.
+	 *
+	 * Only the drawing changes. The stored set is written whole, so it survives
+	 * a reload and stays this project's own; folding never touches a work item.
+	 */
+	function toggleCollapse(id: string): void {
+		collapsedIds = collapsedIds.includes(id)
+			? collapsedIds.filter((entry) => entry !== id)
+			: [...collapsedIds, id];
+		persist((current) => current.writeCollapsed(collapsedIds));
+	}
+
+	/** Remember where the reader left the drawing, for this project only. */
+	function rememberViewport(viewport: GraphViewport): void {
+		restoredViewport = viewport;
+		persist((current) => current.writeViewport(viewport));
+	}
+
+	/**
+	 * Forget the remembered viewport.
+	 *
+	 * Resetting returns the drawing to its fitted state, so a reload must start
+	 * fitted too; keeping the old transform would resurrect what was discarded.
+	 */
+	function forgetViewport(): void {
+		restoredViewport = null;
+		persist((current) => current.clearViewport());
 	}
 
 	function toggleDependencies(): void {
@@ -465,11 +523,15 @@
 					</p>
 				</div>
 			{:else if treeData}
-				{#if presentation === 'graph' && workGraph}
+				{#if presentation === 'graph' && visibleGraph}
 					<GraphView
-						graph={workGraph}
+						graph={visibleGraph}
 						{selectedId}
+						{restoredViewport}
 						onSelect={(id, trigger) => void selectItem(id, trigger)}
+						onToggle={toggleCollapse}
+						onViewportChange={rememberViewport}
+						onViewportReset={forgetViewport}
 					/>
 				{:else}
 					<TreeView

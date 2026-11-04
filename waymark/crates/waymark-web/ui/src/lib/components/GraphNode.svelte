@@ -4,9 +4,11 @@
 	 *
 	 * It carries the same two visual languages the tree uses — the category's
 	 * stable shape and name, and the work state's colour plus its word — and the
-	 * blocked reason in prose. Nothing here is clickable except the title, which
-	 * selects the item; there is no drag handle, no field, and no menu, because
-	 * the graph is read-only.
+	 * blocked reason in prose. Two controls sit beside the title — the title itself,
+	 * which selects the item, and, for a node with children, a toggle that hides
+	 * or shows them. The toggle changes only what is drawn: no work item is
+	 * edited, no relation is added or lost, and nothing is re-read. There is no
+	 * drag handle, no field, and no menu, because the graph is read-only.
 	 */
 	import Shape from './Shape.svelte';
 	import { stateLabel, statusLabel, type WorkState } from '$lib/types';
@@ -15,15 +17,21 @@
 	let {
 		node,
 		selected = false,
+		collapsed = false,
 		graphY,
-		onSelect
+		onSelect,
+		onToggle
 	}: {
 		node: GraphNode;
 		selected?: boolean;
+		/** True when this node's children are hidden. */
+		collapsed?: boolean;
 		/** The top edge of this node's row in the drawing. */
 		graphY: number;
 		/** The node button passes itself, so focus can return to it later. */
 		onSelect: (id: string, trigger?: HTMLElement) => void;
+		/** Collapse or expand this node's children. */
+		onToggle: (id: string) => void;
 	} = $props();
 
 	const stateWord = $derived(stateLabel(node.state));
@@ -41,6 +49,7 @@
 	data-depth={node.depth}
 	data-parent-id={node.parentId ?? ''}
 	data-graph-y={Math.round(graphY)}
+	data-collapsed={collapsed ? 'true' : 'false'}
 >
 	<div class="graph-node-line">
 		<span class="category">
@@ -50,16 +59,40 @@
 		<span class="lifecycle-status">{statusLabel(node.status)}</span>
 	</div>
 
-	<button
-		class="graph-node-title"
-		class:selected
-		type="button"
-		data-testid={`graph-select-${node.id}`}
-		aria-current={selected ? 'true' : undefined}
-		onclick={(event) => onSelect(node.id, event.currentTarget)}
-	>
-		{node.title}
-	</button>
+	<div class="graph-node-heading">
+		<button
+			class="graph-node-title"
+			class:selected
+			type="button"
+			data-testid={`graph-select-${node.id}`}
+			aria-current={selected ? 'true' : undefined}
+			onclick={(event) => onSelect(node.id, event.currentTarget)}
+		>
+			{node.title}
+		</button>
+
+		{#if node.hasChildren}
+			<!-- The name states the action, so a screen reader announces what the
+			     press will do rather than a bare "toggle". -->
+			<button
+				class="graph-node-toggle"
+				type="button"
+				data-testid={`graph-toggle-${node.id}`}
+				aria-expanded={collapsed ? 'false' : 'true'}
+				aria-controls={`graph-node-${node.id}`}
+				aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${node.title}`}
+				onclick={() => onToggle(node.id)}
+			>
+				<svg viewBox="0 0 10 10" aria-hidden="true" focusable="false">
+					{#if collapsed}
+						<path d="M3 1 L7 5 L3 9" />
+					{:else}
+						<path d="M1 3 L5 7 L9 3" />
+					{/if}
+				</svg>
+			</button>
+		{/if}
+	</div>
 
 	<div class="graph-node-line">
 		<span class="state state-{state}" data-testid={`graph-state-${node.id}`}>
