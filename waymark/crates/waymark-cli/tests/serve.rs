@@ -56,6 +56,7 @@ fn tempdir() -> (tempfile::TempDir, Utf8PathBuf) {
     (dir, path)
 }
 
+#[cfg(not(feature = "web"))]
 fn init(root: &Utf8PathBuf) -> Run {
     let result = run(waymark().arg("init").arg("--project").arg(root));
     assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
@@ -76,6 +77,24 @@ fn entries(root: &std::path::Path) -> Vec<String> {
         .collect();
     names.sort();
     names
+}
+
+#[test]
+fn serve_defaults_to_the_web_crate_port_and_accepts_the_global_flags() {
+    let result = run(waymark().arg("serve").arg("--help"));
+    assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
+    let help = result.stdout();
+    assert!(
+        help.contains("--port <PORT>") && help.contains("[default: 7331]"),
+        "the default is the Web crate's DEFAULT_PORT:\n{help}"
+    );
+    assert!(help.contains("--open"), "the browser flag is advertised");
+    for flag in ["--json", "--color", "--project", "--lock-timeout-ms"] {
+        assert!(
+            help.contains(flag),
+            "the global flag {flag} is accepted:\n{help}"
+        );
+    }
 }
 
 #[test]

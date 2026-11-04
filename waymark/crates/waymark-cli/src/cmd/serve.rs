@@ -16,6 +16,13 @@ use waymark_core::error::WaymarkError;
 
 use super::open_project;
 
+#[cfg(feature = "web")]
+use super::{emit, err_line, EXIT_OK};
+#[cfg(feature = "web")]
+use serde_json::json;
+#[cfg(feature = "web")]
+use waymark_core::envelope::{success_envelope, Meta};
+
 /// The default loopback port.
 #[cfg(feature = "web")]
 const DEFAULT_PORT: u16 = waymark_web::DEFAULT_PORT;
@@ -37,11 +44,7 @@ pub struct ServeArgs {
 ///
 /// Discovery comes first in both builds: a missing or invalid project fails
 /// before a listener would bind and before anything is created or modified.
-pub fn run(
-    args: ServeArgs,
-    project: Option<&Utf8Path>,
-    json: bool,
-) -> Result<u8, WaymarkError> {
+pub fn run(args: ServeArgs, project: Option<&Utf8Path>, json: bool) -> Result<u8, WaymarkError> {
     let project = open_project(project)?;
     serve(project, args, json)
 }
@@ -56,13 +59,111 @@ fn serve(
 }
 
 #[cfg(feature = "web")]
-fn serve(
+fn serve(project: waymark_core::Project, args: ServeArgs, json: bool) -> Result<u8, WaymarkError> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|source| {
+            WaymarkError::internal(format!("cannot start the Web runtime: {source}"))
+        })?;
+    runtime.block_on(serve_embedded(project, args, json))
+}
+
+/// Bind, report readiness, then serve until Ctrl-C.
+///
+/// Readiness is reported only after the listener exists, so the printed port is
+/// the one a client can use; `--port 0` therefore reports the port the operating
+/// system chose.
+#[cfg(feature = "web")]
+async fn serve_embedded(
     project: waymark_core::Project,
     args: ServeArgs,
-    _json: bool,
+    json: bool,
 ) -> Result<u8, WaymarkError> {
-    let _ = (project, args);
-    Err(WaymarkError::internal(
-        "the Web variant's serve implementation is not wired yet",
-    ))
+    let config = waymark_web::WebConfig::embedded().with_port(args.port);
+    let running = waymark_web::bind(project, config)
+        .await
+        .map_err(map_web_error)?;
+    let url = format!("http://127.0.0.1:{}", running.addr().port());
+
+    if json {
+        emit(&success_envelope(
+            json!({"url": url}),
+            Meta::direct_file_scoped(),
+        ))?;
+    } else {
+        err_line(&format!("serving {url}"));
+    }
+
+    if args.open {
+        if let Err(source) = open_in_browser(&url) {
+            // Never a serve failure: the view is already available and the URL
+            // was printed, so a browser that is not installed is a note.
+            err_line(&format!(
+                "warning: could not launch the browser opener: {source}"
+            ));
+        }
+    }
+
+    tokio::signal::ctrl_c()
+        .await
+        .map_err(|source| WaymarkError::internal(format!("cannot wait for Ctrl-C: {source}")))?;
+    running.shutdown().await.map_err(map_web_error)?;
+    Ok(EXIT_OK)
+}
+
+/// The platform's browser launcher.
+#[cfg(feature = "web")]
+fn opener() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    }
+}
+
+/// Launch the browser without waiting for it.
+///
+/// Only a failure to launch is reported; the browser process is not ours to
+/// supervise, and a launcher that exits later must not take the server with it.
+#[cfg(feature = "web")]
+fn open_in_browser(url: &str) -> std::io::Result<()> {
+    let opener = opener();
+    std::process::Command::new(opener)
+        .arg(url)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|source| std::io::Error::new(source.kind(), format!("{opener}: {source}")))
+}
+
+/// Translate a Web-service failure into the registered taxonomy.
+///
+/// A port already held is the one expected failure and becomes `PORT_IN_USE`;
+/// every other startup fault is an environment or internal fault, and there is
+/// never a fallback to a different port.
+#[cfg(feature = "web")]
+fn map_web_error(error: waymark_web::WebError) -> WaymarkError {
+    use std::io::ErrorKind;
+
+    match error {
+        waymark_web::WebError::Bind { port, source } if source.kind() == ErrorKind::AddrInUse => {
+            WaymarkError::port_in_use(port)
+        }
+        waymark_web::WebError::Bind { port, source } => {
+            WaymarkError::io(format!("127.0.0.1:{port}"), "bind", &source)
+        }
+        waymark_web::WebError::Address(source) => {
+            WaymarkError::io("the loopback listener", "read the address of", &source)
+        }
+        waymark_web::WebError::Serve(source) => {
+            WaymarkError::internal(format!("the Web service stopped: {source}"))
+        }
+        waymark_web::WebError::Signal(source) => {
+            WaymarkError::internal(format!("cannot wait for Ctrl-C: {source}"))
+        }
+        waymark_web::WebError::MissingAssets(message) => WaymarkError::internal(message),
+    }
 }
