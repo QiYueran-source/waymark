@@ -10,7 +10,7 @@
 	 * browser.
 	 */
 	import { onMount, tick } from 'svelte';
-	import CategoryFilter from './CategoryFilter.svelte';
+	import CategoryPicker from './CategoryPicker.svelte';
 	import DetailPanel from './DetailPanel.svelte';
 	import GraphText from './GraphText.svelte';
 	import GraphView from './GraphView.svelte';
@@ -461,6 +461,23 @@
 	});
 </script>
 
+<!--
+	The one category control. In the drawing it is rendered inside the graph's
+	upper-left cluster; in the tree and the structured list it stays in the top
+	toolbar. Combined mode filters nothing, so the snippet is empty there.
+-->
+{#snippet categoryControl()}
+	{#if view === 'grouped' && categories.length > 0}
+		<CategoryPicker
+			{categories}
+			selected={selectedCategories}
+			onToggle={toggleCategory}
+			onSelectAll={selectAllCategories}
+			onClearAll={clearAllCategories}
+		/>
+	{/if}
+{/snippet}
+
 <div class="explorer">
 	<header class="app-header">
 		<div class="brand">
@@ -552,14 +569,10 @@
 			</label>
 		{/if}
 
-		{#if view === 'grouped' && categories.length > 0}
-			<CategoryFilter
-				{categories}
-				selected={selectedCategories}
-				onToggle={toggleCategory}
-				onSelectAll={selectAllCategories}
-				onClearAll={clearAllCategories}
-			/>
+		{#if !showingGraphDrawing}
+			<!-- Tree and structured-list placement: the same compact control stays
+			     in the top toolbar, with no canvas overlay. -->
+			{@render categoryControl()}
 		{/if}
 
 		{#if summary}
@@ -649,6 +662,7 @@
 						graph={visibleGraph}
 						{selectedId}
 						{restoredViewport}
+						categoryControl={categoryControl}
 						onSelect={(id, trigger) => void selectItem(id, trigger)}
 						onToggle={toggleCollapse}
 						onViewportChange={rememberViewport}

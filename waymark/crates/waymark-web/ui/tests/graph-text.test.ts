@@ -15,6 +15,7 @@ import {
 	makeFetch,
 	unresolvedTree
 } from './fixtures';
+import { clickCategory, clickCategoryAction } from './category-helpers';
 
 type FetchOptions = Parameters<typeof makeFetch>[0];
 
@@ -193,8 +194,8 @@ describe('parity with the graph', () => {
 
 		// Clear Tasks: those items leave both presentations, and the ancestors
 		// they needed leave with them.
-		await fireEvent.click(screen.getByRole('button', { name: 'Clear all categories' }));
-		await fireEvent.click(screen.getByTestId('category-option-bug'));
+		await clickCategoryAction('Clear all categories');
+		await clickCategory('bug');
 		await waitFor(() =>
 			expect(entries().map((element) => element.dataset.nodeId)).toEqual([
 				'wm-docs-umbrella',
@@ -221,8 +222,8 @@ describe('parity with the graph', () => {
 		await screen.findByTestId('graph-text');
 		// Keep Tasks only: the Docs and Bug ancestors stay to preserve parentage,
 		// and the alternative says so rather than implying they are selected.
-		await fireEvent.click(screen.getByRole('button', { name: 'Clear all categories' }));
-		await fireEvent.click(screen.getByTestId('category-option-task'));
+		await clickCategoryAction('Clear all categories');
+		await clickCategory('task');
 
 		await waitFor(() =>
 			expect(textOf(entry('wm-docs-umbrella'))).toContain(

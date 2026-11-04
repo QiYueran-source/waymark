@@ -7,6 +7,7 @@ import '../src/app.css';
 import Explorer from '$lib/components/Explorer.svelte';
 import type { CombinedTree, GroupedTree } from '$lib/types';
 import { BUG, TASK, deepGroupedTree, hierarchyTree, makeFetch, treeNode } from './fixtures';
+import { clickCategory } from './category-helpers';
 
 type FetchOptions = Parameters<typeof makeFetch>[0];
 
@@ -141,8 +142,8 @@ describe('context nodes', () => {
 		await openGroupedGraph({ trees: { combined: LONG_TREE, grouped: deepGroupedTree } });
 		// Task-only scope: the Docs and Bug ancestors stay to keep the task under
 		// its real parents, and are marked as context rather than selected work.
-		await fireEvent.click(screen.getByTestId('category-option-bug'));
-		await fireEvent.click(screen.getByTestId('category-option-docs'));
+		await clickCategory('bug');
+		await clickCategory('docs');
 		await waitFor(() => expect(card('wm-bug-mid').getAttribute('data-context')).toBe('true'));
 
 		const contextCard = card('wm-bug-mid');

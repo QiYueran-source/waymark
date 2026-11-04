@@ -319,40 +319,106 @@ code {
 	accent-color: var(--accent);
 }
 
-/* Category filter --------------------------------------------------------- */
+/* Category picker --------------------------------------------------------- */
 
 /*
- * The filter sits inside the toolbar between the view switch and the summary.
- * Selected and unselected differ by a filled panel, an ink change, and the
- * button's own accessible name, so nothing reads by colour alone.
+ * One compact control in the toolbar (or in the graph's upper-left cluster): a
+ * "Categories (n)" trigger opening a multi-select popover. The popover is only
+ * mounted while open, so closed it neither covers the drawing nor leaves
+ * options in the accessibility tree.
  */
 
 .category-filter {
-	display: flex;
+	position: relative;
+	display: inline-flex;
 	flex: none;
-	flex-wrap: wrap;
 	align-items: center;
-	gap: 0.35rem 0.5rem;
 	padding-left: 0.85rem;
 	border-left: 1px solid var(--line);
 }
 
-.filter-head {
+/* The graph cluster supplies its own frame; the control needs no divider. */
+.graph-controls .category-filter {
+	padding-left: 0;
+	border-left: 0;
+}
+
+.category-trigger {
 	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
+	min-height: 1.7rem;
+	padding: 0.2rem 0.55rem;
+	border: 1px solid var(--line-strong);
+	border-radius: 4px;
+	background: var(--panel);
+	color: var(--muted);
+	font-size: 0.8rem;
+	transition:
+		background-color 130ms ease,
+		color 130ms ease;
+}
+
+.category-trigger:hover {
+	background: var(--panel-2);
+	color: var(--ink);
+}
+
+.category-trigger[aria-expanded='true'] {
+	background: var(--panel-2);
+	color: var(--ink);
+}
+
+.category-caret {
+	width: 0.5rem;
+	height: 0.35rem;
+	transition: transform 130ms ease;
+}
+
+.category-trigger[aria-expanded='true'] .category-caret {
+	transform: rotate(180deg);
+}
+
+/*
+ * The popover floats over the content, anchored to the trigger. Its options are
+ * a vertical list: a long project scrolls inside the popover rather than
+ * stretching the toolbar or covering the whole canvas.
+ */
+.category-popover {
+	position: absolute;
+	top: calc(100% + 0.35rem);
+	left: 0;
+	z-index: 40;
+	display: flex;
+	flex-direction: column;
+	gap: 0.45rem;
+	width: min(19rem, calc(100vw - 2rem));
+	max-height: min(28rem, 70vh);
+	overflow-y: auto;
+	padding: 0.55rem;
+	background: var(--panel);
+	border: 1px solid var(--line-strong);
+	border-radius: 5px;
+}
+
+.category-search {
+	width: 100%;
+	min-height: 1.8rem;
+	padding: 0.2rem 0.45rem;
+	border: 1px solid var(--line-strong);
+	border-radius: 3px;
+	background: var(--panel-2);
+	color: var(--ink);
+	font-size: 0.8rem;
+}
+
+.category-popover-actions {
+	display: flex;
 	align-items: center;
 	gap: 0.1rem;
 }
 
-.filter-label {
-	margin-right: 0.2rem;
-	color: var(--muted);
-	font-size: 0.72rem;
-	font-weight: 600;
-	letter-spacing: 0.04em;
-	text-transform: uppercase;
-}
-
-.filter-head button {
+.category-popover-actions button {
 	min-height: 1.6rem;
 	padding: 0.16rem 0.4rem;
 	border: 0;
@@ -365,44 +431,53 @@ code {
 		background-color 130ms ease;
 }
 
-.filter-head button:hover:not(:disabled) {
+.category-popover-actions button:hover:not(:disabled) {
 	background: var(--panel-2);
 	color: var(--ink);
 }
 
-.filter-head button:disabled {
+.category-popover-actions button:disabled {
 	opacity: 0.45;
 	cursor: default;
 }
 
+.category-no-match {
+	margin: 0;
+	padding: 0.35rem 0.45rem;
+	color: var(--muted);
+	font-size: 0.8rem;
+}
+
 .filter-options {
-	display: inline-flex;
-	flex-wrap: wrap;
-	align-items: center;
-	gap: 2px;
-	padding: 2px;
-	border: 1px solid var(--line-strong);
-	border-radius: 4px;
-	background: var(--sheet);
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	gap: 1px;
+	padding: 0;
+	border: 0;
+	background: transparent;
 }
 
 .filter-option {
-	display: inline-flex;
+	display: flex;
 	align-items: center;
-	gap: 0.3rem;
-	min-height: 1.6rem;
-	padding: 0.16rem 0.5rem;
+	gap: 0.4rem;
+	width: 100%;
+	min-height: 1.7rem;
+	padding: 0.2rem 0.45rem;
 	border: 0;
-	border-radius: 2px;
+	border-radius: 3px;
 	background: transparent;
 	color: var(--muted);
 	font-size: 0.8rem;
+	text-align: left;
 	transition:
 		background-color 130ms ease,
 		color 130ms ease;
 }
 
 .filter-option:hover {
+	background: var(--panel-2);
 	color: var(--ink);
 }
 
@@ -417,7 +492,7 @@ code {
  * relying on hue.
  */
 .filter-option[aria-pressed='true'] {
-	background: var(--panel);
+	background: var(--panel-2);
 	color: var(--ink);
 	font-weight: 600;
 }
@@ -1026,8 +1101,18 @@ code {
 .graph-controls {
 	display: flex;
 	flex-direction: column;
-	align-items: flex-end;
+	align-items: flex-start;
 	gap: 0.3rem;
+}
+
+/* The category picker, the canvas row, and the future direction control share
+   one floating cluster so the upper-left corner reads as one control area. */
+.graph-controls-cluster {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-start;
+	gap: 0.35rem;
+	max-width: min(42rem, calc(100vw - 2rem));
 }
 
 .graph-controls-row {
