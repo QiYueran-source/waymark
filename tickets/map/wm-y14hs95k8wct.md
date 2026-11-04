@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-04T06:26:33Z
+updated_at: 2026-11-04T06:30:35Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -223,6 +223,11 @@ Codes with no exit class, used as warnings and findings: `OWNER_MISMATCH` (warni
 
 - The proposed direction switch applies to the graph presentation, not the tree list. Retain the existing top-to-bottom layout and offer a left-to-right alternative: parents on the left, children on the right, with items at the same level arranged vertically. The user confirmed the scope on 2026-11-04.
 - This planning discussion aims to settle the direction-switch control, state retention, and behavior across relevant scenarios for a later functional specification. It does not itself implement the feature or update the functional specification or implementation tickets. Confirmed on 2026-11-04.
+
+- In graph presentation, provide a toolbar direction choice between top-to-bottom and left-to-right. Default to top-to-bottom on first use. Do not show the direction control in tree presentation. Confirmed on 2026-11-04.
+- One browser-local direction preference per project applies to both combined and category-grouped graph modes; restore it on refresh or reopening the same project, without affecting other projects. Confirmed on 2026-11-04.
+- Switching direction changes layout only: preserve the category selection, selected work item and open detail panel, graph expansion/collapse state, and dependency-visibility choice. Existing planned graph features remain governed by their own design; this decision does not claim they are implemented. Confirmed on 2026-11-04.
+- After switching directions, automatically fit the currently visible graph to the canvas so the overview is visible again; users may subsequently pan and zoom. Confirmed on 2026-11-04.
 
 ### Reopened decisions: Web, MCP, and distribution
 
