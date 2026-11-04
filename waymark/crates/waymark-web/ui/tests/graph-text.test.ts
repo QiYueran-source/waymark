@@ -212,6 +212,27 @@ describe('parity with the graph', () => {
 		).toEqual(['wm-docs-umbrella', 'wm-bug-mid', 'wm-bug-sibling']);
 	});
 
+	it('says which items are only context for the selection, in words', async () => {
+		await renderLoaded({ trees: { combined: combinedTree, grouped: deepGroupedTree } });
+		await fireEvent.click(screen.getByLabelText('By category'));
+		await screen.findByTestId('category-filter');
+		await fireEvent.click(screen.getByLabelText('Graph'));
+		await fireEvent.click(screen.getByLabelText('Structured list'));
+		await screen.findByTestId('graph-text');
+		// Keep Tasks only: the Docs and Bug ancestors stay to preserve parentage,
+		// and the alternative says so rather than implying they are selected.
+		await fireEvent.click(screen.getByRole('button', { name: 'Clear all categories' }));
+		await fireEvent.click(screen.getByTestId('category-option-task'));
+
+		await waitFor(() =>
+			expect(textOf(entry('wm-docs-umbrella'))).toContain(
+				'Context: outside the category selection'
+			)
+		);
+		expect(textOf(entry('wm-bug-mid'))).toContain('Context: outside the category selection');
+		expect(textOf(entry('wm-task-leaf'))).not.toContain('Context:');
+	});
+
 	it('is built from the graph’s model, so it can never show an item the drawing hides', async () => {
 		await openAlternative({ trees: { combined: hierarchyTree } });
 		const fromAlternative = entries().map((element) => element.dataset.nodeId);

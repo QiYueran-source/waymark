@@ -121,6 +121,12 @@
 						</ul>
 					{/if}
 
+					{#if entry.contextNote}
+						<p class="graph-text-context" data-testid={`graph-text-context-${entry.id}`}>
+							{entry.contextNote}
+						</p>
+					{/if}
+
 					{#if entry.blockedReason}
 						<p class="graph-text-reason" data-testid={`graph-text-blocked-reason-${entry.id}`}>
 							Blocked: {entry.blockedReason}

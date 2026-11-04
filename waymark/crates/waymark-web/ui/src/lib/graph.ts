@@ -38,6 +38,13 @@ export interface GraphNode {
 	state: WorkState;
 	blocked: boolean;
 	blockedReason: string | null;
+	/**
+	 * Kept only to preserve parentage under the current category scope: the
+	 * item's own category is outside the selection, and selected work sits below
+	 * it. It is not selected work, so the card and its accessible name say so —
+	 * with the same wording the tree uses.
+	 */
+	context: boolean;
 	/** The displayed parent, or null when this node is a root of its section. */
 	parentId: string | null;
 	/** 0 for a root; one more than the parent's depth below it. */
@@ -92,13 +99,27 @@ export interface WorkGraph {
 	unresolved: UnresolvedItem[];
 }
 
+const EMPTY_CONTEXT: ReadonlySet<string> = new Set();
+
 /** What the payload asks the drawing to include beyond the hierarchy. */
 export interface BuildGraphOptions {
 	/** Draw the dashed dependency overlay. Off unless asked for. */
 	dependenciesVisible?: boolean;
+	/**
+	 * Ids the filtered payload kept only to preserve parentage. They are the
+	 * by-category tree's `contextIds`, handed over unchanged so the two
+	 * presentations cannot disagree about what is context. Defaults to none,
+	 * which is what an unfiltered payload needs.
+	 */
+	contextIds?: ReadonlySet<string>;
 }
 
-function toGraphNode(node: TreeNode, parentId: string | null, depth: number): GraphNode {
+function toGraphNode(
+	node: TreeNode,
+	parentId: string | null,
+	depth: number,
+	contextIds: ReadonlySet<string>
+): GraphNode {
 	return {
 		id: node.id,
 		title: node.title,
@@ -108,6 +129,7 @@ function toGraphNode(node: TreeNode, parentId: string | null, depth: number): Gr
 		state: node.state,
 		blocked: node.blocked,
 		blockedReason: node.blocked_reason,
+		context: contextIds.has(node.id),
 		parentId,
 		depth,
 		hasChildren: node.children.length > 0,
@@ -135,11 +157,12 @@ export function buildGraph(data: TreeData, options: BuildGraphOptions = {}): Wor
 	const edges: GraphEdge[] = [];
 	const roots: string[] = [];
 	const seen = new Set<string>();
+	const contextIds = options.contextIds ?? EMPTY_CONTEXT;
 
 	const walk = (tree: TreeNode, parentId: string | null, depth: number): void => {
 		if (seen.has(tree.id)) return;
 		seen.add(tree.id);
-		nodes.push(toGraphNode(tree, parentId, depth));
+		nodes.push(toGraphNode(tree, parentId, depth, contextIds));
 		if (parentId !== null) {
 			edges.push({
 				id: `${parentId}->${tree.id}`,
@@ -207,9 +230,17 @@ export interface GraphNodePayload extends Record<string, unknown> {
 	onSelect: (id: string, trigger?: HTMLElement) => void;
 }
 
-/** The accessible name of one graph node: title, category, and state. */
+/**
+ * The wording that marks an item kept only for its place in a filtered
+ * hierarchy. It is the tree's phrase, word for word, so a reader who switches
+ * presentation hears the same thing about the same item.
+ */
+export const CONTEXT_NOTE = 'context, outside the selection';
+
+/** The accessible name of one graph node: title, category, state, and context. */
 export function graphNodeLabel(node: GraphNode): string {
-	return `${node.title} — ${node.category.name}, ${stateLabel(node.state)}`;
+	const name = `${node.title} — ${node.category.name}, ${stateLabel(node.state)}`;
+	return node.context ? `${name} (${CONTEXT_NOTE})` : name;
 }
 
 /**
@@ -258,6 +289,14 @@ export interface OutlineItemEntry {
 	/** "… depends on this item." for each edge that points here. */
 	dependents: string[];
 	blockedReason: string | null;
+	/**
+	 * True when the item is only kept to preserve parentage under the current
+	 * category scope. The outline says so in words, exactly as the card and the
+	 * tree row do, so the filter's context rule survives without a badge.
+	 */
+	context: boolean;
+	/** "Context: …" when `context` is true, otherwise null. */
+	contextNote: string | null;
 }
 
 /** One unresolved item, with the reason its parent cannot be reached. */
@@ -339,7 +378,11 @@ export function graphOutline(graph: WorkGraph): OutlineEntry[] {
 				const dependent = byId.get(edge.from);
 				return `${dependent?.title ?? edge.from} (${edge.from}) depends on this item.`;
 			}),
-			blockedReason: node.blocked ? node.blockedReason : null
+			blockedReason: node.blocked ? node.blockedReason : null,
+			context: node.context,
+			contextNote: node.context
+				? `Context: outside the category selection (${CONTEXT_NOTE}).`
+				: null
 		};
 	});
 

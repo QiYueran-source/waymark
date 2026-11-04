@@ -2614,3 +2614,31 @@ geometry makes the drawing deterministic and lets the suite assert real edge ele
   (`<projectId>:graphAlternative`), so it cannot collide with `presentation`, the graph collapse set,
   or the viewport. It is offered only while the graph is the presentation, and the drawing is the
   default because the alternative is an explicit choice.
+
+## Category context in the graph, beside the tree's own rule
+
+- **One filter, two renderers.** `Explorer` still derives the grouped payload once via `filterGroups`
+  and hands `groups` to both presentations. The graph adds no second filter: `buildGraph` receives the
+  tree's own `contextIds` through `BuildGraphOptions.contextIds` and copies it onto each node as
+  `GraphNode.context`. The flag is data, so a context node is testable in `graph.ts` without mounting
+  a component, and the two presentations cannot disagree about which rows are context.
+- **Non-promotion is the filter's, not the graph's.** A selected item under an unselected parent keeps
+  the parent chain `filterGroups` built, so its `parentId` and `depth` are its real ones and the
+  ancestor remains a root. The graph never re-parents and never invents a root for the kept chain.
+- **The marking is worded once.** `CONTEXT_NOTE` in `graph.ts` is the tree's phrase
+  (`context, outside the selection`). The card shows it as visible text in a `context-marker` badge
+  (`aria-hidden`, because the title's accessible name already carries it), gives the node
+  `data-context="true"`, and hatches the card with a dashed state stripe — the same three cues the tree
+  row uses, so the distinction survives greyscale and colour-blindness. `graphNodeLabel` appends
+  `(<context note>)` for the node wrapper's accessible name.
+- **The summary counts selected work only.** It stays `summarizeCounts(scopedGroups.counts, …)`, whose
+  counts exclude context rows; the graph has no summary of its own.
+- **Two empty filtered states, one recovery.** `filtered-empty-state` carries
+  `data-empty-kind="categories-cleared"` when the reader selected nothing and `"no-active-work"` when
+  the selected categories are merely quiet; both carry a `select-all-from-empty` button so the pane is
+  never a dead end, in addition to the toolbar's `Select all`.
+- **Unresolved and archive are asserted, not re-derived.** The UI never filters archived items or
+  unresolved ones out of the graph: the server's payload already omits archived items (so no node,
+  dependency edge, or placeholder can exist for one) and `graph.unresolved` is passed through to the
+  existing list, with no synthetic parent and no promotion to a root. The tests assert that property
+  rather than duplicating the server rule.

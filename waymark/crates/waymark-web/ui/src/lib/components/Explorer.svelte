@@ -109,6 +109,8 @@
 	const isEmpty = $derived(
 		!loadingTree && readFailure === null && treeData !== null && !hasWork && unresolved.length === 0
 	);
+	/** The reader explicitly selected nothing; the filter restored in one click. */
+	const noCategorySelected = $derived(categories.length > 0 && selectedCategories.size === 0);
 	/** The project has work, but none of it is in the categories in scope. */
 	const isFilteredEmpty = $derived(
 		!loadingTree &&
@@ -144,7 +146,15 @@
 	 * at all, and switching it on costs no read.
 	 */
 	const workGraph = $derived(
-		graphData === null ? null : buildGraph(graphData, { dependenciesVisible })
+		graphData === null
+			? null
+			: buildGraph(graphData, {
+					dependenciesVisible,
+					// The same ids the tree marks, so a kept ancestor reads as context
+					// in both presentations. The combined view filters nothing, so its
+					// set is empty and every node stays ordinary work.
+					contextIds
+				})
 	);
 
 	/**
@@ -502,13 +512,36 @@
 					</p>
 				</div>
 			{:else if isFilteredEmpty}
-				<div class="empty" data-testid="filtered-empty-state">
-					<h2>Nothing in the selected categories</h2>
-					<p>
-						The by-category view shows only the categories you select, and none of the
-						selected ones has active work right now. Use Select all above to see every
-						category again.
-					</p>
+				<!-- Two ways to reach an empty filtered pane — every category cleared,
+				     or selected categories that hold no active work — and one recovery
+				     for both, repeated where the reader is looking. -->
+				<div
+					class="empty"
+					data-testid="filtered-empty-state"
+					data-empty-kind={noCategorySelected ? 'categories-cleared' : 'no-active-work'}
+				>
+					{#if noCategorySelected}
+						<h2>No categories selected</h2>
+						<p>
+							The by-category {presentation === 'graph' ? 'graph' : 'view'} shows only the
+							categories you select, and none is selected right now.
+						</p>
+					{:else}
+						<h2>Nothing in the selected categories</h2>
+						<p>
+							The by-category {presentation === 'graph' ? 'graph' : 'view'} shows only the
+							categories you select, and none of the selected ones has active work right
+							now.
+						</p>
+					{/if}
+					<button
+						class="empty-action"
+						type="button"
+						data-testid="select-all-from-empty"
+						onclick={selectAllCategories}
+					>
+						Select all categories
+					</button>
 				</div>
 			{:else if treeData}
 				{#if readingAlternative && workGraph}

@@ -267,6 +267,34 @@ export const dependencyTree: CombinedTree = {
 	categories: [BUG, TASK]
 };
 
+/**
+ * Two unrelated roots joined only by a dependency, one per category:
+ *
+ * - `wm-scope-task` (Tasks) depends on `wm-scope-bug` (Bugs) across categories;
+ * - it also depends on `wm-scope-archived`, which the payload does not draw.
+ *
+ * A task-only scope therefore leaves the dependent drawn with neither target,
+ * so both the filtered-out edge and the archived one must disappear.
+ */
+const scopeBug = treeNode({ id: 'wm-scope-bug', title: 'Scoped bug', category: BUG });
+
+const scopeTask = treeNode({
+	id: 'wm-scope-task',
+	title: 'Scoped task',
+	category: TASK,
+	dependencies: ['wm-scope-bug', 'wm-scope-archived']
+});
+
+export const groupedDependencyTree: GroupedTree = {
+	view: 'grouped',
+	groups: [
+		{ category: BUG, roots: [scopeBug] },
+		{ category: TASK, roots: [scopeTask] }
+	],
+	unresolved: [],
+	categories: [BUG, TASK]
+};
+
 export const groupedTree: GroupedTree = {
 	view: 'grouped',
 	groups: [
@@ -304,6 +332,39 @@ export const unresolvedTree: CombinedTree = {
 			category: TASK,
 			parent: 'wm-missing',
 			reason: 'parent_missing'
+		}
+	],
+	categories: [BUG, TASK]
+};
+
+/**
+ * Both unresolved kinds at once: a missing parent and a two-item parent cycle.
+ * None of them may become a root, and no synthetic parent is invented for them.
+ */
+export const unresolvedReasonsTree: CombinedTree = {
+	view: 'combined',
+	roots: [bugRoot],
+	unresolved: [
+		{
+			id: 'wm-orphan',
+			title: 'Orphaned work',
+			category: TASK,
+			parent: 'wm-missing',
+			reason: 'parent_missing'
+		},
+		{
+			id: 'wm-cycle-a',
+			title: 'Cycle member A',
+			category: TASK,
+			parent: 'wm-cycle-b',
+			reason: 'parent_cycle'
+		},
+		{
+			id: 'wm-cycle-b',
+			title: 'Cycle member B',
+			category: BUG,
+			parent: 'wm-cycle-a',
+			reason: 'parent_cycle'
 		}
 	],
 	categories: [BUG, TASK]
