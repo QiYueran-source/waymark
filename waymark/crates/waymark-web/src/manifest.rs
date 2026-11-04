@@ -147,7 +147,8 @@ impl std::fmt::Display for ManifestError {
             Self::ManifestUnreadable { path, message } => write!(
                 formatter,
                 "could not read the provenance manifest at {}: {message}.\n\
-                 Generate it after the frontend build: waymark-web-manifest.",
+                 Build the frontend first (npm ci && npm run build), then generate \
+                 the manifest: waymark-web-manifest.",
                 path.display()
             ),
             Self::ManifestInvalid { message } => write!(formatter, "{message}"),
@@ -668,6 +669,20 @@ mod tests {
         let error = read_build_id(dir.path()).expect_err("no build id is a failure");
         assert!(matches!(error, ManifestError::BuildIdMissing { .. }));
         assert!(error.to_string().contains("npm run build"));
+    }
+
+    #[test]
+    fn verify_build_id_accepts_the_tree_it_describes_and_rejects_another() {
+        let dir = tree();
+        fs::write(dir.path().join("build-id.txt"), "build-42\n").expect("a build id is written");
+        let manifest =
+            build_manifest(dir.path(), "0.1.0", None, "build-42").expect("a manifest is built");
+        verify_build_id(dir.path(), &manifest).expect("the ids agree");
+
+        fs::write(dir.path().join("build-id.txt"), "build-43\n").expect("the id changes");
+        let error = verify_build_id(dir.path(), &manifest)
+            .expect_err("a changed build id must not match the manifest");
+        assert!(matches!(error, ManifestError::BuildIdMismatch { .. }));
     }
 
     #[test]
