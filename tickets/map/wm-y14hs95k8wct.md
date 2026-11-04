@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-04T12:34:12Z
+updated_at: 2026-11-04T12:35:23Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -249,7 +249,7 @@ The following are the user's requested directions for the existing Web page. The
 - Graph canvas: the user wants to avoid the small framed graph area and let the graph display across the available canvas instead. This concerns usable area, not merely the visual border; the precise relationship to global controls, details, and unresolved content remains open.
 - Project categories and controls: category options such as Implement, Map, and Spec are project-defined and may be numerous, so they should not occupy the page's top toolbar as a fixed set of inline options. The user proposed placing category selection together with zoom and other graph controls at the upper left of the canvas, with the relationship legend at the upper right. The scalable selector design and behavior outside the graphical presentation remain open.
 - Messages: the user requested that warnings, errors, and notices, including the case where no category is selected, be considered for centered presentation. Which message types should be centered, and how non-blocking warnings or lengthy diagnostics behave, remains open.
-- Relationship lines: the user observed sibling nodes connected not only by dashed arrows but also by solid lines with no arrow, one arrow, or two arrows, without clear annotation, and asked for an analysis. The current source defines solid parent-child lines and optional dashed dependency arrows, with an existing two-entry legend. A parent-child and dependency edge may both exist for the same pair, but overlap is only a hypothesis for the observed appearance, not a verified explanation; the screenshot or equivalent reproduction and the cause of one- and two-arrow solid appearances remain to be verified before assigning semantics or adding annotations. Verified on 2026-11-04; see Verified graph edge behavior below. The rendering decision remains open.
+- Relationship lines: the user observed sibling nodes connected not only by dashed arrows but also by solid lines with no arrow, one arrow, or two arrows, without clear annotation, and asked for an analysis. The current source defines solid parent-child lines and optional dashed dependency arrows, with an existing two-entry legend. A parent-child and dependency edge may both exist for the same pair, but overlap is only a hypothesis for the observed appearance, not a verified explanation; the screenshot or equivalent reproduction and the cause of one- and two-arrow solid appearances remain to be verified before assigning semantics or adding annotations. Verified on 2026-11-04; see Verified graph edge behavior below. Resolved on 2026-11-04; see Relationship line rendering below.
 
 ### Verified graph edge behavior
 
@@ -263,6 +263,7 @@ Investigated on 2026-11-04 against the real project payload and a synthetic over
 - At the default fit for a large project (about 11%), a 6/4 dash is sub-pixel, so even an isolated dependency edge looks solid. Low zoom is an independent cause.
 - Duplicate dependency entries collapse to one rendered edge; soft links are not drawn.
 - The graph currently offers no annotation for overlapping or coincident edges: the legend has only the two edge-kind entries, and there is no hover label, edge count, or per-edge identification. The reported double-arrow and solid-line appearances therefore have no on-screen explanation.
+The Relationship line rendering decision below addresses this.
 
 ### Resolved Web page optimization
 
@@ -306,6 +307,16 @@ Confirmed by the user on 2026-11-04. These extend the accepted Web specification
 - Expansion actions are presentation-scoped: tree presentation shows the tree's Expand all/Collapse all; graph presentation shows graph-wide Expand all/Collapse all in the graph's control area. Neither changes the other presentation's state.
 - The structured text alternative mirrors the graph's visible model. A collapsed branch appears as a "Collapsed — N children" row with its own expand control; the alternative also offers "Show all", so a keyboard or screen-reader user can expand a branch collapsed in the graph.
 
+#### Relationship line rendering
+
+- Dependency edges keep a minimum on-screen dash and gap, so a single dependency is visibly dashed at every zoom level; the dash pattern is not allowed to collapse into a solid line at the default fit.
+- Dependency edges use a clearly different colour and/or weight from parent-child edges in addition to the dash; no distinction relies on colour alone.
+- Hovering an edge raises and thickens it and shows its relation label, for example "X → Y (depends on)". The structured text alternative remains the keyboard and screen-reader route to the same relations.
+- Where several dependencies share a visual gap, the interface identifies how many pass through it and lets the reader inspect them; dependencies are not aggregated into one line by default.
+- When a parent-child edge and a dependency edge coincide on the same pair, the dependency is offset or given a halo so both remain visible.
+- The legend keeps its two entries and adds a hint that hovering an edge identifies it.
+- Aggregating same-row dependencies by default, hiding or fading dependencies at low zoom, and annotation-only treatment were rejected: the first two change what the overview means, and the last leaves the visual confusion in place.
+
 #### Messages
 
 - Centered states are the blocking and empty ones: no category selected, selected categories with no active work, an empty project, a read failure, and a detail-load failure (centered within the detail panel).
@@ -337,10 +348,6 @@ The following decisions extend the accepted specification. The Web implementatio
 - Create a separate Wayfinder map for Waymark build, packaging and distribution, covering basic/Web variants, source installation, prebuilt packages, frontend assets, version verification and release workflow. Consult Clove's build, packaging and distribution as prior art while retaining Waymark's decisions and scope; do not copy its fallback behavior blindly. The effort leads to its own specification and implementation tickets once decisions are ready. Web UI and MCP business behavior are outside that map. The present T12 design is synchronized to the existing specification and T12 ticket. Defer the distribution map and its implementation for now and prioritize Waymark's core and interfaces; revisit distribution separately when it becomes necessary.
 
 ## Not yet specified
-
-### Web page optimization: not yet specified
-
-- How to render overlapping same-row dependencies, coincident parent-child and dependency pairs, and dependency dashes at low zoom, now that the causes are verified.
 
 ### Web, MCP, and distribution follow-up
 
