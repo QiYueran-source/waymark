@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-04T02:15:18Z
+updated_at: 2026-11-04T02:23:38Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -212,7 +212,7 @@ Codes with no exit class, used as warnings and findings: `OWNER_MISMATCH` (warni
 - Provide the DSH sidebar plugin first. Do not implement a VS Code or Cursor plugin in this effort; Cursor is expected to reuse the VS Code extension approach if those hosts are addressed later. Consider future host integration in the design without promising compatibility that has not been verified. These decisions were confirmed by the user on 2026-11-04.
 - The DSH view is a right-sidebar tab associated with an active session, so it can be used alongside the conversation. The right sidebar is unavailable without an active session.
 - The sidebar follows the DSH session’s original workspace directory to discover the corresponding Waymark project rather than maintaining a separate project list. For example, if a session starts in project A and the agent later changes its working directory to project B, the sidebar remains on A; switching to a session rooted in B changes the sidebar context to B. Temporary working-directory changes do not select a different project. If no Waymark project is found, explain the condition without automatically initializing one.
-- When the sidebar is visible, changes made outside it, including an agent closing a work item via MCP, should appear automatically without reopening the tab. If an update fails, report the failure and offer retry; retained old data must not be presented as current. The update mechanism and exact timing remain open.
+- The initial sidebar does not add automatic refresh when work items change externally, such as an agent closing an item via MCP. This supersedes the previous automatic-update decision: the existing Web does not currently implement automatic updates. Whether to provide an explicit refresh action and what state it preserves remain open. Confirmed by the user on 2026-11-04.
 - The initial sidebar adds no DSH-specific action to send a work item to the conversation. It remains a read-only browser; conversation integration may be considered later. These decisions were confirmed by the user on 2026-11-04.
 - Initial DSH sidebar support targets the DSH server and browser running on the same machine. Supporting a remote browser requires separate future work and a security-reviewed access design. These decisions were confirmed by the user on 2026-11-04.
 - For this planning effort, do not add project-wide tracker fields just to distinguish decision-ticket type or claim state; the user does not need that distinction for now. Keep work items in Waymark and use its native parent and dependency relations.
