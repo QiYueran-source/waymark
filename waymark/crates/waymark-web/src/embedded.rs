@@ -34,3 +34,10 @@ pub(crate) fn asset(path: &str) -> Option<&'static [u8]> {
         .find(|file| file.path == path)
         .map(|file| file.gzip)
 }
+
+/// The uncompressed `index.html` bytes this build embeds, for the provenance
+/// check. `build.rs` keeps the raw copy beside the gzip table so the check never
+/// needs a runtime decompressor.
+pub(crate) fn index_html() -> Option<&'static [u8]> {
+    INDEX_HTML
+}

@@ -43,6 +43,7 @@ const FINDING_ONLY: &[Code] = &[
     Code::NotAGitRepository,
     Code::DanglingReference,
     Code::TimestampIncoherent,
+    Code::AssetsVersionMismatch,
 ];
 
 fn row(code: Code) -> Value {
@@ -209,8 +210,22 @@ fn the_distribution_codes_are_registered_and_classified() {
     );
     assert_eq!(
         Code::ALL.len(),
-        40,
-        "the registry grew by exactly two codes"
+        41,
+        "the registry grew by exactly three codes"
+    );
+}
+
+#[test]
+fn assets_version_mismatch_is_a_non_fixable_error_finding() {
+    let code =
+        Code::from_str("ASSETS_VERSION_MISMATCH").expect("ASSETS_VERSION_MISMATCH is registered");
+    assert_eq!(code.exit_class(), None, "a finding never fails a command");
+    assert!(!code.retryable());
+    assert_eq!(code.finding(), Some(Severity::Error));
+    assert_eq!(code.details_keys(), ["kind", "expected", "actual"]);
+    assert!(
+        code.location_kinds().is_empty(),
+        "a build's provenance is not a document location"
     );
 }
 
@@ -289,6 +304,7 @@ fn the_finding_only_codes_keep_their_pinned_severity() {
         (Code::NotAGitRepository, Severity::Info),
         (Code::DanglingReference, Severity::Error),
         (Code::TimestampIncoherent, Severity::Warning),
+        (Code::AssetsVersionMismatch, Severity::Error),
     ];
     for (code, severity) in expected {
         assert_eq!(code.finding(), Some(severity), "{}", code.as_str());

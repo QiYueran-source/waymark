@@ -240,6 +240,10 @@ fn every_typed_constructor_fills_exactly_the_registered_details_keys() {
                 "before created_at",
             ),
         ),
+        (
+            "assets_version_mismatch",
+            WaymarkError::assets_version_mismatch("version", "0.1.0", "0.2.0"),
+        ),
     ];
 
     let mut seen: Vec<Code> = Vec::new();

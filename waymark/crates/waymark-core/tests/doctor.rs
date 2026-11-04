@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use waymark_core::config::{Category, Config, FieldDecl, FieldType};
-use waymark_core::envelope::Completeness;
+use waymark_core::envelope::{Completeness, Finding, Meta};
 use waymark_core::error::{Code, ExitClass, Severity};
 use waymark_core::model::{CategoryKey, FieldKey, FieldValue, WorkItem, FORMAT_GENERATION};
 use waymark_core::ops::create::{self, CreateRequest};
@@ -794,6 +794,34 @@ fn walk(directory: &Utf8Path, files: &mut BTreeMap<Utf8PathBuf, Vec<u8>>) {
             files.insert(path.clone(), std::fs::read(&path).unwrap());
         }
     }
+}
+
+/// An adapter may attach one more finding through the report it already has;
+/// the counts and the strict exit follow from the finding's registry severity.
+#[test]
+fn an_attached_adapter_finding_updates_the_counts_and_the_strict_exit() {
+    let mut report = doctor::Report::new(
+        Vec::new(),
+        true,
+        &["assets"],
+        Vec::new(),
+        Meta::direct_file_scoped(),
+    );
+    assert_eq!(report.exit_class(), None);
+
+    report.push_finding(Finding::new(
+        Code::AssetsVersionMismatch,
+        "the embedded manifest does not match",
+    ));
+
+    assert_eq!(report.findings.len(), 1);
+    assert_eq!(report.counts.errors, 1);
+    assert_eq!(report.counts.total(), 1);
+    assert_eq!(
+        report.exit_class(),
+        Some(ExitClass::InvalidInput),
+        "an error-severity finding makes a strict report unhealthy"
+    );
 }
 
 /// `diagnose_from` owns the project-root derivation and maps a broken
