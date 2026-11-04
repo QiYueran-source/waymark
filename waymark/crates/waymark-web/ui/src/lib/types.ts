@@ -136,6 +136,24 @@ export interface ItemDetail {
 	relationships: ItemRelationships;
 }
 
+/**
+ * Why an unresolved item is not in the hierarchy, in the words the UI shows.
+ *
+ * The server names the case; the wording belongs to the app. It lives here,
+ * beside the other value-to-label helpers, so the unresolved-relations list and
+ * the graph's text alternative state a reason identically.
+ */
+export function unresolvedReason(item: UnresolvedItem): string {
+	switch (item.reason) {
+		case 'parent_missing':
+			return `its parent ${item.parent} is missing`;
+		case 'parent_archived':
+			return `its parent ${item.parent} is archived`;
+		case 'parent_cycle':
+			return `its parent ${item.parent} forms a cycle`;
+	}
+}
+
 /** The shape index resolved against the fixed vocabulary. */
 export function shapeFor(category: Category): ShapeName {
 	const index = Number.isFinite(category.shape) ? Math.abs(Math.trunc(category.shape)) : 0;

@@ -19,6 +19,7 @@ import {
 	shapeFor,
 	stateLabel,
 	statusLabel,
+	unresolvedReason,
 	type Category,
 	type ShapeName,
 	type TreeData,
@@ -309,22 +310,6 @@ export interface OutlineUnresolvedEntry {
 }
 
 export type OutlineEntry = OutlineItemEntry | OutlineUnresolvedEntry;
-
-/**
- * The reason an unresolved item is not in the hierarchy, in the same words the
- * unresolved-relations area uses. The server names the case; the wording is the
- * app's, and it lives here so both lists state it identically.
- */
-export function unresolvedReason(item: UnresolvedItem): string {
-	switch (item.reason) {
-		case 'parent_missing':
-			return `its parent ${item.parent} is missing`;
-		case 'parent_archived':
-			return `its parent ${item.parent} is archived`;
-		case 'parent_cycle':
-			return `its parent ${item.parent} forms a cycle`;
-	}
-}
 
 /**
  * The structured text alternative to the graph, as a flat, ordered outline.

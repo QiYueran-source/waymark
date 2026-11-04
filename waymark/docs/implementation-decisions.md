@@ -2594,8 +2594,11 @@ geometry makes the drawing deterministic and lets the suite assert real edge ele
   the *same* `WorkGraph` the drawing renders into an ordered outline, and
   `GraphText.svelte` renders it without the graph library. Category scope, collapse, and the
   dependency overlay therefore cannot diverge between the two views: there is nothing to keep in
-  step. `Explorer` reuses its single `workGraph` derivation for both and only builds the outline while
-  the alternative is on.
+  step. `Explorer` derives one `visibleGraph` — the filtered model today, and the filtered *and
+  collapsed* model once the graph's density control lands — and hands the same value to `GraphView`
+  and `graphOutline`; `collapseGraph(graph, collapsed)` is the pure helper that view applies. The
+  outline is only built while the alternative is on, and the alternative has no collapse control of
+  its own: it follows the drawing's.
 - **Relations are words, not geometry.** Each item entry carries `parent` (`"Parent: …"`, or
   `"Parent: none; this is a top-level item."`), `children` (`"Child: <title> (<id>)."`),
   `dependencies` (`"Depends on <title> (<id>)."`) and `dependents` (`"<title> (<id>) depends on this
@@ -2608,8 +2611,9 @@ geometry makes the drawing deterministic and lets the suite assert real edge ele
 - **Selection is the existing path.** Each entry's title is a real `<button
   data-testid="graph-text-select-<id>">` with `aria-current` while selected and an accessible name of
   `"<title> — <category>, <state>"`; it passes itself to `Explorer.selectItem`, so the same detail
-  panel opens and `closeDetail` returns focus to the same button. Collapse/expand remains a drawing
-  control; the alternative follows the collapsed model rather than offering a second collapse UI.
+  panel opens and `closeDetail` returns focus to the same button. A context ancestor — kept only to
+  preserve parentage under the category scope — says so in words (`Context: outside the category
+  selection …`), from `GraphNode.context`, so the filter's rule survives without a badge.
 - **Persistence.** The choice is one boolean per project, on its own key
   (`<projectId>:graphAlternative`), so it cannot collide with `presentation`, the graph collapse set,
   or the viewport. It is offered only while the graph is the presentation, and the drawing is the
