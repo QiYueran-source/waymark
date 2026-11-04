@@ -43,6 +43,8 @@ describe('project identifier', () => {
 		const namespace = projectIdFor('/projects/alpha');
 		expect(preferenceKey(namespace, 'view')).toBe(`${namespace}:view`);
 		expect(preferenceKey(namespace, 'expanded', 'grouped')).toBe(`${namespace}:expanded:grouped`);
+		// The presentation is one choice per project, independent of the tree view.
+		expect(preferenceKey(namespace, 'presentation')).toBe(`${namespace}:presentation`);
 		// The category scope belongs to the project, not to one tree view: the
 		// grouped tree and the graph filter by the same selection.
 		expect(preferenceKey(namespace, 'categories')).toBe(`${namespace}:categories`);
@@ -59,9 +61,10 @@ describe('project identifier', () => {
 });
 
 describe('PreferenceStore', () => {
-	it('defaults to the combined view, everything expanded, and no overlay', () => {
+	it('defaults to the combined view, everything expanded, no overlay, and the tree presentation', () => {
 		const store = new PreferenceStore(memoryStorage(), projectIdFor('/projects/alpha'));
 		expect(store.readView()).toBe('combined');
+		expect(store.readPresentation()).toBe('tree');
 		expect(store.readExpanded('combined')).toBeNull();
 		expect(store.readDependencies('combined')).toBe(false);
 		expect(store.readScroll('combined')).toBe(0);
@@ -73,6 +76,7 @@ describe('PreferenceStore', () => {
 		const storage = memoryStorage();
 		const store = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
 		store.writeView('grouped');
+		store.writePresentation('graph');
 		store.writeExpanded('combined', ['a', 'b']);
 		store.writeDependencies('combined', true);
 		store.writeScroll('combined', 321.6);
@@ -80,6 +84,7 @@ describe('PreferenceStore', () => {
 
 		const reopened = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
 		expect(reopened.readView()).toBe('grouped');
+		expect(reopened.readPresentation()).toBe('graph');
 		expect(reopened.readExpanded('combined')).toEqual(['a', 'b']);
 		expect(reopened.readExpanded('grouped')).toBeNull();
 		expect(reopened.readDependencies('combined')).toBe(true);
@@ -87,6 +92,22 @@ describe('PreferenceStore', () => {
 		expect(reopened.readScroll('combined')).toBe(322);
 		expect(reopened.readCategories()).toEqual(['bug', 'task']);
 		expect(reopened.failed).toBe(false);
+	});
+
+	it('keeps the presentation independent of the tree view', () => {
+		const storage = memoryStorage();
+		const store = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+		store.writeView('grouped');
+		store.writePresentation('graph');
+
+		const reopened = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+		// The tree view preference is still `grouped`, still stored under its own
+		// key, and switching views later does not touch the presentation.
+		expect(reopened.readView()).toBe('grouped');
+		reopened.writeView('combined');
+		expect(reopened.readView()).toBe('combined');
+		expect(reopened.readPresentation()).toBe('graph');
+		expect(storage.getItem(preferenceKey(store.projectId, 'presentation'))).toBe('graph');
 	});
 
 	it('remembers an empty category selection as a real choice', () => {
@@ -103,10 +124,12 @@ describe('PreferenceStore', () => {
 		const alpha = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
 		const beta = new PreferenceStore(storage, projectIdFor('/projects/beta'));
 		alpha.writeView('grouped');
+		alpha.writePresentation('graph');
 		alpha.writeDependencies('combined', true);
 		alpha.writeCategories(['bug']);
 
 		expect(beta.readView()).toBe('combined');
+		expect(beta.readPresentation()).toBe('tree');
 		expect(beta.readDependencies('combined')).toBe(false);
 		expect(beta.readCategories()).toBeNull();
 		expect(alpha.projectId).not.toBe(beta.projectId);
@@ -116,10 +139,12 @@ describe('PreferenceStore', () => {
 		const storage = memoryStorage();
 		const store = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
 		storage.setItem(preferenceKey(store.projectId, 'view'), 'sideways');
+		storage.setItem(preferenceKey(store.projectId, 'presentation'), 'diagram');
 		storage.setItem(preferenceKey(store.projectId, 'expanded', 'combined'), '{not json');
 		storage.setItem(preferenceKey(store.projectId, 'scroll', 'combined'), '-4');
 		storage.setItem(preferenceKey(store.projectId, 'categories'), '{"bug":true}');
 		expect(store.readView()).toBe('combined');
+		expect(store.readPresentation()).toBe('tree');
 		expect(store.readExpanded('combined')).toBeNull();
 		expect(store.readScroll('combined')).toBe(0);
 		expect(store.readCategories()).toBeNull();
@@ -138,8 +163,10 @@ describe('PreferenceStore', () => {
 		const store = new PreferenceStore(null, projectIdFor('/projects/alpha'));
 		expect(store.failed).toBe(true);
 		expect(store.readView()).toBe('combined');
+		expect(store.readPresentation()).toBe('tree');
 		expect(store.readCategories()).toBeNull();
 		expect(() => store.writeView('grouped')).not.toThrow();
+		expect(() => store.writePresentation('graph')).not.toThrow();
 		expect(() => store.writeCategories(['bug'])).not.toThrow();
 		expect(store.readView()).toBe('combined');
 		expect(store.readCategories()).toBeNull();

@@ -2405,8 +2405,9 @@ takes the `ArchiveRange` and `Projection` explicitly because those are caller ch
 exact version (no `^`, no `~`) in `crates/waymark-web/ui/package.json` and in
 `crates/waymark-web/ui/package-lock.json`, so `npm ci` resolves them from the lockfile alone. They sit
 in `devDependencies` beside every other UI input (the SPA is bundled at build time and served as
-static files, so this project has no runtime `dependencies` list). Neither package is imported by
-`ui/src` yet; the ticket that builds the view imports them.
+static files, so this project has no runtime `dependencies` list). Only
+`ui/src/lib/components/GraphView.svelte` imports them (see the integration seam below); nothing else
+under `ui/src` may.
 
 **Why:** judged only against this project's contract:
 
@@ -2506,6 +2507,52 @@ is heavier than a fixed top-to-bottom rank layout needs. Cytoscape's equivalent 
   visible third-party link is a product-facing element this ticket deliberately does not ship.
 - **Weight, for later budgets.** A minimal graph page is ~60 kB gzip of JavaScript over the current
   shell (69.7 kB gzip total against 10.1 kB gzip today) plus 2.8 kB gzip of CSS; dagre is a further
-  ~17 kB gzip. Install is 20 packages, ~3.5 MB unpacked. The dependency is present in
-  `node_modules` today but absent from the built bundle: `grep -r 'xyflow\|dagre' ui/build` finds
-  nothing and the site is ~149 kB as before, because no module imports it.
+  ~17 kB gzip. Install is 20 packages, ~3.5 MB unpacked.
+
+## The rendering seam as built
+
+- `ui/src/lib/graph.ts` — the pure model. `buildGraph(data: TreeData): WorkGraph` walks each section
+  root in payload order, de-duplicating by id, and returns `nodes` (id, title, category, shape,
+  status, state, blocked, blocked reason, parent id, depth, has-children), solid `edges`
+  (`{id, from, to}`), `roots`, and `unresolved`. There is no synthetic root: `roots` are exactly the
+  parentless items, in payload order. `graphNodeLabel` and `edgeLabel` supply the accessible names
+  (`"<title> — <category>, <state>"`, `"Parent-child: <a> → <b>"`). No library, no Svelte, no I/O.
+- `ui/src/lib/components/GraphItemNode.svelte` — the library's node slot. It unpacks the node's
+  `GraphNodePayload` (`node`, `graphY`, `selected`, `onSelect`) so `GraphNode.svelte` stays a plain
+  component that takes work-item values and library props never leak into it.
+- `ui/src/lib/components/GraphNode.svelte` — one card: the category's `<Shape>` plus its name, the
+  lifecycle status, the title as the single interactive element, the state word with its existing
+  `state-*` class, and the blocked marker with the server's reason. It carries
+  `data-node-id`/`data-depth`/`data-parent-id`/`data-graph-y` on the card element, so placement and
+  single-appearance are assertable without touching the library.
+- `ui/src/lib/components/GraphView.svelte` — the only importer of `@xyflow/svelte` and
+  `@dagrejs/dagre`. It lays the model out with dagre (`rankdir: 'TB'`, `nodesep: 28`, `ranksep: 56`,
+  16 px margins) and hands the renderer fixed geometry. It owns the legend panel; it does not own the
+  presentation choice.
+- `ui/src/lib/components/Explorer.svelte` — owns the presentation. A second `.segment` radio group
+  (`name="presentation"`, labels `Tree` and `Graph`, sr-only legend `Presentation`) switches between
+  `<TreeView>` and `<GraphView>`; both render the tree payload already in memory, so switching reads
+  nothing. `PresentationName` is stored per project (`<projectId>:presentation`), independently of the
+  data view's key, and an unreadable value falls back to `'tree'`.
+
+**Attribution: hidden, deliberately.** `proOptions={{ hideAttribution: true }}`. The Web adapter is
+strictly local, read-only and offline; the attribution panel is a visible outbound third-party link,
+which is a product-facing element this slice does not ship. The MIT licence permits hiding it. The
+library's development build logs a one-off `console.warn` about this; the warning is the notice, not a
+defect. This reverses if the project takes a Svelte Flow Pro subscription or decides to credit the
+upstream project in the product surface — then remove the option and revisit the visual weight of the
+panel in the layout.
+
+**Keyboard selection is owned by the app's button, not the library.** `nodesFocusable={false}`,
+`edgesFocusable={false}` and `elementsSelectable={false}`, plus `selectable: false` and
+`focusable: false` per node, leave exactly one tab stop inside each card: the app-owned title
+`<button>`, which is also the card's accessible click target. The library does not put its own tab
+stop on the node wrapper, and no library selection state reaches the app. Edges are non-focusable and
+carry an `aria-label` written by the app, so a screen reader reads the relation where it is
+encountered instead of a second interactive surface.
+
+**Static handles and explicit sizes.** Each node is given `width`/`height` (216×84) and static handle
+metadata (`source` at the bottom edge, `target` at the top edge, both 1×1). jsdom reports zero-size
+rects, so a `<Handle>` component measures 0×0 and the library then draws no edges at all; fixed
+geometry makes the drawing deterministic and lets the suite assert real edge elements. There is no
+`<Handle>` in the markup, and the layout never depends on measurement.

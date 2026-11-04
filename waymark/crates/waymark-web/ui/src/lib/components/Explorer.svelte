@@ -12,11 +12,13 @@
 	import { onMount, tick } from 'svelte';
 	import CategoryFilter from './CategoryFilter.svelte';
 	import DetailPanel from './DetailPanel.svelte';
+	import GraphView from './GraphView.svelte';
 	import ReadFailure from './ReadFailure.svelte';
 	import TreeView from './TreeView.svelte';
 	import UnresolvedList from './UnresolvedList.svelte';
 	import { ApiFailure, fetchHealth, fetchItem, fetchTree } from '$lib/api';
 	import type { Failure } from '$lib/failure';
+	import { buildGraph } from '$lib/graph';
 	import {
 		allIds,
 		categoryScopeKeys,
@@ -28,7 +30,14 @@
 	} from '$lib/tree';
 	import type { FilteredGroups } from '$lib/tree';
 	import { browserStorage, PreferenceStore, projectIdFor } from '$lib/storage';
-	import type { Category, CategoryGroup, ItemDetail, TreeData, ViewName } from '$lib/types';
+	import type {
+		Category,
+		CategoryGroup,
+		ItemDetail,
+		PresentationName,
+		TreeData,
+		ViewName
+	} from '$lib/types';
 
 	let {
 		fetchImpl = globalThis.fetch,
@@ -42,6 +51,7 @@
 
 	let projectRoot = $state('');
 	let view = $state<ViewName>('combined');
+	let presentation = $state<PresentationName>('tree');
 	let treeData = $state<TreeData | null>(null);
 	let readFailure = $state<Failure | null>(null);
 	let loadingTree = $state(true);
@@ -107,6 +117,20 @@
 				? summarize(treeData)
 				: summarizeCounts(scopedGroups.counts, treeData.unresolved.length)
 	);
+	/**
+	 * The graph is drawn from the tree payload already loaded, so switching
+	 * presentation costs no read. `null` until the first tree arrives. The
+	 * grouped payload is the filtered one, so the graph and the grouped tree
+	 * show the same work.
+	 */
+	const graphData = $derived<TreeData | null>(
+		treeData === null
+			? null
+			: treeData.view === 'grouped'
+				? { ...treeData, groups }
+				: treeData
+	);
+	const workGraph = $derived(graphData === null ? null : buildGraph(graphData));
 
 	const PERSISTENCE_NOTICE =
 		'Preferences could not be saved in this browser. The view still works, but these choices may reset when the page reloads.';
@@ -169,6 +193,9 @@
 			// The preference namespace is derived once, here, from the health payload.
 			store = new PreferenceStore(storage, projectIdFor(projectRoot));
 			syncNotice();
+			// The presentation is a property of the project, not of the data view:
+			// restore it once, before the first tree read.
+			presentation = store.readPresentation();
 			await loadTree(store.readView());
 		} catch (error) {
 			readFailure = toFailure(error);
@@ -182,6 +209,19 @@
 		persist((current) => current.writeScroll(view, offset));
 		persist((current) => current.writeView(next));
 		await loadTree(next);
+	}
+
+	/**
+	 * Switch between the tree and the graph.
+	 *
+	 * The choice is one per project, so it is stored on its own key and survives
+	 * a change of data view. Nothing is re-read: both presentations render the
+	 * tree payload already in memory.
+	 */
+	function selectPresentation(next: PresentationName): void {
+		if (next === presentation) return;
+		presentation = next;
+		persist((current) => current.writePresentation(next));
 	}
 
 	function toggleNode(id: string): void {
@@ -338,6 +378,30 @@
 			</label>
 		</fieldset>
 
+		<fieldset class="views">
+			<legend class="sr-only">Presentation</legend>
+			<label class="segment">
+				<input
+					type="radio"
+					name="presentation"
+					value="tree"
+					checked={presentation === 'tree'}
+					onchange={() => selectPresentation('tree')}
+				/>
+				<span>Tree</span>
+			</label>
+			<label class="segment">
+				<input
+					type="radio"
+					name="presentation"
+					value="graph"
+					checked={presentation === 'graph'}
+					onchange={() => selectPresentation('graph')}
+				/>
+				<span>Graph</span>
+			</label>
+		</fieldset>
+
 		{#if view === 'grouped' && categories.length > 0}
 			<CategoryFilter
 				{categories}
@@ -365,6 +429,7 @@
 	<main class="layout">
 		<section
 			class="tree-pane"
+			class:graph-pane-host={presentation === 'graph'}
 			bind:this={treePane}
 			onscroll={handleScroll}
 			aria-label="Work items"
@@ -393,17 +458,25 @@
 					</p>
 				</div>
 			{:else if treeData}
-				<TreeView
-					{view}
-					{roots}
-					{groups}
-					{contextIds}
-					{expanded}
-					{dependenciesVisible}
-					selectedId={selectedId}
-					onToggle={toggleNode}
-					onSelect={(id, trigger) => void selectItem(id, trigger)}
-				/>
+				{#if presentation === 'graph' && workGraph}
+					<GraphView
+						graph={workGraph}
+						{selectedId}
+						onSelect={(id, trigger) => void selectItem(id, trigger)}
+					/>
+				{:else}
+					<TreeView
+						{view}
+						{roots}
+						{groups}
+						{contextIds}
+						{expanded}
+						{dependenciesVisible}
+						{selectedId}
+						onToggle={toggleNode}
+						onSelect={(id, trigger) => void selectItem(id, trigger)}
+					/>
+				{/if}
 				{#if unresolved.length > 0}
 					<UnresolvedList items={unresolved} />
 				{/if}
