@@ -106,19 +106,21 @@ classification source for *domain* failures; the adapter owns the one failure cl
 in `tests/registry.rs` and `tests/errors.rs` pins the absence, and the CLI has its own
 `adapter_failure_envelope` builder in `envelope.rs` so even this failure keeps the shared shape.
 
-## The registry has 38 codes; the brief's "39" was a miscount
+## The registry has 41 codes; the brief's "39" was a miscount
 
-**Choice:** `Code` has exactly the 38 rows of the specification's **Error registry** table, from
-`ITEM_NOT_FOUND` through `TIMESTAMP_INCOHERENT`, with the seven finding-only codes included. T2 froze 37
+**Choice:** `Code` has exactly the 41 rows of the specification's **Error registry** table, from
+`ITEM_NOT_FOUND` through `TIMESTAMP_INCOHERENT`, with the finding-only codes included. T2 froze 37
 rows; the Git-availability follow-up added `GIT_UNAVAILABLE` (see **Git history and diff (T11)** below),
-so the current total is 38.
+so the total was 38. The distribution work added `WEB_NOT_INCLUDED` (validation class, exit 3),
+`PORT_IN_USE` (environment class, exit 5), and the finding-only `ASSETS_VERSION_MISMATCH` (error
+severity, no exit class), so the current total is 41.
 
 **Why:** the table is authoritative and the brief defers to it ("exactly the codes in the spec's Error
 registry table"). Counting the table at T2 gave 37; counting it plus `USAGE_ERROR` gives 38, and the
 brief's parenthetical listed the finding-only codes correctly, so the original total was simply
-transcribed wrong. No code was invented to match the brief's number, and none was dropped: the golden
-snapshot names all 38 and a consistency test fails if the enum and the snapshot disagree in either
-direction.
+transcribed wrong. No code was invented to match the brief's number, and none was dropped: the three
+distribution additions each have a producing failure, and the golden snapshot names all 41 and a
+consistency test fails if the enum and the snapshot disagree in either direction.
 
 ## One `Spec` row per code, read by every accessor
 
@@ -140,7 +142,7 @@ its code does not declare.
 **Why:** "typed details" is only real if a missing key is a test failure rather than a consumer's
 runtime surprise. The optional subset is data rather than a convention because exactly one code needs
 it: `ITEM_NOT_FOUND` carries `{id, relation?}` — a direct lookup names no relation, a relationship
-resolution does. Encoding `?` as registry metadata keeps the check strict for the other 37 codes.
+resolution does. Encoding `?` as registry metadata keeps the check strict for the other 40 codes.
 
 ## The golden snapshot is generated, then reviewed
 
@@ -1116,9 +1118,10 @@ any dependency change.
 
 ## Binding, status codes, and failure envelopes
 
-**Choice:** the listener is always `127.0.0.1` (`WebConfig` has only `port` and `assets`; port `0`
-asks the OS for a free port). There is no host/interface/LAN option anywhere in the API. Successful
-answers reuse `waymark_core::envelope::success_envelope`; domain failures reuse `failure_envelope` and
+**Choice:** the listener is always `127.0.0.1` (`WebConfig` exposes only `port`; its asset source is a
+`pub(crate)` field selected by `new(dir)` or `embedded()`, and port `0` asks the OS for a free port).
+There is no host/interface/LAN option anywhere in the API. Successful answers reuse
+`waymark_core::envelope::success_envelope`; domain failures reuse `failure_envelope` and
 add a `_meta` block carrying `error.details.diagnostics` (or `[]`). Adapter failures reuse
 `adapter_failure_envelope` with the codes `INVALID_QUERY`, `INVALID_ASSET_PATH`, `INVALID_HOST`,
 `INVALID_ORIGIN`, `METHOD_NOT_ALLOWED`, `NOT_FOUND`, and `ASSET_NOT_FOUND`.
@@ -1183,11 +1186,16 @@ ever returned as data.
 
 ## Server API and launcher
 
-Public items: `WebConfig { port, assets }` (with `new`/`with_port`/`Default`),
-`DEFAULT_PORT = 7331`, `LOOPBACK`, `SHAPES`, `CategoryView`, `WebError`, `Running { addr, url,
-shutdown }`, `bind(project, config) -> Running` (for tests and the launcher), `serve(project, config)`
-(binds, prints the loopback URL to stderr, waits for Ctrl-C), `ensure_assets(dir)`,
-`default_assets_dir()` (`<crate>/ui/build`). `serve` is deliberately not wired into the `waymark` CLI.
+Public items: `WebConfig { port }` with a `pub(crate)` asset source (constructed by `new(dir)` or
+`embedded()`, plus `with_port`/`Default`), `DEFAULT_PORT = 7331` (re-exported from `waymark_core`,
+which also owns the CLI default), `LOOPBACK`, `SHAPES`, `CategoryView`, `WebError`, `Running { addr,
+url, shutdown }`, `bind(project, config) -> Running` (for tests and the launcher), `serve(project,
+config)` (binds, prints the loopback URL to stderr, waits for Ctrl-C), `ensure_assets(dir)`,
+`default_assets_dir()` (`<crate>/ui/build`).
+
+**Superseded by the distribution section below:** `serve` is now a `waymark` subcommand in both
+build variants. The Web branch wires `WebConfig::embedded()` and binds; the basic branch refuses with
+`WEB_NOT_INCLUDED` before any listener exists.
 
 `waymark-web-dev`: `--project PATH` (default: current directory, discovered upward), `--port` (default
 7331; `0` is accepted), `--assets DIR` (default: the crate's `ui/build`). Project discovery and the
@@ -2373,9 +2381,12 @@ takes the `ArchiveRange` and `Projection` explicitly because those are caller ch
   stream is a terminal and `NO_COLOR` is absent or empty (the no-color.org
   convention: a present but empty variable does not disable colour).
 - **The human stream is stderr, so `auto` asks about stderr.** Human prose goes
-  to stderr; stdout carries JSON, `show --raw` documents, and raw `git diff`
-  patches. Only those stderr lines call the palette, so JSON envelopes, raw
-  documents, and raw patches are never coloured even with `--color=always`.
+  to stderr; stdout carries JSON, `waymark version`'s human line, `show --raw`
+  documents, and raw `git diff` patches. `waymark version` is an explicit stdout
+  exception because its output is the release scripts' parse target, and the
+  version tests pin the line (and an empty stderr) to that stream. Only stderr
+  lines call the palette, so JSON envelopes, raw documents, and raw patches are
+  never coloured even with `--color=always`.
 - **The colour follows `DisplayState`, not the rendered label.** The CLI keeps
   its older labels (`ready` for an unblocked in-progress item, `archived` for
   an archived item, `-` for a closed `list` row), and the painter wraps the
@@ -2932,8 +2943,9 @@ colour used only on work state and the selected row.
   section above.
 - Git is optional. `GIT_UNAVAILABLE` (no executable) and `NOT_A_GIT_REPOSITORY` (no containing
   repository) are separate location-less info findings; history/diff succeed empty, doctor/validate
-  report them, and both adapters exit zero. The registry is 38 codes. Details are in the Git sections
-  above.
+  report them, and both adapters exit zero. The registry is 41 codes: the distribution work added
+  `WEB_NOT_INCLUDED` (validation, exit 3), `PORT_IN_USE` (environment, exit 5), and the finding-only
+  `ASSETS_VERSION_MISMATCH`. Details are in the Git sections above.
 
 # Embedded frontend assets and provenance (wm-jd7fyh213aa1)
 
@@ -3074,7 +3086,7 @@ unused async stack in the basic binary.
 ## The build variant decides capabilities, not runtime probing
 
 **Choice:** `waymark version` builds its capability list from `cfg(feature = "web")` in the adapter:
-`["cli", "mcp"]` in every build, plus `web` only in a Web build. `variant --json` adds `assets` only
+`["cli", "mcp"]` in every build, plus `web` only in a Web build. `version --json` adds `assets` only
 when `waymark_web::embedded_manifest()` is `Some`, so the key is absent in a basic build rather than
 `null`. The human form is exactly `waymark <version> (<capabilities>)`.
 
