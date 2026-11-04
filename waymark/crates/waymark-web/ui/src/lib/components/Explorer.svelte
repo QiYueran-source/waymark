@@ -12,13 +12,14 @@
 	import { onMount, tick } from 'svelte';
 	import CategoryFilter from './CategoryFilter.svelte';
 	import DetailPanel from './DetailPanel.svelte';
+	import GraphText from './GraphText.svelte';
 	import GraphView from './GraphView.svelte';
 	import ReadFailure from './ReadFailure.svelte';
 	import TreeView from './TreeView.svelte';
 	import UnresolvedList from './UnresolvedList.svelte';
 	import { ApiFailure, fetchHealth, fetchItem, fetchTree } from '$lib/api';
 	import type { Failure } from '$lib/failure';
-	import { buildGraph, collapseGraph } from '$lib/graph';
+	import { buildGraph, collapseGraph, graphOutline } from '$lib/graph';
 	import type { GraphViewport } from '$lib/graph';
 	import {
 		allIds,
@@ -53,6 +54,13 @@
 	let projectRoot = $state('');
 	let view = $state<ViewName>('combined');
 	let presentation = $state<PresentationName>('tree');
+	/**
+	 * Whether the graph is being read as its structured text alternative.
+	 *
+	 * It belongs to the graph presentation and is stored per project; the
+	 * drawing is the default because the alternative is an explicit choice.
+	 */
+	let graphAlternative = $state(false);
 	let treeData = $state<TreeData | null>(null);
 	let readFailure = $state<Failure | null>(null);
 	let loadingTree = $state(true);
@@ -162,15 +170,32 @@
 	/** The folded set, as the model helper takes it. */
 	const collapsed: ReadonlySet<string> = $derived(new Set(collapsedIds));
 	/**
-	 * The drawing, with folded branches closed up.
+	 * The one drawing both presentations read.
 	 *
-	 * Collapsing is presentation only: the graph is rebuilt from the same tree
+	 * Category scope and the dependency overlay already reach the model through
+	 * `buildGraph`, so they apply to the drawing and the outline alike. This is
+	 * also the seam the graph's collapse state is applied at: whichever filtered
+	 * and collapsed model the drawing is given is also the one `graphOutline`
+	 * reads, so the two cannot disagree about which items are showing. There is
+	 * no second projection to keep in step.
+	 *
+	 * Collapsing is presentation only: the model is rebuilt from the same tree
 	 * payload and then filtered, so no item is read, written, or re-parented.
-	 * Ids this project no longer contains simply match nothing.
+	 * Ids this project no longer contains match nothing.
 	 */
 	const visibleGraph = $derived(
 		workGraph === null ? null : collapseGraph(workGraph, collapsed)
 	);
+
+	/**
+	 * The alternative's outline, built from the same model the drawing renders.
+	 * It is only built while the alternative is on.
+	 */
+	const outline = $derived(
+		visibleGraph === null || !graphAlternative ? [] : graphOutline(visibleGraph)
+	);
+	/** The alternative is the graph presentation read as text. */
+	const readingAlternative = $derived(presentation === 'graph' && graphAlternative);
 
 	const PERSISTENCE_NOTICE =
 		'Preferences could not be saved in this browser. The view still works, but these choices may reset when the page reloads.';
@@ -241,6 +266,7 @@
 			// The presentation is a property of the project, not of the data view:
 			// restore it once, before the first tree read.
 			presentation = store.readPresentation();
+			graphAlternative = store.readGraphAlternative();
 			await loadTree(store.readView());
 		} catch (error) {
 			readFailure = toFailure(error);
@@ -267,6 +293,18 @@
 		if (next === presentation) return;
 		presentation = next;
 		persist((current) => current.writePresentation(next));
+	}
+
+	/**
+	 * Switch the graph between the drawing and its structured text alternative.
+	 *
+	 * Nothing is re-read: both render the graph model already in memory, so the
+	 * selected category scope, the dependency overlay, and the selection stay
+	 * exactly as they were across the switch.
+	 */
+	function toggleGraphAlternative(): void {
+		graphAlternative = !graphAlternative;
+		persist((current) => current.writeGraphAlternative(graphAlternative));
 	}
 
 	function toggleNode(id: string): void {
@@ -477,6 +515,18 @@
 			</label>
 		</fieldset>
 
+		{#if presentation === 'graph'}
+			<label class="deps-toggle alternative-toggle">
+				<input
+					type="checkbox"
+					checked={graphAlternative}
+					onchange={toggleGraphAlternative}
+					data-testid="graph-alternative-toggle"
+				/>
+				Structured list
+			</label>
+		{/if}
+
 		{#if view === 'grouped' && categories.length > 0}
 			<CategoryFilter
 				{categories}
@@ -556,7 +606,13 @@
 					</button>
 				</div>
 			{:else if treeData}
-				{#if presentation === 'graph' && visibleGraph}
+				{#if readingAlternative && visibleGraph}
+					<GraphText
+						{outline}
+						{selectedId}
+						onSelect={(id, trigger) => void selectItem(id, trigger)}
+					/>
+				{:else if presentation === 'graph' && visibleGraph}
 					<GraphView
 						graph={visibleGraph}
 						{selectedId}
@@ -579,7 +635,7 @@
 						onSelect={(id, trigger) => void selectItem(id, trigger)}
 					/>
 				{/if}
-				{#if unresolved.length > 0}
+				{#if unresolved.length > 0 && !readingAlternative}
 					<UnresolvedList items={unresolved} />
 				{/if}
 			{/if}

@@ -55,7 +55,8 @@ export function preferenceKey(
 		| 'scroll'
 		| 'categories'
 		| 'collapsed'
-		| 'viewport',
+		| 'viewport'
+		| 'graphAlternative',
 	view?: ViewName
 ): string {
 	return view === undefined
@@ -196,6 +197,21 @@ export class PreferenceStore {
 
 	writePresentation(presentation: PresentationName): void {
 		this.write(preferenceKey(this.projectId, 'presentation'), presentation);
+	}
+
+	/**
+	 * Whether the graph is being read as its structured text alternative.
+	 *
+	 * It is a property of the project, not of one data view, and it is on its
+	 * own key so the graph's collapse set and its viewport stay independent of
+	 * it. The drawing is the default: the alternative is an explicit choice.
+	 */
+	readGraphAlternative(): boolean {
+		return this.read(preferenceKey(this.projectId, 'graphAlternative')) === 'true';
+	}
+
+	writeGraphAlternative(alternative: boolean): void {
+		this.write(preferenceKey(this.projectId, 'graphAlternative'), String(alternative));
 	}
 
 	/**
