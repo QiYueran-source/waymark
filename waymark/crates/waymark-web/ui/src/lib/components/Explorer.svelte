@@ -10,15 +10,25 @@
 	 * browser.
 	 */
 	import { onMount, tick } from 'svelte';
+	import CategoryFilter from './CategoryFilter.svelte';
 	import DetailPanel from './DetailPanel.svelte';
 	import ReadFailure from './ReadFailure.svelte';
 	import TreeView from './TreeView.svelte';
 	import UnresolvedList from './UnresolvedList.svelte';
 	import { ApiFailure, fetchHealth, fetchItem, fetchTree } from '$lib/api';
 	import type { Failure } from '$lib/failure';
-	import { allIds, summarize, visibleRoots } from '$lib/tree';
+	import {
+		allIds,
+		categoryScopeKeys,
+		filterGroups,
+		resolveCategoryScope,
+		summarize,
+		summarizeCounts,
+		visibleRoots
+	} from '$lib/tree';
+	import type { FilteredGroups } from '$lib/tree';
 	import { browserStorage, PreferenceStore, projectIdFor } from '$lib/storage';
-	import type { CategoryGroup, ItemDetail, TreeData, ViewName } from '$lib/types';
+	import type { Category, CategoryGroup, ItemDetail, TreeData, ViewName } from '$lib/types';
 
 	let {
 		fetchImpl = globalThis.fetch,
@@ -44,6 +54,12 @@
 	let persistenceNotice = $state<string | null>(null);
 	let treePane: HTMLElement | undefined = $state();
 	let restoreToken = $state(0);
+	/**
+	 * The category keys this project has in scope, in configured order, or `null`
+	 * before a grouped read has resolved them. `[]` is a real choice — the reader
+	 * cleared every category — so it is not the same as `null`.
+	 */
+	let categoryScope = $state<string[] | null>(null);
 
 	let store: PreferenceStore | null = null;
 	let detailRequest = 0;
@@ -51,19 +67,41 @@
 	let detailTrigger: HTMLElement | null = null;
 
 	const roots = $derived(treeData?.view === 'combined' ? treeData.roots : []);
-	const groups: CategoryGroup[] = $derived(treeData?.view === 'grouped' ? treeData.groups : []);
+	/** Every category the project configures, whether or not it holds work. */
+	const categories: Category[] = $derived(treeData === null ? [] : treeData.categories);
+	const selectedCategories: ReadonlySet<string> = $derived(
+		resolveCategoryScope(categories, categoryScope)
+	);
+	/** The grouped view's groups after the scope is applied; the seam for context rows. */
+	const scopedGroups: FilteredGroups = $derived(
+		filterGroups(treeData?.view === 'grouped' ? treeData.groups : [], selectedCategories)
+	);
+	const groups: CategoryGroup[] = $derived(scopedGroups.groups);
 	const unresolved = $derived(treeData?.unresolved ?? []);
+	/** The payload holds work, before any category filtering. */
+	const hasWork = $derived(
+		treeData !== null &&
+			(treeData.view === 'combined' ? treeData.roots.length > 0 : treeData.groups.length > 0)
+	);
 	const isEmpty = $derived(
+		!loadingTree && readFailure === null && treeData !== null && !hasWork && unresolved.length === 0
+	);
+	/** The project has work, but none of it is in the categories in scope. */
+	const isFilteredEmpty = $derived(
 		!loadingTree &&
 			readFailure === null &&
-			treeData !== null &&
-			(treeData.view === 'combined'
-				? treeData.roots.length === 0
-				: treeData.groups.length === 0) &&
-			treeData.unresolved.length === 0
+			treeData?.view === 'grouped' &&
+			hasWork &&
+			groups.length === 0
 	);
-	/** The screen's one finding: how much work there is and what is held up. */
-	const summary = $derived(treeData === null ? '' : summarize(treeData));
+	/** The screen's one finding: how much work is shown and what is held up. */
+	const summary = $derived(
+		treeData === null
+			? ''
+			: treeData.view === 'combined'
+				? summarize(treeData)
+				: summarizeCounts(scopedGroups.counts, treeData.unresolved.length)
+	);
 
 	const PERSISTENCE_NOTICE =
 		'Preferences could not be saved in this browser. The view still works, but these choices may reset when the page reloads.';
@@ -106,6 +144,10 @@
 			const saved = store?.readExpanded(next) ?? null;
 			expanded = saved ?? allIds(visibleRoots(data));
 			dependenciesVisible = store?.readDependencies(next) ?? false;
+			// The stored scope is read as it was written; stale keys are dropped
+			// where it meets this project's configured categories, which the
+			// payload carries. `null` stays `null` so the default is "everything".
+			categoryScope = store?.readCategories() ?? null;
 			restoreToken += 1;
 			syncNotice();
 		} catch (error) {
@@ -158,6 +200,35 @@
 	function toggleDependencies(): void {
 		dependenciesVisible = !dependenciesVisible;
 		persist((current) => current.writeDependencies(view, dependenciesVisible));
+	}
+
+	/**
+	 * Remember a category scope.
+	 *
+	 * What is stored is a set of category keys, in configured order, so a stored
+	 * scope compares and reloads predictably. An empty scope is written rather
+	 * than cleared: "I chose none" is a decision the reader made, not a missing
+	 * preference, and it must survive a reload.
+	 */
+	function setCategoryScope(next: ReadonlySet<string>): void {
+		const keys = categoryScopeKeys(categories, next);
+		categoryScope = keys;
+		persist((current) => current.writeCategories(keys));
+	}
+
+	function toggleCategory(key: string): void {
+		const next = new Set(selectedCategories);
+		if (next.has(key)) next.delete(key);
+		else next.add(key);
+		setCategoryScope(next);
+	}
+
+	function selectAllCategories(): void {
+		setCategoryScope(new Set(categories.map((category) => category.key)));
+	}
+
+	function clearAllCategories(): void {
+		setCategoryScope(new Set());
 	}
 
 	async function selectItem(id: string, trigger?: HTMLElement): Promise<void> {
@@ -262,6 +333,16 @@
 			</label>
 		</fieldset>
 
+		{#if view === 'grouped' && categories.length > 0}
+			<CategoryFilter
+				{categories}
+				selected={selectedCategories}
+				onToggle={toggleCategory}
+				onSelectAll={selectAllCategories}
+				onClearAll={clearAllCategories}
+			/>
+		{/if}
+
 		{#if summary}
 			<p class="summary" data-testid="tree-summary">{summary}</p>
 		{/if}
@@ -295,6 +376,15 @@
 					<p>
 						This project has no non-archived work items. Archived items stay out of this
 						view.
+					</p>
+				</div>
+			{:else if isFilteredEmpty}
+				<div class="empty" data-testid="filtered-empty-state">
+					<h2>Nothing in the selected categories</h2>
+					<p>
+						The by-category view shows only the categories you select, and none of the
+						selected ones has active work right now. Use Select all above to see every
+						category again.
 					</p>
 				</div>
 			{:else if treeData}

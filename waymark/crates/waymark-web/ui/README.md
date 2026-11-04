@@ -41,29 +41,38 @@ when `ui/build/index.html` is absent.
 
 ## Browser state
 
-Only four preferences are stored, in `localStorage`, namespaced by a
-`cyrb53` hash of the normalized project root reported by `GET /api/health`
-(`data.project.root`): the selected view, per-view expansion, per-view
-dependency-overlay visibility, and per-view scroll position. The keys are
+Four preferences are stored, in `localStorage`, namespaced by a `cyrb53` hash of
+the normalized project root reported by `GET /api/health` (`data.project.root`):
+the selected view, per-view expansion, per-view dependency-overlay visibility,
+and per-view scroll position. The keys are
 `waymark.web.v1:<hash>:<preference>[:<view>]`, so two projects on one origin never
 read each other's state and each view keeps its own expansion and overlay choice.
 Nothing is written into the project or sent to the service. Unavailable or
 failing storage degrades to in-memory state with a concise notice.
 
+One more preference is stored per project rather than per view, at
+`waymark.web.v1:<hash>:categories`: the category keys the reader has in scope in
+the by-category tree. The value is a JSON array of keys, and its absence means
+"every configured category"; an empty array means the reader cleared them all, so
+the two cases stay distinguishable. Keys for categories this project no longer
+configures are ignored when the scope meets the payload's `categories`, which
+also lists configured categories that have no active work yet.
+
 ## Layout
 
-- `src/lib/components/` — `Explorer` (data loading and state), `TreeView`,
-  `NodeRow`, `DetailPanel`, `UnresolvedList`, `ReadFailure`, `ReferenceList`,
-  `Shape`.
+- `src/lib/components/` — `Explorer` (data loading and state), `CategoryFilter`,
+  `TreeView`, `NodeRow`, `DetailPanel`, `UnresolvedList`, `ReadFailure`,
+  `ReferenceList`, `Shape`.
 - `src/lib/api.ts` — GET-only envelope client and failure types.
 - `src/lib/storage.ts` — project-scoped browser preferences.
-- `src/lib/tree.ts` — pure rows, dependency edges, and grouped reference nodes.
+- `src/lib/tree.ts` — pure rows, dependency edges, grouped reference nodes, and
+  the category scope and filtering used by the by-category tree.
 - `src/app.css` — the whole visual system in plain CSS (tokens, tree, detail,
   states, responsive); there is no UI framework and no icon package.
 - `tests/` — vitest suites for combined/grouped rendering, overlay toggling and
   reference anchoring, detail contents and the HTML-injection boundary,
   expand/collapse, persistence and per-project isolation, unavailable storage,
-  empty, unresolved, and read-failure states.
+  category selection and filtering, empty, unresolved, and read-failure states.
 
 ## Visual direction
 
