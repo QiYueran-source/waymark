@@ -3,11 +3,12 @@ schema: 1
 id: wm-jd7fyh213aa1
 title: Embed the Web frontend and its provenance manifest
 category: implement
-status: open
+status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-04T15:38:10Z
-updated_at: 2026-11-04T15:38:10Z
+updated_at: 2026-11-04T16:02:31Z
+closed_at: 2026-11-04T16:02:31Z
 parent: wm-4125jxq7bpq8
 ---
 ## Parent

@@ -24,26 +24,56 @@
 //! `localhost` or a loopback IP at the actual listening port, and an `Origin`
 //! header, when present, must be the matching `http://host:port` origin.
 //!
-//! # The asset seam (phase 2)
+//! # The asset seam
 //!
-//! The frontend is a SvelteKit build in a directory chosen by the launcher.
-//! `GET /` serves `<assets>/index.html`; `GET /assets/<path>` serves
-//! `<assets>/<path>`. Nothing is embedded and nothing is generated: a build
-//! without assets starts (so `cargo test` needs no npm) but `GET /` explains the
-//! missing assets instead of serving a placeholder. [`ensure_assets`] is the
-//! launcher's startup check.
+//! The frontend is a SvelteKit build. In a development run the launcher names a
+//! directory and `GET /` serves `<assets>/index.html`; `GET /assets/<path>`
+//! serves `<assets>/<path>`. With the off-by-default `embed` feature,
+//! `build.rs` compiles the built tree into the binary instead, gzipped at build
+//! time, and [`WebConfig::embedded`] serves it with `Content-Encoding: gzip`.
+//! A build without `embed` has no embedded tree and still starts without assets
+//! (so `cargo test` needs no npm); `GET /` explains missing development assets
+//! instead of serving a placeholder. [`ensure_assets`] is the launcher's startup
+//! check.
+//!
+//! [`embedded_manifest`] exposes the provenance manifest a Web build embeds, so
+//! an adapter (`waymark version --json`, `waymark doctor`) can report exactly
+//! which tree the binary carries.
 
 mod api;
 mod assets;
+mod embedded;
 mod guard;
+pub mod manifest;
 mod render;
 mod respond;
 mod server;
 
 pub use api::{CategoryView, SHAPES};
+pub use manifest::{AssetFile, AssetManifest, AssetMismatch};
+
+/// The provenance manifest embedded by an `embed` build, or `None`.
+///
+/// The manifest and the asset table come from the same build script run, so a
+/// `Some` value describes exactly the bytes this binary serves.
+pub fn embedded_manifest() -> Option<&'static AssetManifest> {
+    embedded::manifest()
+}
+
+/// Why this binary's embedded frontend disagrees with the build, if it does.
+///
+/// A basic build embeds no frontend and returns `None`; a Web build whose
+/// manifest matches the version and the embedded `index.html` also returns
+/// `None`. The disagreement is reported, never enforced: `serve` still starts.
+pub fn embedded_manifest_mismatch() -> Option<AssetMismatch> {
+    let manifest = embedded::manifest()?;
+    let index_html = embedded::index_html().expect("an embed build embeds index.html");
+    manifest::verify_agreement(manifest, env!("CARGO_PKG_VERSION"), index_html).err()
+}
 pub use server::{
     bind, default_assets_dir, ensure_assets, serve, Running, WebConfig, WebError, LOOPBACK,
 };
 
-/// The default development port, mirrored from the launcher's `--port` default.
-pub const DEFAULT_PORT: u16 = 7331;
+/// The default loopback port, re-exported from `waymark_core` so the Web
+/// service, the launcher, and the CLI share one value.
+pub use waymark_core::DEFAULT_PORT;

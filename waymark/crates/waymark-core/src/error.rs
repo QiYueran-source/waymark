@@ -70,6 +70,8 @@ pub enum Code {
     InvalidRelationship,
     /// A complete, fresh projection is unavailable.
     IncompleteProjection,
+    /// This build does not include the Web capability.
+    WebNotIncluded,
     /// The target changed since the operation read it.
     WriteConflict,
     /// An archived item rejects a write.
@@ -92,6 +94,8 @@ pub enum Code {
     LockFailed,
     /// A reader could not obtain a stable snapshot after bounded retries.
     SnapshotUnstable,
+    /// The loopback port the Web service asks for is already taken.
+    PortInUse,
     /// Data declares a generation the installed release cannot read.
     UnsupportedVersion,
     /// An item's generation is older than the project generation.
@@ -125,6 +129,8 @@ pub enum Code {
     DanglingReference,
     /// A persisted system timestamp is internally inconsistent.
     TimestampIncoherent,
+    /// The embedded frontend manifest disagrees with this build.
+    AssetsVersionMismatch,
 }
 
 /// The process exit class of a failure.
@@ -266,6 +272,7 @@ impl Code {
         Code::CycleDetected,
         Code::InvalidRelationship,
         Code::IncompleteProjection,
+        Code::WebNotIncluded,
         Code::WriteConflict,
         Code::ItemArchived,
         Code::AlreadyArchived,
@@ -277,6 +284,7 @@ impl Code {
         Code::LockTimeout,
         Code::LockFailed,
         Code::SnapshotUnstable,
+        Code::PortInUse,
         Code::UnsupportedVersion,
         Code::ItemNeedsMigration,
         Code::ActionRequiresMigration,
@@ -293,6 +301,7 @@ impl Code {
         Code::NotAGitRepository,
         Code::DanglingReference,
         Code::TimestampIncoherent,
+        Code::AssetsVersionMismatch,
     ];
 
     /// The registry row for this code.
@@ -379,6 +388,7 @@ impl Code {
                 &["completeness", "freshness", "diagnostics"],
                 &[File, WorkItem],
             ),
+            Self::WebNotIncluded => spec(Some(ExitClass::InvalidInput), false, None, &[], &[]),
             Self::WriteConflict => spec(
                 Some(ExitClass::Conflict),
                 false,
@@ -442,6 +452,9 @@ impl Code {
             Self::SnapshotUnstable => {
                 spec(Some(ExitClass::Environment), true, None, &["retries"], &[])
             }
+            // The recovery action is a different port, not a blind retry: the
+            // same request is expected to fail again while the port is held.
+            Self::PortInUse => spec(Some(ExitClass::Environment), false, None, &["port"], &[]),
             Self::UnsupportedVersion => spec(
                 Some(ExitClass::Version),
                 false,
@@ -528,6 +541,13 @@ impl Code {
                 &["id", "field", "value", "reason"],
                 &[WorkItem, Field],
             ),
+            Self::AssetsVersionMismatch => spec(
+                None,
+                false,
+                Some(Severity::Error),
+                &["kind", "expected", "actual"],
+                &[],
+            ),
         }
     }
 
@@ -545,6 +565,7 @@ impl Code {
             Self::CycleDetected => "CYCLE_DETECTED",
             Self::InvalidRelationship => "INVALID_RELATIONSHIP",
             Self::IncompleteProjection => "INCOMPLETE_PROJECTION",
+            Self::WebNotIncluded => "WEB_NOT_INCLUDED",
             Self::WriteConflict => "WRITE_CONFLICT",
             Self::ItemArchived => "ITEM_ARCHIVED",
             Self::AlreadyArchived => "ALREADY_ARCHIVED",
@@ -556,6 +577,7 @@ impl Code {
             Self::LockTimeout => "LOCK_TIMEOUT",
             Self::LockFailed => "LOCK_FAILED",
             Self::SnapshotUnstable => "SNAPSHOT_UNSTABLE",
+            Self::PortInUse => "PORT_IN_USE",
             Self::UnsupportedVersion => "UNSUPPORTED_VERSION",
             Self::ItemNeedsMigration => "ITEM_NEEDS_MIGRATION",
             Self::ActionRequiresMigration => "ACTION_REQUIRES_MIGRATION",
@@ -572,6 +594,7 @@ impl Code {
             Self::NotAGitRepository => "NOT_A_GIT_REPOSITORY",
             Self::DanglingReference => "DANGLING_REFERENCE",
             Self::TimestampIncoherent => "TIMESTAMP_INCOHERENT",
+            Self::AssetsVersionMismatch => "ASSETS_VERSION_MISMATCH",
         }
     }
 
@@ -598,6 +621,7 @@ impl Code {
             "CYCLE_DETECTED" => Ok(Self::CycleDetected),
             "INVALID_RELATIONSHIP" => Ok(Self::InvalidRelationship),
             "INCOMPLETE_PROJECTION" => Ok(Self::IncompleteProjection),
+            "WEB_NOT_INCLUDED" => Ok(Self::WebNotIncluded),
             "WRITE_CONFLICT" => Ok(Self::WriteConflict),
             "ITEM_ARCHIVED" => Ok(Self::ItemArchived),
             "ALREADY_ARCHIVED" => Ok(Self::AlreadyArchived),
@@ -609,6 +633,7 @@ impl Code {
             "LOCK_TIMEOUT" => Ok(Self::LockTimeout),
             "LOCK_FAILED" => Ok(Self::LockFailed),
             "SNAPSHOT_UNSTABLE" => Ok(Self::SnapshotUnstable),
+            "PORT_IN_USE" => Ok(Self::PortInUse),
             "UNSUPPORTED_VERSION" => Ok(Self::UnsupportedVersion),
             "ITEM_NEEDS_MIGRATION" => Ok(Self::ItemNeedsMigration),
             "ACTION_REQUIRES_MIGRATION" => Ok(Self::ActionRequiresMigration),
@@ -625,6 +650,7 @@ impl Code {
             "NOT_A_GIT_REPOSITORY" => Ok(Self::NotAGitRepository),
             "DANGLING_REFERENCE" => Ok(Self::DanglingReference),
             "TIMESTAMP_INCOHERENT" => Ok(Self::TimestampIncoherent),
+            "ASSETS_VERSION_MISMATCH" => Ok(Self::AssetsVersionMismatch),
             other => Err(UnknownCode(other.to_owned())),
         }
     }
@@ -977,6 +1003,19 @@ impl WaymarkError {
         }))
     }
 
+    /// This build has no Web capability, so `serve` cannot run.
+    ///
+    /// The recovery is to install the Web-enabled package; the command never
+    /// downloads or installs anything itself.
+    pub fn web_not_included() -> Self {
+        Self::new(
+            Code::WebNotIncluded,
+            "this build does not include the Web view; install the waymark-web package to run \
+             `waymark serve`",
+        )
+        .with_details(json!({}))
+    }
+
     // -- conflict and state rejection (class 4) ---------------------------
 
     /// The target changed since the operation read it.
@@ -1096,6 +1135,21 @@ impl WaymarkError {
             format!("the project changed during {retries} read attempts; retry"),
         )
         .with_details(json!({"retries": retries}))
+    }
+
+    /// The loopback port the Web service needs is already taken.
+    ///
+    /// The message names the port and points at `--port 0`; there is no silent
+    /// fallback to a different port.
+    pub fn port_in_use(port: u16) -> Self {
+        Self::new(
+            Code::PortInUse,
+            format!(
+                "port {port} on 127.0.0.1 is already in use; pass `--port 0` to let the \
+                 operating system choose a free port"
+            ),
+        )
+        .with_details(json!({"port": port}))
     }
 
     // -- version and migration (class 6) ----------------------------------
@@ -1348,6 +1402,34 @@ impl WaymarkError {
             "reason": reason,
         }))
         .with_location(Location::work_item(id))
+    }
+
+    /// The embedded frontend manifest disagrees with this build.
+    ///
+    /// `kind` names the disagreement (`version` or `index_html_sha256`);
+    /// `expected` is what this build carries and `actual` is what the manifest
+    /// records. The message names both so a human sees the disagreement without
+    /// parsing the details.
+    pub fn assets_version_mismatch(
+        kind: impl Into<String>,
+        expected: impl Into<String>,
+        actual: impl Into<String>,
+    ) -> Self {
+        let kind = kind.into();
+        let expected = expected.into();
+        let actual = actual.into();
+        Self::new(
+            Code::AssetsVersionMismatch,
+            format!(
+                "the embedded frontend manifest does not match this build: \
+                 {kind} is {actual}, expected {expected}"
+            ),
+        )
+        .with_details(json!({
+            "kind": kind,
+            "expected": expected,
+            "actual": actual,
+        }))
     }
 
     // -- building ---------------------------------------------------------

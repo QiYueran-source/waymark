@@ -26,6 +26,18 @@
     "retryable": false
   },
   {
+    "code": "ASSETS_VERSION_MISMATCH",
+    "details": [
+      "kind",
+      "expected",
+      "actual"
+    ],
+    "exit": null,
+    "finding": "error",
+    "location_kinds": [],
+    "retryable": false
+  },
+  {
     "code": "CATEGORY_NOT_FOUND",
     "details": [
       "key"
@@ -392,6 +404,16 @@
     "retryable": false
   },
   {
+    "code": "PORT_IN_USE",
+    "details": [
+      "port"
+    ],
+    "exit": 5,
+    "finding": null,
+    "location_kinds": [],
+    "retryable": false
+  },
+  {
     "code": "PROJECT_NOT_FOUND",
     "details": [
       "searched"
@@ -471,6 +493,14 @@
       "config_key",
       "relationship"
     ],
+    "retryable": false
+  },
+  {
+    "code": "WEB_NOT_INCLUDED",
+    "details": [],
+    "exit": 3,
+    "finding": null,
+    "location_kinds": [],
     "retryable": false
   },
   {

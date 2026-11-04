@@ -1,16 +1,24 @@
 //! The frontend asset seam.
 //!
-//! `GET /` serves `<assets>/index.html`; `GET /assets/<path>` serves
-//! `<assets>/<path>`, and `GET /_app/<path>` serves `<assets>/_app/<path>`
-//! because that is where SvelteKit writes its hashed build output. The directory
-//! is chosen by the launcher (`--assets`), so a
-//! production build can reuse the same server. Nothing is embedded and no
-//! placeholder is generated: when `index.html` is missing the page route explains
-//! how to build the frontend.
+//! `GET /` serves `index.html`; `GET /assets/<path>` serves `<path>`, and
+//! `GET /_app/<path>` serves `_app/<path>` because that is where SvelteKit writes
+//! its hashed build output. A development run reads those files from the
+//! directory the launcher chose; a Web release serves the same layout from the
+//! tree embedded in the binary.
 //!
-//! Paths are rejected when they contain `.`/`..` segments, backslashes, NUL, or
-//! an empty segment, and the canonical target must stay under the canonical asset
-//! root, so a crafted URL or a symlink cannot read outside the build directory.
+//! Nothing is generated at runtime and no placeholder is served: when the
+//! development directory has no `index.html` the page route explains how to build
+//! the frontend, and a Web build cannot start without an embedded tree at all.
+//!
+//! Directory paths are rejected when they contain `.`/`..` segments,
+//! backslashes, NUL, or an empty segment, and the canonical target must stay
+//! under the canonical asset root, so a crafted URL or a symlink cannot read
+//! outside the build directory. Embedded paths simply have to name a file in the
+//! embedded table; there is no filesystem to escape.
+//!
+//! Embedded files were gzipped by the build script, so every embedded response
+//! carries `Content-Encoding: gzip`. The content-type mapping is shared with the
+//! directory path.
 
 use std::path::Path;
 
@@ -21,11 +29,19 @@ use axum::response::{IntoResponse, Response};
 use std::fs;
 
 use crate::respond;
-use crate::server::AppState;
+use crate::server::{AppState, AssetSource};
 
 /// The SPA shell.
 pub(crate) async fn index(State(state): State<AppState>) -> Response {
-    let path = state.assets.join("index.html");
+    match state.assets.as_ref() {
+        AssetSource::Directory(directory) => directory_index(directory).await,
+        #[cfg(feature = "embed")]
+        AssetSource::Embedded => embedded("index.html"),
+    }
+}
+
+async fn directory_index(directory: &Path) -> Response {
+    let path = directory.join("index.html");
     match fs::read(&path) {
         Ok(bytes) => (
             StatusCode::OK,
@@ -58,7 +74,7 @@ pub(crate) async fn asset(
     serve_relative(state, relative).await
 }
 
-/// One hashed SvelteKit build file: `/_app/<path>` maps to `<assets>/_app/<path>`.
+/// One hashed SvelteKit build file: `/_app/<path>` maps to `_app/<path>`.
 ///
 /// The generated `index.html` references `/_app/...`; the prefix is part of the
 /// on-disk layout, so it is restored here rather than stripped.
@@ -70,22 +86,23 @@ pub(crate) async fn app_asset(
 }
 
 async fn serve_relative(state: AppState, relative: String) -> Response {
-    let Some(relative) = safe_relative(&relative) else {
+    if !crate::manifest::safe_relative(&relative) {
         return respond::bad_request(
             "INVALID_ASSET_PATH",
             "the asset path contains a forbidden segment",
         );
-    };
-    let target = match resolve(&state.assets, relative).await {
+    }
+    match state.assets.as_ref() {
+        AssetSource::Directory(directory) => serve_directory(directory, &relative).await,
+        #[cfg(feature = "embed")]
+        AssetSource::Embedded => embedded(&relative),
+    }
+}
+
+async fn serve_directory(directory: &Path, relative: &str) -> Response {
+    let target = match resolve(directory, relative).await {
         Some(target) => target,
-        None => {
-            return respond::adapter_error(
-                StatusCode::NOT_FOUND,
-                "ASSET_NOT_FOUND",
-                "the requested asset does not exist",
-                serde_json::json!({ "path": relative }),
-            )
-        }
+        None => return asset_not_found(relative),
     };
     match fs::read(&target) {
         Ok(bytes) => Response::builder()
@@ -94,26 +111,35 @@ async fn serve_relative(state: AppState, relative: String) -> Response {
             .header(header::CACHE_CONTROL, "no-cache")
             .body(Body::from(bytes))
             .expect("a response with a known content type builds"),
-        Err(_) => respond::adapter_error(
-            StatusCode::NOT_FOUND,
-            "ASSET_NOT_FOUND",
-            "the requested asset does not exist",
-            serde_json::json!({ "path": relative }),
-        ),
+        Err(_) => asset_not_found(relative),
     }
 }
 
-/// A relative path with no traversal and no empty segments.
-fn safe_relative(path: &str) -> Option<&str> {
-    if path.is_empty() || path.starts_with('/') || path.contains('\\') || path.contains('\0') {
-        return None;
-    }
-    for segment in path.split('/') {
-        if segment.is_empty() || segment == "." || segment == ".." {
-            return None;
-        }
-    }
-    Some(path)
+/// Serve one file from the tree embedded at build time.
+///
+/// The bytes are already gzip-compressed, so they go out verbatim under
+/// `Content-Encoding: gzip`; the content type still comes from the path.
+#[cfg(feature = "embed")]
+fn embedded(relative: &str) -> Response {
+    let Some(gzip) = crate::embedded::asset(relative) else {
+        return asset_not_found(relative);
+    };
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, content_type(Path::new(relative)))
+        .header(header::CACHE_CONTROL, "no-cache")
+        .header(header::CONTENT_ENCODING, "gzip")
+        .body(Body::from(gzip))
+        .expect("a response with a known content type builds")
+}
+
+fn asset_not_found(relative: &str) -> Response {
+    respond::adapter_error(
+        StatusCode::NOT_FOUND,
+        "ASSET_NOT_FOUND",
+        "the requested asset does not exist",
+        serde_json::json!({ "path": relative }),
+    )
 }
 
 /// Canonicalize the target and require it to stay inside the asset root.

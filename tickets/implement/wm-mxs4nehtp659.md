@@ -3,11 +3,12 @@ schema: 1
 id: wm-mxs4nehtp659
 title: Gate pull requests with CI
 category: implement
-status: open
+status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-04T15:38:17Z
-updated_at: 2026-11-04T15:38:17Z
+updated_at: 2026-11-04T16:41:05Z
+closed_at: 2026-11-04T16:41:05Z
 parent: wm-4125jxq7bpq8
 dependencies:
   - wm-vkasp2ade4j7

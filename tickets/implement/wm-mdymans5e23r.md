@@ -3,11 +3,12 @@ schema: 1
 id: wm-mdymans5e23r
 title: Report embedded asset provenance in doctor
 category: implement
-status: open
+status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-04T15:38:15Z
-updated_at: 2026-11-04T15:38:15Z
+updated_at: 2026-11-04T16:52:21Z
+closed_at: 2026-11-04T16:52:21Z
 parent: wm-4125jxq7bpq8
 dependencies:
   - wm-vkasp2ade4j7

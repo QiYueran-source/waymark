@@ -43,6 +43,7 @@ const FINDING_ONLY: &[Code] = &[
     Code::NotAGitRepository,
     Code::DanglingReference,
     Code::TimestampIncoherent,
+    Code::AssetsVersionMismatch,
 ];
 
 fn row(code: Code) -> Value {
@@ -177,7 +178,55 @@ fn git_unavailable_is_a_finding_only_info_code() {
         code.location_kinds().is_empty(),
         "a missing binary is an environment fact, not a document location"
     );
-    assert_eq!(Code::ALL.len(), 38, "the registry grew by exactly one code");
+}
+
+#[test]
+fn the_distribution_codes_are_registered_and_classified() {
+    // The basic build refuses `serve` as invalid input: the build, not the
+    // request's data, is what must change.
+    let web = Code::from_str("WEB_NOT_INCLUDED").expect("WEB_NOT_INCLUDED is a registered code");
+    assert_eq!(web.exit_class(), Some(ExitClass::InvalidInput));
+    assert!(!web.retryable());
+    assert_eq!(web.finding(), None);
+    assert!(
+        web.details_keys().is_empty(),
+        "the message names the package"
+    );
+    assert!(
+        web.location_kinds().is_empty(),
+        "a build variant is not a document location"
+    );
+
+    // A busy loopback port is an environment condition; the same request must
+    // not be retried blindly, because the recovery action is `--port 0`.
+    let port = Code::from_str("PORT_IN_USE").expect("PORT_IN_USE is a registered code");
+    assert_eq!(port.exit_class(), Some(ExitClass::Environment));
+    assert!(!port.retryable());
+    assert_eq!(port.finding(), None);
+    assert_eq!(port.details_keys(), ["port"]);
+    assert!(
+        port.location_kinds().is_empty(),
+        "a listening port is not a document location"
+    );
+    assert_eq!(
+        Code::ALL.len(),
+        41,
+        "the registry grew by exactly three codes"
+    );
+}
+
+#[test]
+fn assets_version_mismatch_is_a_non_fixable_error_finding() {
+    let code =
+        Code::from_str("ASSETS_VERSION_MISMATCH").expect("ASSETS_VERSION_MISMATCH is registered");
+    assert_eq!(code.exit_class(), None, "a finding never fails a command");
+    assert!(!code.retryable());
+    assert_eq!(code.finding(), Some(Severity::Error));
+    assert_eq!(code.details_keys(), ["kind", "expected", "actual"]);
+    assert!(
+        code.location_kinds().is_empty(),
+        "a build's provenance is not a document location"
+    );
 }
 
 #[test]
@@ -255,6 +304,7 @@ fn the_finding_only_codes_keep_their_pinned_severity() {
         (Code::NotAGitRepository, Severity::Info),
         (Code::DanglingReference, Severity::Error),
         (Code::TimestampIncoherent, Severity::Warning),
+        (Code::AssetsVersionMismatch, Severity::Error),
     ];
     for (code, severity) in expected {
         assert_eq!(code.finding(), Some(severity), "{}", code.as_str());

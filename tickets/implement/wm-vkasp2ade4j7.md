@@ -3,11 +3,12 @@ schema: 1
 id: wm-vkasp2ade4j7
 title: Add waymark serve and waymark version build variants
 category: implement
-status: open
+status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-04T15:38:14Z
-updated_at: 2026-11-04T15:38:14Z
+updated_at: 2026-11-04T16:22:03Z
+closed_at: 2026-11-04T16:22:03Z
 parent: wm-4125jxq7bpq8
 dependencies:
   - wm-jd7fyh213aa1

@@ -106,19 +106,21 @@ classification source for *domain* failures; the adapter owns the one failure cl
 in `tests/registry.rs` and `tests/errors.rs` pins the absence, and the CLI has its own
 `adapter_failure_envelope` builder in `envelope.rs` so even this failure keeps the shared shape.
 
-## The registry has 38 codes; the brief's "39" was a miscount
+## The registry has 41 codes; the brief's "39" was a miscount
 
-**Choice:** `Code` has exactly the 38 rows of the specification's **Error registry** table, from
-`ITEM_NOT_FOUND` through `TIMESTAMP_INCOHERENT`, with the seven finding-only codes included. T2 froze 37
+**Choice:** `Code` has exactly the 41 rows of the specification's **Error registry** table, from
+`ITEM_NOT_FOUND` through `TIMESTAMP_INCOHERENT`, with the finding-only codes included. T2 froze 37
 rows; the Git-availability follow-up added `GIT_UNAVAILABLE` (see **Git history and diff (T11)** below),
-so the current total is 38.
+so the total was 38. The distribution work added `WEB_NOT_INCLUDED` (validation class, exit 3),
+`PORT_IN_USE` (environment class, exit 5), and the finding-only `ASSETS_VERSION_MISMATCH` (error
+severity, no exit class), so the current total is 41.
 
 **Why:** the table is authoritative and the brief defers to it ("exactly the codes in the spec's Error
 registry table"). Counting the table at T2 gave 37; counting it plus `USAGE_ERROR` gives 38, and the
 brief's parenthetical listed the finding-only codes correctly, so the original total was simply
-transcribed wrong. No code was invented to match the brief's number, and none was dropped: the golden
-snapshot names all 38 and a consistency test fails if the enum and the snapshot disagree in either
-direction.
+transcribed wrong. No code was invented to match the brief's number, and none was dropped: the three
+distribution additions each have a producing failure, and the golden snapshot names all 41 and a
+consistency test fails if the enum and the snapshot disagree in either direction.
 
 ## One `Spec` row per code, read by every accessor
 
@@ -140,7 +142,7 @@ its code does not declare.
 **Why:** "typed details" is only real if a missing key is a test failure rather than a consumer's
 runtime surprise. The optional subset is data rather than a convention because exactly one code needs
 it: `ITEM_NOT_FOUND` carries `{id, relation?}` — a direct lookup names no relation, a relationship
-resolution does. Encoding `?` as registry metadata keeps the check strict for the other 37 codes.
+resolution does. Encoding `?` as registry metadata keeps the check strict for the other 40 codes.
 
 ## The golden snapshot is generated, then reviewed
 
@@ -1116,9 +1118,10 @@ any dependency change.
 
 ## Binding, status codes, and failure envelopes
 
-**Choice:** the listener is always `127.0.0.1` (`WebConfig` has only `port` and `assets`; port `0`
-asks the OS for a free port). There is no host/interface/LAN option anywhere in the API. Successful
-answers reuse `waymark_core::envelope::success_envelope`; domain failures reuse `failure_envelope` and
+**Choice:** the listener is always `127.0.0.1` (`WebConfig` exposes only `port`; its asset source is a
+`pub(crate)` field selected by `new(dir)` or `embedded()`, and port `0` asks the OS for a free port).
+There is no host/interface/LAN option anywhere in the API. Successful answers reuse
+`waymark_core::envelope::success_envelope`; domain failures reuse `failure_envelope` and
 add a `_meta` block carrying `error.details.diagnostics` (or `[]`). Adapter failures reuse
 `adapter_failure_envelope` with the codes `INVALID_QUERY`, `INVALID_ASSET_PATH`, `INVALID_HOST`,
 `INVALID_ORIGIN`, `METHOD_NOT_ALLOWED`, `NOT_FOUND`, and `ASSET_NOT_FOUND`.
@@ -1183,11 +1186,16 @@ ever returned as data.
 
 ## Server API and launcher
 
-Public items: `WebConfig { port, assets }` (with `new`/`with_port`/`Default`),
-`DEFAULT_PORT = 7331`, `LOOPBACK`, `SHAPES`, `CategoryView`, `WebError`, `Running { addr, url,
-shutdown }`, `bind(project, config) -> Running` (for tests and the launcher), `serve(project, config)`
-(binds, prints the loopback URL to stderr, waits for Ctrl-C), `ensure_assets(dir)`,
-`default_assets_dir()` (`<crate>/ui/build`). `serve` is deliberately not wired into the `waymark` CLI.
+Public items: `WebConfig { port }` with a `pub(crate)` asset source (constructed by `new(dir)` or
+`embedded()`, plus `with_port`/`Default`), `DEFAULT_PORT = 7331` (re-exported from `waymark_core`,
+which also owns the CLI default), `LOOPBACK`, `SHAPES`, `CategoryView`, `WebError`, `Running { addr,
+url, shutdown }`, `bind(project, config) -> Running` (for tests and the launcher), `serve(project,
+config)` (binds, prints the loopback URL to stderr, waits for Ctrl-C), `ensure_assets(dir)`,
+`default_assets_dir()` (`<crate>/ui/build`).
+
+**Superseded by the distribution section below:** `serve` is now a `waymark` subcommand in both
+build variants. The Web branch wires `WebConfig::embedded()` and binds; the basic branch refuses with
+`WEB_NOT_INCLUDED` before any listener exists.
 
 `waymark-web-dev`: `--project PATH` (default: current directory, discovered upward), `--port` (default
 7331; `0` is accepted), `--assets DIR` (default: the crate's `ui/build`). Project discovery and the
@@ -1997,6 +2005,10 @@ document/configuration rewrites (a category-key migration's value rewrites can r
     capabilities.
   - `agent-doc` — a generated CLI reference for humans and agents reading the
     command tree, not a business capability, so it has no tool.
+  - `version` — reports the build version and the capabilities it contains; it
+    is not a business capability and has no MCP tool.
+  - `serve` — the CLI entry point for the read-only Web adapter; the Web view is
+    its own read-only surface, not an MCP tool.
 - **No `waymark-core`, `waymark-cli`, or `waymark-web` source was changed.** The
   one genuine gap found (creation's richer inputs) is recorded above rather than
   patched around in the adapter.
@@ -2369,9 +2381,12 @@ takes the `ArchiveRange` and `Projection` explicitly because those are caller ch
   stream is a terminal and `NO_COLOR` is absent or empty (the no-color.org
   convention: a present but empty variable does not disable colour).
 - **The human stream is stderr, so `auto` asks about stderr.** Human prose goes
-  to stderr; stdout carries JSON, `show --raw` documents, and raw `git diff`
-  patches. Only those stderr lines call the palette, so JSON envelopes, raw
-  documents, and raw patches are never coloured even with `--color=always`.
+  to stderr; stdout carries JSON, `waymark version`'s human line, `show --raw`
+  documents, and raw `git diff` patches. `waymark version` is an explicit stdout
+  exception because its output is the release scripts' parse target, and the
+  version tests pin the line (and an empty stderr) to that stream. Only stderr
+  lines call the palette, so JSON envelopes, raw documents, and raw patches are
+  never coloured even with `--color=always`.
 - **The colour follows `DisplayState`, not the rendered label.** The CLI keeps
   its older labels (`ready` for an unblocked in-progress item, `archived` for
   an archived item, `-` for a closed `list` row), and the painter wraps the
@@ -2928,5 +2943,217 @@ colour used only on work state and the selected row.
   section above.
 - Git is optional. `GIT_UNAVAILABLE` (no executable) and `NOT_A_GIT_REPOSITORY` (no containing
   repository) are separate location-less info findings; history/diff succeed empty, doctor/validate
-  report them, and both adapters exit zero. The registry is 38 codes. Details are in the Git sections
-  above.
+  report them, and both adapters exit zero. The registry is 41 codes: the distribution work added
+  `WEB_NOT_INCLUDED` (validation, exit 3), `PORT_IN_USE` (environment, exit 5), and the finding-only
+  `ASSETS_VERSION_MISMATCH`. Details are in the Git sections above.
+
+# Embedded frontend assets and provenance (wm-jd7fyh213aa1)
+
+The specification requires an embedded release frontend and a manifest that proves which tree was
+embedded, but leaves the mechanism open. These are the choices this implementation fixed.
+
+## Feature name and shape
+
+**Choice:** `waymark-web` declares `[features] default = []` and `embed = []`. Embedding is compiled
+by `build.rs` only when `CARGO_FEATURE_EMBED` is set; every other build writes an empty table.
+
+**Why:** the ticket names the feature, and a plain feature with no dependency edges keeps the default
+build free of npm, `ui/build`, and the manifest. `waymark-cli`'s `web` feature is expected to enable
+`waymark-web/embed` (the next ticket), so there is no second switch.
+
+## Where the manifest lives
+
+**Choice:** `crates/waymark-web/ui/assets-manifest.json`, beside `ui/build`, not inside it. It is
+ignored by Git like `ui/build` and regenerated by the frontend/release workflow.
+
+**Why:** a manifest inside the tree would be embedded and served as an asset, and would have to
+describe itself. Beside the tree it can cover the whole tree without recursion. The generator writes
+it by default (`--out` overrides); `build.rs` reads it from there and embeds a copy in the binary.
+
+## How the build id is derived
+
+**Choice:** the frontend build emits `ui/build/build-id.txt` containing a random UUIDv4. A Vite
+plugin (`waymarkBuildId` in `vite.config.ts`) emits it as an asset into the client bundle, so
+`adapter-static` copies it into `build/` with the rest of the frontend. The manifest generator reads
+and trims that file; the manifest records the same value in `build_id`.
+
+**Why:** the ticket says the build id is emitted by the frontend build. A per-build random id makes
+two separate frontend builds distinguishable, and keeping it in a file lets the id travel with the
+tree to every embedding job without passing shell state between npm and cargo. The generator never
+invents an id; a missing or empty file fails.
+
+**What would change it:** if reproducible builds are required, the id could become a hash of the
+emitted bundle instead of a UUID; the generator and build checks would keep working because they only
+compare the file with the manifest.
+
+## Gzip timing and serving
+
+**Choice:** `build.rs` gzips each embedded file once with `flate2` (pure-Rust `rust_backend`,
+`Compression::best`) into `OUT_DIR`, and the binary serves those bytes verbatim with
+`Content-Encoding: gzip`. Directory serving stays uncompressed and is unchanged.
+
+**Why:** compressing at build time spends the CPU once, keeps the binary's cold path free of a
+compressor dependency, and makes the served bytes exactly what the manifest hashed. The content-type
+mapping is the existing path-extension map, now shared by both sources. There is no negotiation: the
+response is always gzip, which every supported browser accepts.
+
+## Manifest shape and null commit
+
+**Choice:** pretty-printed JSON with a trailing newline:
+
+```json
+{
+  "version": "0.1.0",
+  "git_sha": null,
+  "build_id": "...",
+  "files": [{ "path": "index.html", "sha256": "...", "size": 1234 }]
+}
+```
+
+Paths are `/`-separated and sorted byte-wise; `sha256` is lowercase hex. `git_sha` is present as
+`null` for a local build and a string when `WAYMARK_GIT_SHA` is set. `version` is the workspace
+package version (`CARGO_PKG_VERSION` of `waymark-web`).
+
+**Why:** always emitting the key keeps consumers from treating "absent" and "unknown" differently,
+and the release checks can assert `git_sha` against the tag. Sorting and pretty printing keep the file
+diffable.
+
+## What the build script verifies
+
+**Choice:** with `embed`, `build.rs` fails the build when any of these is false:
+
+- `ui/build` exists and contains `index.html`;
+- `ui/assets-manifest.json` exists and parses;
+- the manifest's `files` are unique, sorted, safe relative paths, each a 64-digit lowercase hash, and
+  include `index.html`;
+- re-walking the tree yields exactly the manifest's files, hashes, and sizes (a stale or changed tree
+  fails, as does an extra or missing file);
+- the manifest's `version` equals the crate version and its `build_id` equals `build-id.txt`;
+- if `WAYMARK_GIT_SHA` is set, the manifest records the same commit;
+- if `WAYMARK_RELEASE=1`, `WAYMARK_GIT_SHA` is set.
+
+**Why:** the manifest must describe the bytes that are embedded, not a tree that existed earlier. The
+build script never runs npm and never repairs a manifest.
+
+## `WAYMARK_SKIP_UI_BUILD=1`
+
+**Choice:** the variable is accepted and listed for Cargo's rerun tracking, but embedding does not
+consult it to decide whether assets are required. It only documents that a workflow already built the
+tree; a missing `index.html` or manifest still fails.
+
+**Why:** reusing a tree and requiring a valid tree are orthogonal. The variable must not become a
+backdoor that ships an empty or stale asset set.
+
+## Generator invocation
+
+**Choice:** the generator is a second binary in `waymark-web`:
+
+```sh
+cargo run -p waymark-web --bin waymark-web-manifest
+# defaults: --assets crates/waymark-web/ui/build
+#           --out    crates/waymark-web/ui/assets-manifest.json
+#           --version $CARGO_PKG_VERSION
+#           --git-sha $WAYMARK_GIT_SHA (null when absent)
+```
+
+`--assets`, `--out`, `--version`, and `--git-sha` exist for tests and for a workflow that stages the
+tree elsewhere. The pure walk/hash function is `waymark_web::manifest::asset_files`; the generator is
+a thin process wrapper over it.
+
+## Public API for the next tickets
+
+- `waymark_web::WebConfig::embedded()` (only with `embed`) plus `.with_port(port)` selects the
+  embedded source; `WebConfig::new(dir)` keeps directory serving.
+- `waymark_web::embedded_manifest() -> Option<&'static AssetManifest>` returns the embedded manifest,
+  or `None` without `embed`, for `waymark version --json` and `waymark doctor`.
+- `waymark_web::AssetManifest` / `AssetFile` and `waymark_web::manifest::{asset_files, read, write,
+  build_manifest, validate_tree, verify_build_id, read_build_id, release_git_sha}` are public for the
+  build and release checks.
+
+# Distribution: build variants, `serve`, and `version`
+
+## The Web variant is one optional feature
+
+**Choice:** `waymark-cli` declares `web = ["dep:waymark-web", "waymark-web/embed", "dep:tokio"]`, with
+`waymark-web` and `tokio` optional dependencies. The basic build therefore links neither the Web crate
+nor the async runtime; `cargo tree -p waymark-cli -e features` lists no `waymark-web`.
+
+**Why:** the distribution decision names one optional capability instead of an aggregate `full`
+feature. `tokio` is part of enabling that capability, not a separate feature: `serve` needs a runtime
+to call `waymark_web::bind`, and making it a normal dependency would put both the runtime and an
+unused async stack in the basic binary.
+
+## The build variant decides capabilities, not runtime probing
+
+**Choice:** `waymark version` builds its capability list from `cfg(feature = "web")` in the adapter:
+`["cli", "mcp"]` in every build, plus `web` only in a Web build. `version --json` adds `assets` only
+when `waymark_web::embedded_manifest()` is `Some`, so the key is absent in a basic build rather than
+`null`. The human form is exactly `waymark <version> (<capabilities>)`.
+
+**Why:** a runtime probe could claim a capability the binary cannot exercise. The manifest accessor is
+already the compile-time proof that a Web build carries an embedded tree.
+
+## `serve` refuses in the basic build, and both branches discover first
+
+**Choice:** `serve` calls the same `open_project` discovery as every other command before it does
+anything else. In a basic build it then returns `WEB_NOT_INCLUDED` (exit class 3, invalid input); a
+missing or invalid project produces the ordinary `PROJECT_NOT_FOUND`/`CONFIG_INVALID` failure instead.
+The command never downloads, installs, or shells out.
+
+**Why:** a command that behaves differently from its siblings before failing would make "no project"
+indistinguishable from "wrong build". The build refusal is about the installed binary, so the message
+names the `waymark-web` package and the registry row carries no details or location.
+
+## `PORT_IN_USE` is an environment failure, not a retryable conflict
+
+**Choice:** a bind that fails with `AddrInUse` becomes `PORT_IN_USE`, exit class 5 (environment),
+non-retryable, details `{port}`, no location, and a message naming the port and `--port 0`. Any other
+bind failure stays `IO_ERROR`; a runtime stop is `INTERNAL_ERROR`. There is no free-port fallback.
+
+**Why:** the recovery action is a different port, not a retry, and `--port 0` is named in the message
+and the details carry the requested port so a script can report it. The functional specification's
+invariant that only `LOCK_TIMEOUT` and `SNAPSHOT_UNSTABLE` are retryable stays true.
+
+## Readiness is reported after binding and before blocking
+
+**Choice:** the Web branch binds with `WebConfig::embedded().with_port(args.port)`, reads the actual
+port from `Running::addr()`, then prints `serving http://127.0.0.1:<port>` on stderr (human mode) or
+emits `{"url": "http://127.0.0.1:<port>"}` in the success envelope on stdout (`--json`). Only then
+does it await Ctrl-C. The URL uses `127.0.0.1`, not `Running::url()`'s `localhost`, because the
+distribution decision names the loopback literal.
+
+**Why:** `--port 0` has no usable port until the listener exists, so reporting before binding would be
+either wrong or a second bind. `--json` must emit exactly one value and then keep serving; the
+readiness envelope is that value.
+
+## `--open` is best-effort and never silently enabled
+
+**Choice:** after readiness, `--open` spawns `xdg-open <url>` on Linux or `open <url>` on macOS with
+null standard streams, without waiting. A spawn failure prints a `warning:` line and leaves the
+server running. No opener runs without the flag.
+
+**Why:** the server is useful whether or not a browser exists, and a launcher that later exits must
+not take the server down. The flag is the only way to launch anything; `serve` mutates no project
+state.
+
+## Embedded manifest disagreements are doctor findings, not startup failures
+
+**Choice:** `waymark_web::manifest::verify_agreement` compares an `AssetManifest`'s `version` with the
+running package version and its `index.html` SHA-256 with the bytes this build embeds;
+`waymark_web::embedded_manifest_mismatch()` applies it to the binary and returns the disagreement, or
+`None` for a matching Web build or a basic build with no manifest. The `doctor`/`validate` adapter
+turns a disagreement into a finding-only `ASSETS_VERSION_MISMATCH` — severity `error`, non-fixable,
+details `{kind, expected, actual}`, no location — and appends it to the report it already has. The
+version is checked first, so a manifest that disagrees about both still produces one finding. `serve`
+never calls the check.
+
+**Why:** `build.rs` refuses to embed a manifest that disagrees with the tree, so a disagreement
+observed at runtime means tampering or a mixed build; that is a health fact, not a reason to refuse to
+start. Keeping the comparison next to the manifest keeps the rule in `waymark-web`, and pushing the
+finding through `Report::push_finding` reuses the envelope and the `--strict` exit rules instead of
+adding a second diagnosis path. `build.rs` keeps an uncompressed copy of `index.html` beside the gzip
+table so the hash needs no runtime decompressor.
+
+**What would change it:** if `serve` ever needs to refuse a mismatched tree, it can call the same
+function and choose its own failure; today it starts regardless.
+

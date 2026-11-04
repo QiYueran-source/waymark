@@ -81,6 +81,14 @@ const EXCEPTIONS: &[(&str, &str)] = &[
         "agent-doc",
         "a generated CLI reference, not a business capability",
     ),
+    (
+        "version",
+        "reports the build version and capabilities; it is not a business capability",
+    ),
+    (
+        "serve",
+        "the CLI entry point for the read-only Web adapter; it has no MCP tool",
+    ),
 ];
 
 fn cli_commands() -> Vec<String> {

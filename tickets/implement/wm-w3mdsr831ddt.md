@@ -3,11 +3,12 @@ schema: 1
 id: wm-w3mdsr831ddt
 title: Document installation, licences, changelog, and MCP clients
 category: implement
-status: open
+status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-04T15:38:12Z
-updated_at: 2026-11-04T15:38:12Z
+updated_at: 2026-11-04T15:54:29Z
+closed_at: 2026-11-04T15:54:29Z
 parent: wm-4125jxq7bpq8
 ---
 ## Parent

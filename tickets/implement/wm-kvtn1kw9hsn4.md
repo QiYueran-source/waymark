@@ -3,11 +3,12 @@ schema: 1
 id: wm-kvtn1kw9hsn4
 title: Publish verified release artifacts from a tag
 category: implement
-status: open
+status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-04T15:38:20Z
-updated_at: 2026-11-04T15:38:20Z
+updated_at: 2026-11-04T17:34:09Z
+closed_at: 2026-11-04T17:34:09Z
 parent: wm-4125jxq7bpq8
 dependencies:
   - wm-vkasp2ade4j7
