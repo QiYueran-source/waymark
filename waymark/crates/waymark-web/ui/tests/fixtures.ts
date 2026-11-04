@@ -253,6 +253,84 @@ export function success(data: unknown): Record<string, unknown> {
 	};
 }
 
+/**
+ * A diagnostic finding, matching `waymark_core::envelope::Finding`:
+ * `{severity, code, location?, message, fixable}`.
+ */
+export interface Finding {
+	severity: 'error' | 'warning' | 'info';
+	code: string;
+	location?: Record<string, unknown>;
+	message: string;
+	fixable: boolean;
+}
+
+/** One finding; `location` is omitted when the finding has no place. */
+export function finding(options: {
+	code: string;
+	message: string;
+	severity?: 'error' | 'warning' | 'info';
+	location?: Record<string, unknown>;
+	fixable?: boolean;
+}): Finding {
+	const value: Finding = {
+		severity: options.severity ?? 'error',
+		code: options.code,
+		message: options.message,
+		fixable: options.fixable ?? false
+	};
+	if (options.location !== undefined) value.location = options.location;
+	return value;
+}
+
+/**
+ * The `INCOMPLETE_PROJECTION` summary finding that leads a scoped projection's
+ * diagnostics (`Projection::diagnostics`).
+ */
+export function incompleteProjectionSummary(
+	options: { documents?: number; uncertain?: number } = {}
+): Finding {
+	const documents = options.documents ?? 0;
+	const uncertain = options.uncertain ?? 0;
+	return finding({
+		code: 'INCOMPLETE_PROJECTION',
+		message: `the projection is scoped and fresh: ${documents} document(s) could not be read and ${uncertain} item-shaped path(s) are uncertain`
+	});
+}
+
+/**
+ * A field-level validation finding for the document at `path`, as `parse.rs`
+ * builds it: the location is the field, and the document is named in prose.
+ */
+export function validationFinding(path: string, field: string, reason: string): Finding {
+	return finding({
+		code: 'VALIDATION_ERROR',
+		location: { kind: 'field', field },
+		message: `work item document ${path}: ${field}: ${reason}`
+	});
+}
+
+/** A document that could not be parsed; the location names the file. */
+export function parseErrorFinding(path: string, reason: string): Finding {
+	return finding({
+		code: 'PARSE_ERROR',
+		location: { kind: 'file', path },
+		message: `cannot parse ${path}: ${reason}`
+	});
+}
+
+/**
+ * An item-shaped inventory path the projection could not classify
+ * (`projection::inventory_finding`), which reuses `INCOMPLETE_PROJECTION`.
+ */
+export function inventoryUncertaintyFinding(path: string, reason: string): Finding {
+	return finding({
+		code: 'INCOMPLETE_PROJECTION',
+		location: { kind: 'file', path },
+		message: `the inventory is uncertain about ${path}: ${reason}`
+	});
+}
+
 /** A failure envelope, matching `domain_error` / `adapter_error`. */
 export function failure(
 	code: string,
