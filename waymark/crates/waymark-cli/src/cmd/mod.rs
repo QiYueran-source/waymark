@@ -25,6 +25,7 @@ pub mod relationship;
 pub mod show;
 pub mod status;
 pub mod tree;
+pub mod version;
 
 use std::io::Write;
 

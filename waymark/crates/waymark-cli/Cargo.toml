@@ -10,6 +10,11 @@ rust-version.workspace = true
 name = "waymark"
 path = "src/main.rs"
 
+[features]
+# The off-by-default Web variant: compile in the read-only Web server with its
+# embedded frontend. A basic build must never reach `waymark-web` at all.
+web = ["dep:waymark-web", "waymark-web/embed", "dep:tokio"]
+
 [dependencies]
 waymark-core.workspace = true
 serde.workspace = true
@@ -17,6 +22,10 @@ serde_json.workspace = true
 clap.workspace = true
 chrono.workspace = true
 camino.workspace = true
+waymark-web = { workspace = true, optional = true }
+# `serve` needs an async runtime; tokio is part of the Web variant only, so the
+# basic binary does not link it.
+tokio = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true

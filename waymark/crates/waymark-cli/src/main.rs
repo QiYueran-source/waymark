@@ -146,6 +146,8 @@ enum Command {
     Doctor(DoctorArgs),
     /// Validate the whole project against the current configuration.
     Validate(ValidateArgs),
+    /// Report the version and the capabilities included in this build.
+    Version,
 }
 
 fn main() -> ExitCode {
@@ -347,6 +349,7 @@ fn run(cli: Cli) -> Result<u8, waymark_core::WaymarkError> {
         )),
         Command::Doctor(args) => cmd::doctor::run_doctor(args, cli.project.as_deref(), json),
         Command::Validate(args) => cmd::doctor::run_validate(args, cli.project.as_deref(), json),
+        Command::Version => ok(cmd::version::run(json)),
     }
 }
 
