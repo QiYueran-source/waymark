@@ -14,6 +14,9 @@ export default defineConfig({
 		environment: 'jsdom',
 		include: ['tests/**/*.test.ts'],
 		setupFiles: ['./tests/setup.ts'],
-		restoreMocks: true
+		restoreMocks: true,
+		// Load the real stylesheet, so a test can assert the focus ring a
+		// keyboard user actually sees instead of trusting a class name.
+		css: true
 	}
 });
