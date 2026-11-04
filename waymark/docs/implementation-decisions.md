@@ -2301,3 +2301,117 @@ takes the `ArchiveRange` and `Projection` explicitly because those are caller ch
   rule. `blocked_by` remains the CLI/JSON fact, and the Web derives
   `blocked_reason` from the same helper rather than owning the prose.
 
+
+# Web graph view — rendering library
+
+## Svelte Flow, with dagre for the top-to-bottom hierarchy
+
+**Choice:** `@xyflow/svelte` **1.7.1** renders the read-only work graph, and
+`@dagrejs/dagre` **3.1.3** computes the fixed top-to-bottom layered layout. Both are pinned to an
+exact version (no `^`, no `~`) in `crates/waymark-web/ui/package.json` and in
+`crates/waymark-web/ui/package-lock.json`, so `npm ci` resolves them from the lockfile alone. They sit
+in `devDependencies` beside every other UI input (the SPA is bundled at build time and served as
+static files, so this project has no runtime `dependencies` list). Neither package is imported by
+`ui/src` yet; the ticket that builds the view imports them.
+
+**Why:** judged only against this project's contract:
+
+| Contract point | Svelte Flow 1.7.1 | Cytoscape.js 3.34.4 |
+| --- | --- | --- |
+| Strictly read-only | No write surface at all; nodes are inert unless the app attaches handlers; `nodesDraggable={false}`, `nodesConnectable={false}`, `deleteKey={null}` remove the mutating gestures | No write surface either; both are rendering libraries |
+| Fixed top-to-bottom layout | Positions are plain `{x, y}` on each node, so the app supplies them from a layered engine; dagre in `rankdir: 'TB'` produced `a(145,20) b(230,110) c(60,110)` for a 3-node hierarchy | Same model (`dagre` layout preset gives `a(26,0.5) b(51.5,51.5) c(0.5,51.5)`), but positions are only reachable through library objects |
+| Solid parent / dashed directed dependency edges | Edge `style: 'stroke-dasharray: 5 5'` plus `markerEnd: {type: 'arrowclosed'}` rendered a dashed path with an arrowhead in the jsdom spike | Same via `line-style: dashed` plus a `target-arrow-shape` on a style selector (both present in 3.34.4) |
+| Non-draggable nodes | Per-node `draggable: false` and the global `nodesDraggable={false}` | `autoungrabify: true` and node `grabbable: false` (both present in 3.34.4) |
+| App-controlled node content | The node body is app Svelte markup: the existing `Shape.svelte`, category name, state colour, blocked marker and `blocked_reason` render unchanged, and the accessible name comes from the app's own `<button aria-label>` | Node labels are a text field on a canvas; app-styled content means HTML overlays positioned over the canvas, i.e. a second rendering stack |
+| Accessibility surface | Each node is a DOM element (`role="group"`, `aria-roledescription="node"`, `aria-describedby` pointing at the library description, `tabindex="0"` when focusable); each edge is `<g role="group" aria-label="Edge from a to b">`; the viewport is `role="application"` and `ariaLabelConfig` localizes the library strings. App controls inside a node are ordinary focusable DOM | Every node is painted pixels; a node has no element, no role and no accessible name. Accessible node semantics would require a parallel hidden DOM tree, which is the "second rendering stack" this ticket forbids |
+| Testability from the existing suite | Rendered 3 nodes and 2 edges as real DOM in jsdom; a `<button>` inside the node content was found by role/name, `fireEvent.click` fired the app callback, and the selected state was observable | Rendered mode aborts in jsdom: `Error: Could not create canvas of type 2d`. Headless mode computes positions but produces no DOM, so every test would have to assert library objects |
+| Bundle weight | A minimal SvelteFlow page built to 208.16 kB JS (69.69 kB gzip) + 16.32 kB CSS (2.75 kB gzip), against a 25.26 kB (10.14 kB gzip) plain-Svelte baseline: about 60 kB gzip of JS marginal. Dagre adds 48.8 kB minified (17.1 kB gzip) | 490 kB minified (157.9 kB gzip) bundled through esbuild with the dagre extension; cytoscape's own `esm.min` is 434 kB (136 kB gzip) |
+| Install footprint | 20 packages, ~3.5 MB unpacked (`@xyflow/svelte`, `@xyflow/system 0.0.84`, `@svelte-put/shortcut 4.2.0`, `d3-drag/zoom/selection/interpolate` and their `@types`) | 2 packages, ~6.4 MB unpacked (`cytoscape` 5.6 MB, `cytoscape-dagre` 810 kB — the extension bundles its own dagre) |
+| Maintenance | 1.7.1 published 2026-11-02, MIT, xyflow team; `@xyflow/svelte` ~368 k weekly downloads, `@xyflow/system` ~20 M | 3.34.4 published 2026-10-15, MIT, cytoscape team; ~25 M weekly downloads |
+
+Svelte Flow wins on the two points that decide this ticket: it renders DOM the existing Vitest +
+Testing Library + jsdom suite can drive, and its node content is app-owned markup, so the
+accessibility contract (semantic roles, accessible names, keyboard operation) is satisfied by the
+same components the tree already uses rather than by a parallel representation.
+
+**Rejected — Cytoscape.js 3.34.4 with cytoscape-dagre 4.0.1.** The rejecting evidence is the jsdom
+spike, not documentation: mounting a 3-node hierarchy in a real jsdom container threw
+`Error: Could not create canvas of type 2d` from `cytoscape.esm.mjs` (`HTMLCanvasElement.getContext`
+is not implemented without the native `canvas` package), and the container was left holding an empty
+`<div>` with no node elements. The same graph in `headless: true` mode did compute dagre positions, so
+Cytoscape is usable only as a model — tests would then assert `cy.nodes()`/`cy.edges()`, which is
+exactly the library-internals coupling the specification forbids, or the suite would need a native
+canvas dependency and still could not name a node. Canvas painting is the root cause of both
+failures: no DOM means no accessible node names and no way for Testing Library to reach a node.
+
+**Open / what would change it.**
+- If the suite stopped running in jsdom (a real browser runner with a canvas implementation), the
+  testability objection to Cytoscape would weaken — the accessibility objection would not.
+- If Svelte Flow made node content canvas-painted, or dropped its `role`/`aria-label` output, the
+  decision needs revisiting.
+- If the graph bundle budget dropped below ~60 kB gzip (for example a hard performance budget for
+  large projects), a lighter library would be reconsidered.
+- If the licence or the visible attribution link were unacceptable (see below), a library without one
+  would be reconsidered.
+
+**Layout helper, and why dagre rather than elk.** `@dagrejs/dagre` 3.1.3 is MIT, synchronous, works
+in jsdom and in Node, and adds one transitive dependency (`@dagrejs/graphlib` 4.0.6). `elkjs` 0.12.1
+is `EPL-2.0 OR GPL-3.0-or-later` — a copyleft option in a project whose whole dependency surface is
+currently permissive — ships an 8.2 MB package with a web-worker runtime, and its layered algorithm
+is heavier than a fixed top-to-bottom rank layout needs. Cytoscape's equivalent helper,
+`cytoscape-dagre`, bundles its own copy of dagre and is only reachable through the canvas renderer.
+
+## The integration seam
+
+- `ui/src/lib/graph.ts` owns the **pure** graph model: nodes built from the tree payload (category
+  shape, category name, state, blocked marker, accessible name parts), solid parent-child edges,
+  optional dashed dependency edges, the visible/collapsed/filtered sets, and the structured text
+  alternative's data. It imports no graph library (dagre included) and no Svelte component, and is
+  unit-tested directly.
+- `ui/src/lib/components/GraphView.svelte` — plus at most small child components under the same
+  layer, such as a node component — is the **only** module that imports `@xyflow/svelte` and
+  `@dagrejs/dagre`. It receives the model and `onSelect`/`onToggle` callbacks, owns the layout call
+  and the pan/zoom/fit/reset controls, and never becomes application state.
+- `ui/src/lib/components/GraphText.svelte` renders the structured text/list alternative as plain DOM.
+- Tests drive rendered controls and observable state (roles, accessible names, `data-*` hooks the app
+  owns, callback effects), never library objects — no `cy` instances, no `nodeLookup`, no
+  `useSvelteFlow` store assertions.
+
+## What the graph tickets must know (measured, not assumed)
+
+- **No vitest config change is needed once the package is a declared dependency.** The existing
+  plugin chain compiles the library's `.svelte` files as-is. A spike that installed the package with
+  `npm install --no-save` did fail with `TypeError: Unknown file extension ".svelte"`; after
+  declaring it in `package.json` the same mount passed with the unchanged `vitest.config.ts`
+  (`test.server.deps.inline` was tried and is not required).
+- **Two jsdom shims are required** before any `SvelteFlow` mount: `window.matchMedia` (Svelte's
+  `MediaQuery`, used by the library's initial store, throws `window.matchMedia is not a function`)
+  and `ResizeObserver` (`ReferenceError: ResizeObserver is not defined`). Both belong in
+  `tests/setup.ts`, not in individual tests. Verified by removing them one at a time from the spike
+  setup.
+- **Edges need explicit geometry.** jsdom reports `getBoundingClientRect()` as all zeros, so
+  `<Handle>` components inside a custom node measure 0×0 and the library renders **zero** edges.
+  Giving each node an explicit `width`, `height` and static handle metadata
+  (`handles: [{type: 'source', position: Position.Bottom, x, y, width: 1, height: 1}, …]`) produced
+  the expected edge paths, including the dashed style and the arrowhead marker — and needs no
+  `<Handle>` component at all, which also keeps the mobile/empty state honest. Prefer asserting edge
+  semantics from the model; if the DOM must be asserted, keep the static handles.
+- **Nodes are addressable.** A node rendered as
+  `<div class="svelte-flow__node" role="group" aria-roledescription="node" tabindex="0"
+  aria-describedby="svelte-flow__node-desc-1">`; edges as
+  `<g class="svelte-flow__edge" role="group" aria-label="Edge from a to b">`; the viewport as
+  `role="application"`. Put the app's `<button>` (or link) inside the node content: that is the
+  accessible name and the click target, and it drove `onSelect` from a jsdom click. `nodesFocusable`
+  defaults to `true` (a second tab stop per node); set it deliberately and record which surface owns
+  keyboard selection.
+- **Non-draggable** is `nodesDraggable={false}` globally plus `draggable: false` per node;
+  `nodesConnectable={false}` and `deleteKey={null}` remove the other mutating gestures.
+- **Attribution.** `SvelteFlow` renders a `svelte-flow__attribution` panel containing an outbound
+  link to `svelteflow.dev` unless `proOptions={{ hideAttribution: true }}` is passed. The MIT licence
+  permits hiding it; the ticket that builds the view must choose and record the choice, because a
+  visible third-party link is a product-facing element this ticket deliberately does not ship.
+- **Weight, for later budgets.** A minimal graph page is ~60 kB gzip of JavaScript over the current
+  shell (69.7 kB gzip total against 10.1 kB gzip today) plus 2.8 kB gzip of CSS; dagre is a further
+  ~17 kB gzip. Install is 20 packages, ~3.5 MB unpacked. The dependency is present in
+  `node_modules` today but absent from the built bundle: `grep -r 'xyflow\|dagre' ui/build` finds
+  nothing and the site is ~149 kB as before, because no module imports it.
