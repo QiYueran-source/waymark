@@ -27,6 +27,7 @@ use clap::CommandFactory;
 
 use cmd::agent_doc::AgentDocArgs;
 use cmd::archive::ArchiveArgs;
+use cmd::colour::ColourChoice;
 use cmd::config::ConfigArgs;
 use cmd::create::CreateArgs;
 use cmd::doctor::{DoctorArgs, ValidateArgs};
@@ -57,6 +58,16 @@ struct Cli {
     /// Emit the versioned JSON envelope on stdout.
     #[arg(long, global = true)]
     json: bool,
+
+    /// When to colour human output: auto, always, or never.
+    #[arg(
+        long,
+        global = true,
+        value_enum,
+        default_value = "auto",
+        value_name = "WHEN"
+    )]
+    color: ColourChoice,
 
     /// Operate on the project at this directory instead of discovering one.
     #[arg(long, global = true, value_name = "DIR")]
@@ -184,6 +195,7 @@ fn finish(result: Result<u8, waymark_core::WaymarkError>, json: bool) -> ExitCod
 /// class directly instead of travelling through the generic failure mapping.
 fn run(cli: Cli) -> Result<u8, waymark_core::WaymarkError> {
     let json = cli.json;
+    let colour = cmd::colour::Palette::for_human_stream(cli.color);
     let options = OpOptions::new()
         .with_clock(Arc::new(SystemClock))
         .with_lock_wait(cmd::lock_wait(cli.lock_timeout_ms));
@@ -196,7 +208,7 @@ fn run(cli: Cli) -> Result<u8, waymark_core::WaymarkError> {
         }
         Command::Show(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
-            ok(cmd::show::run(&project, &args, json))
+            ok(cmd::show::run(&project, &args, json, colour))
         }
         Command::Status(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
@@ -274,7 +286,13 @@ fn run(cli: Cli) -> Result<u8, waymark_core::WaymarkError> {
         }
         Command::List(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
-            ok(cmd::list::run(&project, &args, cmd::list::Which::All, json))
+            ok(cmd::list::run(
+                &project,
+                &args,
+                cmd::list::Which::All,
+                json,
+                colour,
+            ))
         }
         Command::Ready(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
@@ -283,6 +301,7 @@ fn run(cli: Cli) -> Result<u8, waymark_core::WaymarkError> {
                 &args,
                 cmd::list::Which::Ready,
                 json,
+                colour,
             ))
         }
         Command::Blocked(args) => {
@@ -292,11 +311,12 @@ fn run(cli: Cli) -> Result<u8, waymark_core::WaymarkError> {
                 &args,
                 cmd::list::Which::Blocked,
                 json,
+                colour,
             ))
         }
         Command::Query(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
-            ok(cmd::query::run_query(&project, &args, json))
+            ok(cmd::query::run_query(&project, &args, json, colour))
         }
         Command::Search(args) => {
             let project = cmd::open_project(cli.project.as_deref())?;
