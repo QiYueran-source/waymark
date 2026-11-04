@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildGraph, edgeLabel, graphNodeLabel, graphOutline } from '$lib/graph';
+import { buildGraph, collapseGraph, edgeLabel, graphNodeLabel, graphOutline } from '$lib/graph';
 import type { OutlineEntry, OutlineItemEntry } from '$lib/graph';
 import { allIds, filterGroups, visibleRoots } from '$lib/tree';
 import {
@@ -265,6 +265,21 @@ describe('the structured text outline', () => {
 			context: false,
 			contextNote: null
 		});
+	});
+
+	it('drops a collapsed branch from the outline exactly as it drops it from the drawing', () => {
+		const graph = buildGraph(hierarchyTree);
+		const collapsed = collapseGraph(graph, new Set(['wm-h-child']));
+		const outline = graphOutline(collapsed);
+		// The collapsed node stays and keeps its own sentence; its child is gone
+		// from the outline, so the two readings list the same items.
+		expect(outline.map((entry) => entry.id)).toEqual(collapsed.nodes.map((node) => node.id));
+		expect(outline.map((entry) => entry.id)).not.toContain('wm-h-grandchild');
+		expect(drawn(outline, 'wm-h-child').children).toEqual([]);
+		// Nothing else moves: the sibling root and its relation are untouched.
+		expect(drawn(outline, 'wm-h-second-root').parent).toBe(
+			'Parent: none; this is a top-level item.'
+		);
 	});
 
 	it('carries the server’s blocked reason in prose', () => {

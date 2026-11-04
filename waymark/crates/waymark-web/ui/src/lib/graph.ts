@@ -56,6 +56,11 @@ export interface GraphNode {
 	 * resolved here: a target that is not drawn yields no edge at all.
 	 */
 	dependencies: string[];
+	/**
+	 * True when the reader has collapsed this node, so its children are not
+	 * drawn. Set by [`collapseGraph`]; a complete graph has none collapsed.
+	 */
+	collapsed?: boolean;
 }
 
 /** A solid parent-child edge. */
@@ -310,6 +315,53 @@ export interface OutlineUnresolvedEntry {
 }
 
 export type OutlineEntry = OutlineItemEntry | OutlineUnresolvedEntry;
+
+/**
+ * The graph with the reader's collapsed nodes applied.
+ *
+ * Collapsing is presentation only: the returned model is a new value, so the
+ * complete one survives for anything that still needs it. A node that is itself
+ * collapsed stays and is marked `collapsed`; every descendant below it is left
+ * out, along with any edge whose far end went with it. Ids in `collapsed` that
+ * this drawing does not contain are ignored, which is what lets a stored
+ * collapse set survive project changes.
+ *
+ * This is the density seam: the drawing and the structured text alternative are
+ * both built from the result, so a collapsed branch is absent from both rather
+ * than from one of them.
+ */
+export function collapseGraph(graph: WorkGraph, collapsed: ReadonlySet<string>): WorkGraph {
+	if (collapsed.size === 0) return graph;
+
+	// `graph.nodes` lists a parent before its children, so one pass suffices: a
+	// node below a hidden or collapsed parent is hidden in turn.
+	const hidden = new Set<string>();
+	const kept: GraphNode[] = [];
+	for (const node of graph.nodes) {
+		if (node.parentId !== null && hidden.has(node.parentId)) {
+			hidden.add(node.id);
+			continue;
+		}
+		if (collapsed.has(node.id)) {
+			hidden.add(node.id);
+			kept.push({ ...node, collapsed: true });
+			continue;
+		}
+		kept.push(node);
+	}
+
+	const drawn = new Set(kept.map((node) => node.id));
+	const keepBoth = (edge: { from: string; to: string }): boolean =>
+		drawn.has(edge.from) && drawn.has(edge.to);
+
+	return {
+		nodes: kept,
+		edges: graph.edges.filter(keepBoth),
+		dependencies: graph.dependencies.filter(keepBoth),
+		roots: graph.roots.filter((id) => drawn.has(id)),
+		unresolved: graph.unresolved
+	};
+}
 
 /**
  * The structured text alternative to the graph, as a flat, ordered outline.
