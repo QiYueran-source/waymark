@@ -11,16 +11,28 @@ Run from this directory (`crates/waymark-web/ui`):
 
 ```sh
 npm ci          # install exactly what package-lock.json pins
-npm run build   # static SPA output in ui/build
+npm run build   # static SPA output in ui/build, plus ui/build/build-id.txt
 npm test        # vitest + @testing-library/svelte + jsdom
 npm run check   # svelte-check type/diagnostic pass
 ```
 
-`node_modules/`, `build/`, and `.svelte-kit/` are local artifacts and are
-ignored; `package-lock.json` is committed.
+`node_modules/`, `build/`, `.svelte-kit/`, and `assets-manifest.json` are local
+artifacts and are ignored; `package-lock.json` is committed.
 
-`npm run build` emits `ui/build/index.html` and hashed files under
-`ui/build/_app/...`. The service serves the shell at `/` and maps `/_app/<path>`
+`npm run build` emits `ui/build/index.html`, hashed files under
+`ui/build/_app/...`, and `ui/build/build-id.txt` (a random id the Vite plugin in
+`vite.config.ts` writes after the adapter finishes). A Web release then records
+the tree in `ui/assets-manifest.json` with the Rust generator:
+
+```sh
+# from the repository root
+cargo run -p waymark-web --bin waymark-web-manifest
+```
+
+The generator walks `ui/build`, hashes every file, and fails if `index.html` or
+`build-id.txt` is missing. `cargo build -p waymark-web --features embed` embeds
+the tree only when that manifest is present and matches the tree exactly; the
+development launcher below does not need it. The service serves the shell at `/` and maps `/_app/<path>`
 to `<assets>/_app/<path>` (SvelteKit's default asset prefix, which is why
 `svelte.config.js` leaves `kit.paths.base` and `kit.paths.assets` unset and only
 sets `kit.paths.relative = false`). The backend also serves the same files under
