@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-04T06:30:35Z
+updated_at: 2026-11-04T06:33:49Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -228,6 +228,11 @@ Codes with no exit class, used as warnings and findings: `OWNER_MISMATCH` (warni
 - One browser-local direction preference per project applies to both combined and category-grouped graph modes; restore it on refresh or reopening the same project, without affecting other projects. Confirmed on 2026-11-04.
 - Switching direction changes layout only: preserve the category selection, selected work item and open detail panel, graph expansion/collapse state, and dependency-visibility choice. Existing planned graph features remain governed by their own design; this decision does not claim they are implemented. Confirmed on 2026-11-04.
 - After switching directions, automatically fit the currently visible graph to the canvas so the overview is visible again; users may subsequently pan and zoom. Confirmed on 2026-11-04.
+
+- Direction changes preserve parent-child relationships and the order of siblings, changing only geometry and connection placement. In left-to-right mode parent-child lines connect from the parent right to the child left; enabled dependency arrows retain their original relationship direction. Confirmed on 2026-11-04.
+- When switching direction with the detail panel open, fit the graph to the remaining visible graph canvas rather than the entire page. If there is no graph to show, retain the existing empty state and do not fit an empty graph. Confirmed on 2026-11-04.
+- When browser storage is unavailable, direction switching remains usable for the current session and the existing brief persistence-failure notice explains that the preference cannot be saved; a later session may return to the default. Browser origin, browser and normalized project path remain the existing preference isolation boundaries. Confirmed on 2026-11-04.
+- Direction is explicitly selected by the user; do not automatically switch based on hierarchy depth, item count or viewport size. Confirmed on 2026-11-04.
 
 ### Reopened decisions: Web, MCP, and distribution
 
