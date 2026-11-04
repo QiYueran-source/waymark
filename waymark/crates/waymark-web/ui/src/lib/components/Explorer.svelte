@@ -158,14 +158,28 @@
 	);
 
 	/**
-	 * The alternative's outline, built from the same model the drawing renders.
+	 * The one drawing both presentations read.
 	 *
-	 * Sharing `workGraph` is what makes the two views agree on category scope,
-	 * collapse, and the dependency overlay: there is no second projection to
-	 * keep in step. It is only built while the alternative is on.
+	 * Category scope and the dependency overlay already reach the model through
+	 * `buildGraph`, so they apply to the drawing and the outline alike. This is
+	 * the seam the graph's collapse state is applied at: whichever filtered and
+	 * collapsed model the drawing is given is also the one `graphOutline` reads,
+	 * so the two cannot disagree about which items are showing. There is no
+	 * second projection to keep in step.
+	 *
+	 * TODO(wm-7k80455wfcks): apply that ticket's collapsed view here, e.g.
+	 * `const visibleGraph = $derived(collapseGraph(workGraph, collapsedNodes))`.
+	 * Until it lands, the graph has no collapse state and this is the complete
+	 * filtered model.
+	 */
+	const visibleGraph = $derived(workGraph);
+
+	/**
+	 * The alternative's outline, built from the same model the drawing renders.
+	 * It is only built while the alternative is on.
 	 */
 	const outline = $derived(
-		workGraph === null || !graphAlternative ? [] : graphOutline(workGraph)
+		visibleGraph === null || !graphAlternative ? [] : graphOutline(visibleGraph)
 	);
 	/** The alternative is the graph presentation read as text. */
 	const readingAlternative = $derived(presentation === 'graph' && graphAlternative);
@@ -544,15 +558,15 @@
 					</button>
 				</div>
 			{:else if treeData}
-				{#if readingAlternative && workGraph}
+				{#if readingAlternative && visibleGraph}
 					<GraphText
 						{outline}
 						{selectedId}
 						onSelect={(id, trigger) => void selectItem(id, trigger)}
 					/>
-				{:else if presentation === 'graph' && workGraph}
+				{:else if presentation === 'graph' && visibleGraph}
 					<GraphView
-						graph={workGraph}
+						graph={visibleGraph}
 						{selectedId}
 						onSelect={(id, trigger) => void selectItem(id, trigger)}
 					/>
