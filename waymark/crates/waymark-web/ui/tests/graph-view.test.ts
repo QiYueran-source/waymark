@@ -214,19 +214,24 @@ describe('the graph', () => {
 		expect(legend.textContent).toMatch(/parent-child/i);
 	});
 
-	it('renders no dependency edge even when dependency visibility is on', async () => {
+	it('draws the dependency overlay only when dependency visibility is on', async () => {
 		const rendered = await renderLoaded({ trees: { combined: combinedTree } });
 		await fireEvent.click(screen.getByLabelText('Show dependency edges'));
 		await fireEvent.click(screen.getByLabelText('Graph'));
 		await screen.findByTestId('graph');
 
-		// The fixture has wm-task-ship depending on wm-bug-login; only the
-		// hierarchy is drawn.
+		// The fixture has wm-task-ship depending on wm-bug-login: with the
+		// overlay on, the hierarchy edge keeps its place and the dependency is a
+		// second, dashed, directed edge. `graph-dependency.test.ts` owns the
+		// detailed overlay contract.
 		const edges = screen.getAllByTestId('graph-edge');
-		expect(edges).toHaveLength(1);
-		expect(edges[0].getAttribute('data-from')).toBe('wm-bug-login');
-		expect(edges[0].getAttribute('data-to')).toBe('wm-task-child');
-		expect(screen.getByTestId('graph').querySelector('[data-testid="dependency-edge"]')).toBeNull();
+		expect(edges).toHaveLength(2);
+		const solid = edges.find((edge) => edge.getAttribute('data-edge-kind') === 'parent-child');
+		expect(solid?.getAttribute('data-from')).toBe('wm-bug-login');
+		expect(solid?.getAttribute('data-to')).toBe('wm-task-child');
+		const dashed = edges.find((edge) => edge.getAttribute('data-edge-kind') === 'dependency');
+		expect(dashed?.getAttribute('data-from')).toBe('wm-task-ship');
+		expect(dashed?.getAttribute('data-to')).toBe('wm-bug-login');
 		expect(rendered.requests.every((request) => request.method === 'GET')).toBe(true);
 	});
 
@@ -274,6 +279,10 @@ describe('the graph', () => {
 		await fireEvent.click(screen.getByLabelText('By category'));
 		await waitFor(() => expect(cards()).toHaveLength(3));
 		expect(screen.getAllByTestId('graph-node-wm-bug-login')).toHaveLength(1);
-		expect(screen.queryAllByTestId('dependency-edge')).toHaveLength(0);
+		expect(
+			screen
+				.getAllByTestId('graph-edge')
+				.filter((edge) => edge.getAttribute('data-edge-kind') === 'dependency')
+		).toHaveLength(0);
 	});
 });
