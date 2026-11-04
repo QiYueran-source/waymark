@@ -32,11 +32,16 @@
 	import GraphBridge from './GraphBridge.svelte';
 	import GraphItemNode from './GraphItemNode.svelte';
 	import {
+		GRAPH_COLUMN_GAP,
+		GRAPH_MARGIN,
+		GRAPH_NODE_WIDTH,
 		GRAPH_NOMINAL_CANVAS,
+		GRAPH_ROW_GAP,
 		MAX_GRAPH_ZOOM,
 		MIN_FIT_ZOOM,
 		MIN_GRAPH_ZOOM,
 		edgeLabel,
+		estimatedGraphNodeHeight,
 		fittedViewport,
 		graphBounds,
 		graphNodeLabel,
@@ -83,14 +88,14 @@
 	} = $props();
 
 	/**
-	 * One fixed card size. The layout is computed from these numbers, so a node
-	 * never has to be measured before its edges can be drawn.
+	 * The card geometry lives with the model (`$lib/graph.ts`), so the layout and
+	 * the fallback height estimate cannot drift apart: a card's width is fixed,
+	 * and its height is laid out per node.
 	 */
-	const NODE_WIDTH = 216;
-	const NODE_HEIGHT = 84;
-	const ROW_GAP = 56;
-	const COLUMN_GAP = 28;
-	const MARGIN = 16;
+	const NODE_WIDTH = GRAPH_NODE_WIDTH;
+	const ROW_GAP = GRAPH_ROW_GAP;
+	const COLUMN_GAP = GRAPH_COLUMN_GAP;
+	const MARGIN = GRAPH_MARGIN;
 
 	/**
 	 * Handle ids. The hierarchy always leaves the bottom of a parent and enters
@@ -125,6 +130,31 @@
 		payload: GraphNodePayload;
 		x: number;
 		y: number;
+		height: number;
+	}
+
+	/**
+	 * Real card heights reported by the rendered cards, by node id.
+	 *
+	 * The layout is a pure function of the model plus this map, so it can be
+	 * computed before the browser paints (from the deterministic estimate) and
+	 * again when cards report their measured height. Nothing elsewhere reads the
+	 * DOM to place a node.
+	 */
+	let measuredHeights: Record<string, number> = $state({});
+
+	/**
+	 * Take one card's measured border-box height back from the renderer.
+	 *
+	 * A card reports through a `ResizeObserver`, so this runs once per real
+	 * change: the map keeps only whole pixels and ignores a repeated or empty
+	 * measurement, which is what keeps the re-layout from looping.
+	 */
+	function measureNode(id: string, height: number): void {
+		const measured = Math.round(height);
+		if (!Number.isFinite(measured) || measured <= 0) return;
+		if (measuredHeights[id] === measured) return;
+		measuredHeights = { ...measuredHeights, [id]: measured };
 	}
 
 	/**
@@ -135,8 +165,11 @@
 	 * Work-item ids are passed through unchanged — the graph never renames, nor
 	 * wraps an item in a synthetic node — and only solid parent-child relations
 	 * become layout edges. The dashed overlay is deliberately absent here.
+	 *
+	 * Each card's own height is handed to the engine, so a taller card pushes
+	 * its children down and no edge has to be drawn through wrapped text.
 	 */
-	function placeNodes(model: WorkGraph): PlacedNode[] {
+	function placeNodes(model: WorkGraph, heights: Readonly<Record<string, number>>): PlacedNode[] {
 		if (model.nodes.length === 0) return [];
 
 		const layoutGraph = new DagreGraph();
@@ -152,7 +185,10 @@
 		layoutGraph.setDefaultEdgeLabel(() => ({}));
 
 		for (const node of model.nodes) {
-			layoutGraph.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
+			layoutGraph.setNode(node.id, {
+				width: NODE_WIDTH,
+				height: heights[node.id] ?? estimatedGraphNodeHeight(node)
+			});
 		}
 		for (const edge of model.edges) {
 			layoutGraph.setEdge(edge.from, edge.to);
@@ -162,27 +198,36 @@
 
 		return model.nodes.map((node) => {
 			const center = layoutGraph.node(node.id) as { x: number; y: number } | undefined;
-			const y = (center?.y ?? 0) - NODE_HEIGHT / 2;
+			const height = heights[node.id] ?? estimatedGraphNodeHeight(node);
+			const y = (center?.y ?? 0) - height / 2;
 			return {
 				payload: {
 					node,
 					graphY: y,
+					height,
 					selected: node.id === selectedId,
 					collapsed: node.collapsed === true,
 					onSelect,
-					onToggle
+					onToggle,
+					onMeasure: measureNode
 				},
 				x: (center?.x ?? 0) - NODE_WIDTH / 2,
-				y
+				y,
+				height
 			};
 		});
 	}
 
-	const placed = $derived(placeNodes(graph));
+	const placed = $derived(placeNodes(graph, measuredHeights));
 
 	/** Where each node sits, so an overlay can leave by the nearest side. */
 	const placedById = $derived(
-		new Map(placed.map((entry) => [entry.payload.node.id, { x: entry.x, y: entry.y }]))
+		new Map(
+			placed.map((entry) => [
+				entry.payload.node.id,
+				{ x: entry.x, y: entry.y, depth: entry.payload.node.depth }
+			])
+		)
 	);
 
 	/**
@@ -191,7 +236,9 @@
 	 * The hierarchy is top-to-bottom, so most dependencies point up or down and
 	 * the vertical pair is right. Two items on the same row — two roots, or a
 	 * dependency between siblings — are drawn side by side instead, so the arrow
-	 * arcs across rather than looping around.
+	 * arcs across rather than looping around. Rows are identified by depth, not
+	 * by the top edge: cards on one row can differ in height and therefore in
+	 * where their top edge sits.
 	 */
 	function dependencyHandles(from: string, to: string): { source: string; target: string } {
 		const source = placedById.get(from);
@@ -199,13 +246,12 @@
 		if (source === undefined || target === undefined) {
 			return { source: OUT_BOTTOM, target: IN_TOP };
 		}
-		const dy = target.y - source.y;
-		if (Math.abs(dy) < 1) {
+		if (source.depth === target.depth) {
 			return target.x >= source.x
 				? { source: OUT_RIGHT, target: IN_LEFT }
 				: { source: OUT_LEFT, target: IN_RIGHT };
 		}
-		return dy < 0
+		return target.y < source.y
 			? { source: OUT_TOP, target: IN_BOTTOM }
 			: { source: OUT_BOTTOM, target: IN_TOP };
 	}
@@ -220,12 +266,12 @@
 	 * so a dependency arrow can approach from the side the target is on.
 	 */
 	const nodes: Node[] = $derived(
-		placed.map(({ payload, x, y }) => ({
+		placed.map(({ payload, x, y, height }) => ({
 			id: payload.node.id,
 			type: 'workitem',
 			position: { x, y },
 			width: NODE_WIDTH,
-			height: NODE_HEIGHT,
+			height,
 			draggable: false,
 			selectable: false,
 			connectable: false,
@@ -238,7 +284,7 @@
 					type: 'source',
 					position: Position.Bottom,
 					x: NODE_WIDTH / 2,
-					y: NODE_HEIGHT
+					y: height
 				},
 				{ id: IN_TOP, type: 'target', position: Position.Top, x: NODE_WIDTH / 2, y: 0 },
 				{ id: OUT_TOP, type: 'source', position: Position.Top, x: NODE_WIDTH / 2, y: 0 },
@@ -247,23 +293,23 @@
 					type: 'target',
 					position: Position.Bottom,
 					x: NODE_WIDTH / 2,
-					y: NODE_HEIGHT
+					y: height
 				},
 				{
 					id: OUT_RIGHT,
 					type: 'source',
 					position: Position.Right,
 					x: NODE_WIDTH,
-					y: NODE_HEIGHT / 2
+					y: height / 2
 				},
-				{ id: IN_LEFT, type: 'target', position: Position.Left, x: 0, y: NODE_HEIGHT / 2 },
-				{ id: OUT_LEFT, type: 'source', position: Position.Left, x: 0, y: NODE_HEIGHT / 2 },
+				{ id: IN_LEFT, type: 'target', position: Position.Left, x: 0, y: height / 2 },
+				{ id: OUT_LEFT, type: 'source', position: Position.Left, x: 0, y: height / 2 },
 				{
 					id: IN_RIGHT,
 					type: 'target',
 					position: Position.Right,
 					x: NODE_WIDTH,
-					y: NODE_HEIGHT / 2
+					y: height / 2
 				}
 			],
 			domAttributes: {
@@ -343,7 +389,7 @@
 
 	/** Where the whole visible drawing sits, in drawing coordinates. */
 	const bounds = $derived(
-		graphBounds(placed.map(({ x, y }) => ({ x, y, width: NODE_WIDTH, height: NODE_HEIGHT })))
+		graphBounds(placed.map(({ x, y, height }) => ({ x, y, width: NODE_WIDTH, height })))
 	);
 
 	/** The viewport that shows the whole visible drawing, centred. */
@@ -365,6 +411,30 @@
 
 	/** The viewport this drawing entered at; the state "reset" returns to. */
 	let initial: GraphViewport | null = $state(null);
+
+	/**
+	 * The estimate the entry fit was computed from, and the node set it fitted.
+	 *
+	 * A first entry fits before paint, from the deterministic estimates. When
+	 * the cards then report their real heights, the fitted view moves; these
+	 * keep the entry fit honest by re-fitting only while the reader has not
+	 * moved and the drawn set has not changed. A restored viewport is never
+	 * replaced, and folding or filtering never auto-fits.
+	 */
+	let entryMeasurements: string | null = null;
+	let entryNodeIds: string | null = null;
+	let entryWasFit = false;
+
+	function measurementSignature(heights: Readonly<Record<string, number>>): string {
+		return Object.keys(heights)
+			.sort()
+			.map((id) => `${id}:${heights[id]}`)
+			.join('|');
+	}
+
+	function nodeSignature(model: WorkGraph): string {
+		return model.nodes.map((node) => node.id).join('|');
+	}
 
 	/**
 	 * The canvas's own transform, bound through the drawing.
@@ -436,6 +506,9 @@
 	function enterViewport(): void {
 		if (flow === null || initial !== null) return;
 		initial = restoredViewport ?? fitted;
+		entryWasFit = restoredViewport === null;
+		entryMeasurements = measurementSignature(measuredHeights);
+		entryNodeIds = nodeSignature(graph);
 		apply(initial);
 	}
 
@@ -443,6 +516,26 @@
 	// `oninit` once that API is ready; either signal is enough to enter.
 	$effect(() => {
 		if (flow !== null) enterViewport();
+	});
+
+	/**
+	 * Re-fit a first entry once the real card heights replace the estimates.
+	 *
+	 * Only the transition from estimated to measured geometry triggers this, and
+	 * only while the canvas is still where entry left it for the same node set.
+	 * A reader's pan or zoom, a restored viewport, and a changed graph all opt
+	 * out, so measurement can never yank a view the reader owns.
+	 */
+	$effect(() => {
+		const measurements = measurementSignature(measuredHeights);
+		const fit = fitted;
+		if (flow === null || initial === null || !entryWasFit) return;
+		if (nodeSignature(graph) !== entryNodeIds) return;
+		if (measurements === entryMeasurements) return;
+		if (!sameViewport(shown, initial)) return;
+		entryMeasurements = measurements;
+		initial = fit;
+		apply(fit);
 	});
 
 	/** Fit the whole visible drawing, and remember that as the view. */

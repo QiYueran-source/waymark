@@ -18,6 +18,8 @@
 	selected={data.selected}
 	collapsed={data.collapsed}
 	graphY={data.graphY}
+	height={data.height}
 	onSelect={data.onSelect}
 	onToggle={data.onToggle}
+	onMeasure={data.onMeasure}
 />

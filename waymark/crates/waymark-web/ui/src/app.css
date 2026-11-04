@@ -784,6 +784,12 @@ code {
 	stroke-dasharray: 6 4;
 }
 
+/*
+ * A card is content-sized, not a fixed frame: the layout hands it the height it
+ * last measured, but its own text decides how tall it must be. The floor keeps
+ * a short card readable before anything has been measured; long titles, blocked
+ * reasons, and context badges wrap and add height rather than spilling out.
+ */
 .graph-node {
 	--state-stripe: transparent;
 	display: flex;
@@ -791,7 +797,8 @@ code {
 	gap: 0.12rem;
 	box-sizing: border-box;
 	width: 100%;
-	height: 100%;
+	min-width: 0;
+	min-height: 5.25rem;
 	padding: 0.42rem 0.62rem 0.5rem 0.72rem;
 	background: var(--panel);
 	border: 1px solid var(--line-strong);
@@ -818,41 +825,37 @@ code {
 
 /*
  * A context card is not selected work: it is an ancestor kept only so a node
- * below it keeps its real parent. It carries the tree row's three cues — a
- * hatched ground, a dashed state stripe, and the text badge in the card — so
- * the marking survives greyscale and colour-blindness.
+ * below it keeps its real parent. It keeps the ordinary card layout and is
+ * marked by a dashed outline around the whole card and by its inside badge —
+ * no hatch, and no left state stripe.
  */
-.graph-node.context {
-	border-left-style: dashed;
-	border-left-color: var(--dash);
-	background: repeating-linear-gradient(135deg, var(--panel-2) 0 6px, var(--panel) 6px 12px);
+.graph-node[data-context='true'] {
+	border: 1px dashed var(--dash);
+	background: var(--panel);
 }
 
-/* Selecting a context node must still read as selected, so keep the hatch and
+/* Selecting a context node must still read as selected: keep the outline and
    swap its paper for the selection tint rather than dropping either cue. */
-.graph-node.context.selected {
-	background: repeating-linear-gradient(
-		135deg,
-		var(--accent-soft) 0 6px,
-		var(--panel) 6px 12px
-	);
+.graph-node[data-context='true'].selected {
 	border-color: var(--accent);
-	border-left-style: dashed;
+	background: var(--accent-soft);
 }
 
-.graph-node.context .graph-node-title {
+.graph-node[data-context='true'] .graph-node-title {
 	color: var(--muted);
 }
 
-/* The badge is a sentence, not an icon, and the card is a fixed width: let the
-   card's lines wrap rather than overflow into the next column. */
-.graph-node.context .graph-node-line {
-	flex-wrap: wrap;
-	row-gap: 0.1rem;
-}
-
-.graph-node.context .context-marker {
+/*
+ * The badge is a sentence, not an icon. It is a line of the card, so it wraps
+ * at the card's width and the card grows to hold it; nothing floats outside the
+ * node.
+ */
+.graph-node .context-marker {
+	align-self: flex-start;
+	max-width: 100%;
+	margin: 0;
 	white-space: normal;
+	overflow-wrap: anywhere;
 }
 
 .graph-node.selected {
@@ -862,9 +865,26 @@ code {
 
 .graph-node-line {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: baseline;
 	gap: 0.55rem;
+	row-gap: 0.1rem;
 	min-width: 0;
+}
+
+/* A graph card has a fixed width, so its category name wraps instead of
+   ellipsizing or reaching into the next column. */
+.graph-node .category,
+.graph-node .category-name {
+	min-width: 0;
+	max-width: 100%;
+}
+
+.graph-node .category-name {
+	overflow: visible;
+	overflow-wrap: anywhere;
+	text-overflow: clip;
+	white-space: normal;
 }
 
 .graph-node-title {

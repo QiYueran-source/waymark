@@ -108,6 +108,53 @@ export interface WorkGraph {
 const EMPTY_CONTEXT: ReadonlySet<string> = new Set();
 
 /**
+ * The card geometry the graph layout shares.
+ *
+ * A card's width is fixed — the drawing is a column of cards, and a node must
+ * not resize with its text — while its height comes from its content. The
+ * layout receives each card's measured height from the view; these values are
+ * the deterministic geometry before the browser has measured anything.
+ */
+export const GRAPH_NODE_WIDTH = 216;
+/** The shortest card; also the height a card reports before it is measured. */
+export const GRAPH_NODE_MIN_HEIGHT = 84;
+export const GRAPH_ROW_GAP = 56;
+export const GRAPH_COLUMN_GAP = 28;
+export const GRAPH_MARGIN = 16;
+
+/** Approximate line boxes inside a card, used only by the fallback estimate. */
+const TITLE_LINE_HEIGHT = 18;
+const REASON_LINE_HEIGHT = 16;
+const CONTEXT_LINE_HEIGHT = 20;
+/** Characters a card's inner width fits per line, per text size. */
+const TITLE_CHARS_PER_LINE = 30;
+const REASON_CHARS_PER_LINE = 40;
+
+function wrappedLineCount(text: string, charsPerLine: number): number {
+	return Math.max(1, Math.ceil(text.length / charsPerLine));
+}
+
+/**
+ * The deterministic card height used until the browser measures the real one.
+ *
+ * The graph layout must be reproducible without a DOM, so a card starts from a
+ * width-aware estimate of its wrapped content and the view replaces it with the
+ * measured height when the card reports one. The estimate deliberately only
+ * adds full lines: short cards keep the known minimum, and a long title or
+ * reason never shrinks the layout below what the text needs.
+ */
+export function estimatedGraphNodeHeight(node: GraphNode): number {
+	let height = GRAPH_NODE_MIN_HEIGHT;
+	height += (wrappedLineCount(node.title, TITLE_CHARS_PER_LINE) - 1) * TITLE_LINE_HEIGHT;
+	if (node.state === 'blocked' && node.blockedReason !== null) {
+		height +=
+			(wrappedLineCount(node.blockedReason, REASON_CHARS_PER_LINE) - 1) * REASON_LINE_HEIGHT;
+	}
+	if (node.context) height += CONTEXT_LINE_HEIGHT;
+	return height;
+}
+
+/**
  * A viewport: where the canvas is scrolled to and how far it is zoomed.
  *
  * The values are the drawing library's own transform — `x`/`y` in screen
@@ -293,6 +340,13 @@ export interface GraphNodePayload extends Record<string, unknown> {
 	node: GraphNode;
 	/** Top edge of the node's place in the drawing: one row per generation. */
 	graphY: number;
+	/**
+	 * The height the layout used for this card: the measured height when the
+	 * view has one, otherwise [`estimatedGraphNodeHeight`].
+	 */
+	height: number;
+	/** Report this card's border-box height back to the layout. */
+	onMeasure: (id: string, height: number) => void;
 	selected: boolean;
 	/** True when this node's children are hidden by the reader's collapse. */
 	collapsed: boolean;
