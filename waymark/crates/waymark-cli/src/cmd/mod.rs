@@ -22,6 +22,7 @@ pub mod parent;
 pub mod project;
 pub mod query;
 pub mod relationship;
+pub mod serve;
 pub mod show;
 pub mod status;
 pub mod tree;

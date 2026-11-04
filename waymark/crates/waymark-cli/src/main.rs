@@ -42,6 +42,7 @@ use cmd::parent::ParentArgs;
 use cmd::project::ProjectArgs;
 use cmd::r#move::MoveArgs;
 use cmd::relationship::DependencyArgs;
+use cmd::serve::ServeArgs;
 use cmd::show::ShowArgs;
 use cmd::status::{StatusArgs, TransitionArgs};
 use cmd::tree::{DepArgs, TreeArgs};
@@ -148,6 +149,8 @@ enum Command {
     Validate(ValidateArgs),
     /// Report the version and the capabilities included in this build.
     Version,
+    /// Serve the read-only Web view on loopback (Web build only).
+    Serve(ServeArgs),
 }
 
 fn main() -> ExitCode {
@@ -350,6 +353,7 @@ fn run(cli: Cli) -> Result<u8, waymark_core::WaymarkError> {
         Command::Doctor(args) => cmd::doctor::run_doctor(args, cli.project.as_deref(), json),
         Command::Validate(args) => cmd::doctor::run_validate(args, cli.project.as_deref(), json),
         Command::Version => ok(cmd::version::run(json)),
+        Command::Serve(args) => cmd::serve::run(args, cli.project.as_deref(), json),
     }
 }
 
