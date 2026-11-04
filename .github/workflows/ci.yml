@@ -1,0 +1,164 @@
+name: CI
+
+# Pull requests and pushes to master run the same gates. The frontend job is the
+# only place npm runs: it builds the UI once, generates its provenance manifest,
+# and uploads the tree the Rust jobs download for the embedding build. A missing
+# or failed frontend build fails the pipeline rather than letting the Rust jobs
+# run the embedding build against an empty tree.
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: waymark/crates/waymark-web/ui
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: waymark/crates/waymark-web/ui/package-lock.json
+
+      - name: Install the Rust toolchain for the manifest generator
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Check the frontend
+        run: npm run check
+
+      - name: Build the frontend
+        run: npm run build
+
+      - name: Generate the assets manifest
+        working-directory: waymark
+        run: cargo run --locked -p waymark-web --bin waymark-web-manifest
+
+      # Both paths share `waymark/crates/waymark-web/ui` as their least common
+      # ancestor, so the artifact holds `build/` beside `assets-manifest.json`.
+      # The Rust jobs download it into `waymark/crates/waymark-web/ui`, which is
+      # exactly where `waymark-web/build.rs` looks for both.
+      - name: Upload the built frontend
+        uses: actions/upload-artifact@v4
+        with:
+          name: waymark-web-ui
+          path: |
+            waymark/crates/waymark-web/ui/build
+            waymark/crates/waymark-web/ui/assets-manifest.json
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 7
+
+  rust:
+    name: Rust (${{ matrix.os }})
+    needs: frontend
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    defaults:
+      run:
+        working-directory: waymark
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Install the Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Download the built frontend
+        uses: actions/download-artifact@v4
+        with:
+          name: waymark-web-ui
+          path: waymark/crates/waymark-web/ui
+
+      - name: Check the restored frontend tree
+        run: |
+          test -f crates/waymark-web/ui/build/index.html
+          test -f crates/waymark-web/ui/assets-manifest.json
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Lint
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Test (all features)
+        run: cargo test --workspace --all-features
+
+      - name: Test (default features)
+        run: cargo test --workspace
+
+      - name: Assert the basic build excludes waymark-web
+        run: |
+          if cargo tree -p waymark-cli -e features | grep -q 'waymark-web'; then
+            echo "::error::the basic waymark-cli dependency graph must not include waymark-web"
+            exit 1
+          fi
+
+      - name: Smoke-test the basic and Web build variants
+        run: |
+          project="$(mktemp -d)"
+          cargo run --quiet --locked -p waymark-cli --bin waymark -- --project "$project" init
+          set +e
+          output="$(cargo run --quiet --locked -p waymark-cli --bin waymark -- --json --project "$project" serve)"
+          status=$?
+          set -e
+          if [ "$status" -ne 3 ]; then
+            echo "::error::basic serve exited $status, expected 3 (WEB_NOT_INCLUDED)"
+            exit 1
+          fi
+          if ! printf '%s\n' "$output" | grep -q 'WEB_NOT_INCLUDED'; then
+            echo "::error::basic serve did not report WEB_NOT_INCLUDED: $output"
+            exit 1
+          fi
+          version="$(cargo run --quiet --locked -p waymark-cli --features web --bin waymark -- version)"
+          if ! printf '%s\n' "$version" | grep -q 'web'; then
+            echo "::error::the Web version did not report the web capability: $version"
+            exit 1
+          fi
+
+  msrv:
+    name: MSRV (Rust 1.85)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: waymark
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.85
+        uses: dtolnay/rust-toolchain@1.85.0
+
+      - name: Check the resolved dependency graph
+        run: cargo metadata --locked
+
+      - name: Build the default workspace on Rust 1.85
+        run: cargo build --workspace --locked
+
+      - name: Test the default workspace on Rust 1.85
+        run: cargo test --workspace --locked
