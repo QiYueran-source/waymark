@@ -110,6 +110,25 @@ function shortCrossGenerationTree(count: number): CombinedTree {
 	return { view: 'combined', roots, unresolved: [], categories: [BUG, TASK] };
 }
 
+/**
+ * A wide row where the first root depends on its neighbour.
+ *
+ * The fitted zoom is low; the dependency's handles face each other across one
+ * column gap, so the drawn chord is only about 28 drawing units even though
+ * the two card centres are a whole card width apart.
+ */
+function adjacentRowDependencyTree(count: number): CombinedTree {
+	const roots = Array.from({ length: count }, (_, index) =>
+		treeNode({
+			id: `wm-adjacent-${index}`,
+			title: `Adjacent item ${index}`,
+			category: index % 2 === 0 ? BUG : TASK
+		})
+	);
+	roots[0] = { ...roots[0], dependencies: [roots[1].id] };
+	return { view: 'combined', roots, unresolved: [], categories: [BUG, TASK] };
+}
+
 /** The two lengths a dash pattern draws with, in drawing units. */
 function pattern(zoom: number): [number, number] {
 	const parts = dependencyDashArray(zoom)
@@ -223,6 +242,25 @@ describe('drawn relationship lines', () => {
 		// …and the gap is still there at the reader's scale.
 		expect(dash).toBeGreaterThan(0);
 		expect(gap * shown.zoom).toBeGreaterThan(0);
+	});
+
+	it('caps a same-row edge by the gap between its handles, not the card centres', async () => {
+		await openGraph({ trees: { combined: adjacentRowDependencyTree(20) } });
+		await fireEvent.click(dependencyToggle());
+		await waitFor(() => expect(edges('dependency')).toHaveLength(1));
+
+		const shown = viewport();
+		expect(shown.zoom).toBeLessThan(0.5);
+		const path = edgePath(edges('dependency')[0]);
+		// Svelte Flow draws the path between the facing handles, so its span is
+		// the column gap (GRAPH_COLUMN_GAP, 28), not the whole card width that
+		// separates the centres.
+		const handleGapScreen = 28 * shown.zoom;
+		const [dash, gap] = drawnPattern(path);
+		expect(dash).toBeGreaterThan(0);
+		expect(gap).toBeGreaterThan(0);
+		// At least one full period fits along the path the reader actually sees.
+		expect((dash + gap) * shown.zoom).toBeLessThanOrEqual(handleGapScreen);
 	});
 
 	it('recomputes the dash after zooming out, so its screen-space size is kept', async () => {

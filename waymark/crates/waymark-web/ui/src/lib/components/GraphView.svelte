@@ -582,21 +582,84 @@
 	);
 
 	/**
-	 * The straight-line screen distance between two cards' centres.
+	 * Where one handle sits on a placed card, in drawing coordinates.
+	 *
+	 * The four sides are the base geometry; the offset pair used by a
+	 * coincident relation shifts along the side, matching the static handle
+	 * metadata handed to the renderer. These points are what an edge actually
+	 * spans, which can be much shorter than the distance between card centres:
+	 * two adjacent cards in one row are joined only across the column gap.
+	 */
+	function handlePoint(
+		entry: { x: number; y: number; height: number },
+		handle: string
+	): { x: number; y: number } {
+		const left = entry.x;
+		const right = entry.x + NODE_WIDTH;
+		const top = entry.y;
+		const bottom = entry.y + entry.height;
+		const midX = entry.x + NODE_WIDTH / 2;
+		const midY = entry.y + entry.height / 2;
+		switch (handle) {
+			case OUT_BOTTOM:
+				return { x: midX, y: bottom };
+			case IN_TOP:
+				return { x: midX, y: top };
+			case OUT_TOP:
+				return { x: midX, y: top };
+			case IN_BOTTOM:
+				return { x: midX, y: bottom };
+			case OUT_RIGHT:
+				return { x: right, y: midY };
+			case IN_LEFT:
+				return { x: left, y: midY };
+			case OUT_LEFT:
+				return { x: left, y: midY };
+			case IN_RIGHT:
+				return { x: right, y: midY };
+			case OUT_BOTTOM_OFFSET:
+				return { x: midX + HANDLE_OFFSET, y: bottom };
+			case IN_TOP_OFFSET:
+				return { x: midX + HANDLE_OFFSET, y: top };
+			case OUT_TOP_OFFSET:
+				return { x: midX + HANDLE_OFFSET, y: top };
+			case IN_BOTTOM_OFFSET:
+				return { x: midX + HANDLE_OFFSET, y: bottom };
+			case OUT_RIGHT_OFFSET:
+				return { x: right, y: midY + HANDLE_OFFSET };
+			case IN_LEFT_OFFSET:
+				return { x: left, y: midY + HANDLE_OFFSET };
+			case OUT_LEFT_OFFSET:
+				return { x: left, y: midY + HANDLE_OFFSET };
+			case IN_RIGHT_OFFSET:
+				return { x: right, y: midY + HANDLE_OFFSET };
+			default:
+				return { x: midX, y: midY };
+		}
+	}
+
+	/**
+	 * The straight-line screen distance between the two handles an edge joins.
 	 *
 	 * A dependency between adjacent generations spans only about one row gap,
-	 * so at a low fit zoom it can be shorter on screen than one whole
-	 * dash-plus-gap and would draw as a single solid dash. The dash helper
-	 * needs that chord to cap the pattern. An edge whose ends are not both
-	 * placed has no chord, which keeps the ordinary zoom-only pattern.
+	 * and two cards in one row are joined only across the column gap; at a low
+	 * fit zoom either can be shorter on screen than one whole dash-plus-gap and
+	 * would draw as a single solid dash. The dash helper needs that chord to cap
+	 * the pattern. An edge whose ends are not both placed has no chord, which
+	 * keeps the ordinary zoom-only pattern.
 	 */
-	function dependencyScreenSpan(from: string, to: string, zoom: number): number | undefined {
+	function dependencyScreenSpan(
+		from: string,
+		to: string,
+		handles: { source: string; target: string },
+		zoom: number
+	): number | undefined {
 		const source = placedById.get(from);
 		const target = placedById.get(to);
 		if (source === undefined || target === undefined) return undefined;
-		const dx = source.x + NODE_WIDTH / 2 - (target.x + NODE_WIDTH / 2);
-		const dy = source.y + source.height / 2 - (target.y + target.height / 2);
-		return Math.hypot(dx, dy) * zoom;
+		const start = handlePoint(source, handles.source);
+		const end = handlePoint(target, handles.target);
+		return Math.hypot(start.x - end.x, start.y - end.y) * zoom;
 	}
 
 	/**
@@ -613,7 +676,7 @@
 		const handles = dependencyHandles(edge.from, edge.to, coincident, direction);
 		const gap = gapByEdge.get(edge.id);
 		const raised = hoveredEdgeId === edge.id;
-		const screenSpan = dependencyScreenSpan(edge.from, edge.to, zoom);
+		const screenSpan = dependencyScreenSpan(edge.from, edge.to, handles, zoom);
 		return {
 			id: edge.id,
 			source: edge.from,
