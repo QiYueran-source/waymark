@@ -42,6 +42,8 @@
 		MAX_GRAPH_ZOOM,
 		MIN_FIT_ZOOM,
 		MIN_GRAPH_ZOOM,
+		dependencyDashArray,
+		dependencyGaps,
 		edgeLabel,
 		estimatedGraphNodeHeight,
 		fittedViewport,
@@ -90,6 +92,16 @@
 	} = $props();
 
 	/**
+	 * The edge the pointer is over, if any.
+	 *
+	 * Hover is drawing state only: it raises and thickens one line and prints
+	 * its relation beside it, so a reader can tell which relation a line means
+	 * where several share the same gap. It never selects an edge or changes the
+	 * model, and the edge's accessible name is present without hovering.
+	 */
+	let hoveredEdgeId: string | null = $state(null);
+
+	/**
 	 * The card geometry lives with the model (`$lib/graph.ts`), so the layout and
 	 * the fallback height estimate cannot drift apart: a card's width is fixed,
 	 * and its height is laid out per node.
@@ -114,19 +126,64 @@
 	const IN_RIGHT = 'in-right';
 
 	/**
+	 * Parallel handles for a dependency that covers the same pair as a
+	 * parent-child edge. Each is shifted along the card's side, so the dashed
+	 * line runs beside the solid one instead of exactly under it.
+	 */
+	const HANDLE_OFFSET = 14;
+	const OUT_BOTTOM_OFFSET = 'out-bottom-offset';
+	const IN_TOP_OFFSET = 'in-top-offset';
+	const OUT_TOP_OFFSET = 'out-top-offset';
+	const IN_BOTTOM_OFFSET = 'in-bottom-offset';
+	const OUT_RIGHT_OFFSET = 'out-right-offset';
+	const IN_LEFT_OFFSET = 'in-left-offset';
+	const OUT_LEFT_OFFSET = 'out-left-offset';
+	const IN_RIGHT_OFFSET = 'in-right-offset';
+
+	/**
 	 * The overlay's arrowhead, defined by the renderer's marker machinery and
 	 * referenced from the edge path's target end. It is the one app-owned hook
 	 * that makes the direction visible at a glance.
 	 */
 	const DEPENDENCY_MARKER: EdgeMarker = {
 		type: MarkerType.ArrowClosed,
-		color: 'var(--dash)',
+		color: 'var(--dep-edge)',
 		width: 14,
 		height: 14
 	};
 
-	/** Dashed, muted, and never the hierarchy's solid stroke. */
-	const DEPENDENCY_STYLE = 'stroke-dasharray: 6 4; stroke: var(--dash)';
+	/**
+	 * The two line treatments are painted explicitly on the path, not left to
+	 * the renderer's defaults: hierarchy is a 1.5px guide-coloured solid stroke,
+	 * dependency is a thicker blue-grey dashed one. Colour, weight, and dash all
+	 * differ, so the kinds never rest on colour alone.
+	 */
+	const DEPENDENCY_WEIGHT = 2.5;
+	const RAISED_WEIGHT = 3.5;
+	const RAISED_Z_INDEX = 1000;
+
+	function edgeStyle(kind: 'parent-child' | 'dependency', zoom: number, raised: boolean): string {
+		const width =
+			kind === 'dependency'
+				? raised
+					? RAISED_WEIGHT
+					: DEPENDENCY_WEIGHT
+				: raised
+					? 2.5
+					: 1.5;
+		if (kind === 'parent-child') return `stroke: var(--guide); stroke-width: ${width};`;
+		return `stroke: var(--dep-edge); stroke-width: ${width}; stroke-dasharray: ${dependencyDashArray(
+			zoom
+		)};`;
+	}
+
+	function edgeClass(kind: 'parent-child' | 'dependency', raised: boolean): string {
+		return [
+			'graph-edge',
+			`graph-edge-${kind}`,
+			raised ? 'graph-edge-raised' : 'graph-edge-idle'
+		].join(' ');
+	}
 
 	interface PlacedNode {
 		payload: GraphNodePayload;
@@ -233,6 +290,34 @@
 	);
 
 	/**
+	 * The card pairs the hierarchy already joins, in either direction.
+	 *
+	 * A dependency between the same two items is still its own relation, but it
+	 * must not be painted exactly under the solid parent-child line; the
+	 * overlay checks this set and takes the offset handles when it matches.
+	 */
+	const parentPairs = $derived(
+		new Set(
+			graph.edges.map((edge) =>
+				edge.from < edge.to ? `${edge.from}|${edge.to}` : `${edge.to}|${edge.from}`
+			)
+		)
+	);
+
+	/**
+	 * How many dependencies share each generation gap.
+	 *
+	 * The lines themselves stay separate — nothing is aggregated — but a reader
+	 * who sees several dashes in one corridor can see the count and hover each
+	 * line for its relation. Only a shared gap is announced.
+	 */
+	const gapGroups = $derived(dependencyGaps(graph));
+	const sharedGaps = $derived(gapGroups.filter((gap) => gap.count > 1));
+	const gapByEdge = $derived(
+		new Map(gapGroups.flatMap((gap) => gap.edgeIds.map((edgeId) => [edgeId, gap] as const)))
+	);
+
+	/**
 	 * Which pair of handles a dependency edge should use.
 	 *
 	 * The hierarchy is top-to-bottom, so most dependencies point up or down and
@@ -240,21 +325,36 @@
 	 * dependency between siblings — are drawn side by side instead, so the arrow
 	 * arcs across rather than looping around. Rows are identified by depth, not
 	 * by the top edge: cards on one row can differ in height and therefore in
-	 * where their top edge sits.
+	 * where their top edge sits. A coincident relation takes the offset pair, so
+	 * both lines stay visible.
 	 */
-	function dependencyHandles(from: string, to: string): { source: string; target: string } {
+	function dependencyHandles(
+		from: string,
+		to: string,
+		coincident: boolean
+	): { source: string; target: string } {
 		const source = placedById.get(from);
 		const target = placedById.get(to);
 		if (source === undefined || target === undefined) {
 			return { source: OUT_BOTTOM, target: IN_TOP };
 		}
 		if (source.depth === target.depth) {
-			return target.x >= source.x
-				? { source: OUT_RIGHT, target: IN_LEFT }
+			if (target.x >= source.x) {
+				return coincident
+					? { source: OUT_RIGHT_OFFSET, target: IN_LEFT_OFFSET }
+					: { source: OUT_RIGHT, target: IN_LEFT };
+			}
+			return coincident
+				? { source: OUT_LEFT_OFFSET, target: IN_RIGHT_OFFSET }
 				: { source: OUT_LEFT, target: IN_RIGHT };
 		}
-		return target.y < source.y
-			? { source: OUT_TOP, target: IN_BOTTOM }
+		if (target.y < source.y) {
+			return coincident
+				? { source: OUT_TOP_OFFSET, target: IN_BOTTOM_OFFSET }
+				: { source: OUT_TOP, target: IN_BOTTOM };
+		}
+		return coincident
+			? { source: OUT_BOTTOM_OFFSET, target: IN_TOP_OFFSET }
 			: { source: OUT_BOTTOM, target: IN_TOP };
 	}
 
@@ -312,6 +412,64 @@
 					position: Position.Right,
 					x: NODE_WIDTH,
 					y: height / 2
+				},
+				// The offset pair used by a dependency that coincides with a
+				// parent-child edge: same sides, shifted so both lines show.
+				{
+					id: OUT_BOTTOM_OFFSET,
+					type: 'source',
+					position: Position.Bottom,
+					x: NODE_WIDTH / 2 + HANDLE_OFFSET,
+					y: height
+				},
+				{
+					id: IN_TOP_OFFSET,
+					type: 'target',
+					position: Position.Top,
+					x: NODE_WIDTH / 2 + HANDLE_OFFSET,
+					y: 0
+				},
+				{
+					id: OUT_TOP_OFFSET,
+					type: 'source',
+					position: Position.Top,
+					x: NODE_WIDTH / 2 + HANDLE_OFFSET,
+					y: 0
+				},
+				{
+					id: IN_BOTTOM_OFFSET,
+					type: 'target',
+					position: Position.Bottom,
+					x: NODE_WIDTH / 2 + HANDLE_OFFSET,
+					y: height
+				},
+				{
+					id: OUT_RIGHT_OFFSET,
+					type: 'source',
+					position: Position.Right,
+					x: NODE_WIDTH,
+					y: height / 2 + HANDLE_OFFSET
+				},
+				{
+					id: IN_LEFT_OFFSET,
+					type: 'target',
+					position: Position.Left,
+					x: 0,
+					y: height / 2 + HANDLE_OFFSET
+				},
+				{
+					id: OUT_LEFT_OFFSET,
+					type: 'source',
+					position: Position.Left,
+					x: 0,
+					y: height / 2 + HANDLE_OFFSET
+				},
+				{
+					id: IN_RIGHT_OFFSET,
+					type: 'target',
+					position: Position.Right,
+					x: NODE_WIDTH,
+					y: height / 2 + HANDLE_OFFSET
 				}
 			],
 			domAttributes: {
@@ -328,20 +486,30 @@
 	 * never replaces this one.
 	 */
 	const hierarchyEdges: Edge[] = $derived(
-		graph.edges.map((edge) => ({
-			id: edge.id,
-			source: edge.from,
-			target: edge.to,
-			sourceHandle: OUT_BOTTOM,
-			targetHandle: IN_TOP,
-			ariaLabel: edgeLabel(graph, edge),
-			domAttributes: {
-				'data-testid': 'graph-edge',
-				'data-from': edge.from,
-				'data-to': edge.to,
-				'data-edge-kind': 'parent-child'
-			}
-		}))
+		graph.edges.map((edge) => {
+			const raised = hoveredEdgeId === edge.id;
+			return {
+				id: edge.id,
+				source: edge.from,
+				target: edge.to,
+				sourceHandle: OUT_BOTTOM,
+				targetHandle: IN_TOP,
+				style: edgeStyle('parent-child', 1, raised),
+				class: edgeClass('parent-child', raised),
+				zIndex: raised ? RAISED_Z_INDEX : 0,
+				label: raised ? edgeLabel(graph, edge) : undefined,
+				ariaLabel: edgeLabel(graph, edge),
+				domAttributes: {
+					'data-testid': 'graph-edge',
+					'data-from': edge.from,
+					'data-to': edge.to,
+					'data-edge-kind': 'parent-child',
+					'data-hovered': raised ? 'true' : 'false',
+					'data-source-handle': OUT_BOTTOM,
+					'data-target-handle': IN_TOP
+				}
+			};
+		})
 	);
 
 	/**
@@ -349,15 +517,23 @@
 	 * depended on. `data-arrow="target"` is the app-owned hook that states the
 	 * direction without geometry; the accessible name says it in words too.
 	 */
-	function dependencyEdge(edge: GraphDependencyEdge): Edge {
-		const handles = dependencyHandles(edge.from, edge.to);
+	function dependencyEdge(edge: GraphDependencyEdge, zoom: number): Edge {
+		const coincident = parentPairs.has(
+			edge.from < edge.to ? `${edge.from}|${edge.to}` : `${edge.to}|${edge.from}`
+		);
+		const handles = dependencyHandles(edge.from, edge.to, coincident);
+		const gap = gapByEdge.get(edge.id);
+		const raised = hoveredEdgeId === edge.id;
 		return {
 			id: edge.id,
 			source: edge.from,
 			target: edge.to,
 			sourceHandle: handles.source,
 			targetHandle: handles.target,
-			style: DEPENDENCY_STYLE,
+			style: edgeStyle('dependency', zoom, raised),
+			class: edgeClass('dependency', raised),
+			zIndex: raised ? RAISED_Z_INDEX : 0,
+			label: raised ? edgeLabel(graph, edge) : undefined,
 			markerEnd: DEPENDENCY_MARKER,
 			ariaLabel: edgeLabel(graph, edge),
 			domAttributes: {
@@ -365,12 +541,16 @@
 				'data-from': edge.from,
 				'data-to': edge.to,
 				'data-edge-kind': 'dependency',
-				'data-arrow': 'target'
+				'data-arrow': 'target',
+				'data-hovered': raised ? 'true' : 'false',
+				'data-coincident': coincident ? 'true' : 'false',
+				'data-gap': gap?.key ?? '',
+				'data-gap-count': String(gap?.count ?? 1),
+				'data-source-handle': handles.source,
+				'data-target-handle': handles.target
 			}
 		};
 	}
-
-	const edges: Edge[] = $derived([...hierarchyEdges, ...graph.dependencies.map(dependencyEdge)]);
 
 	const nodeTypes: NodeTypes = { workitem: GraphItemNode };
 
@@ -512,6 +692,16 @@
 
 	/** What the reader sees now. */
 	const shown: GraphViewport = $derived(canvasViewport ?? initial ?? fitted);
+
+	/**
+	 * Every edge the renderer draws: the hierarchy first, then the dependency
+	 * overlay. The dash pattern is recomputed from the shown zoom, so a zoom
+	 * gesture cannot shrink it below what the reader can see.
+	 */
+	const edges: Edge[] = $derived([
+		...hierarchyEdges,
+		...graph.dependencies.map((edge) => dependencyEdge(edge, shown.zoom))
+	]);
 
 	/**
 	 * True while the canvas shows the fitted view and that view really contains
@@ -688,6 +878,10 @@
 			bind:viewport={canvasViewport}
 			oninit={enterViewport}
 			onmoveend={handleMoveEnd}
+			onedgepointerenter={({ edge }) => (hoveredEdgeId = edge.id)}
+			onedgepointerleave={({ edge }) => {
+				if (hoveredEdgeId === edge.id) hoveredEdgeId = null;
+			}}
 			proOptions={{ hideAttribution: true }}
 		>
 			<GraphBridge onReady={(handle) => (flow = handle)} />
@@ -741,8 +935,30 @@
 						</svg>
 						<span>Dashed line: dependency; the arrow points at the depended-on item</span>
 					</span>
+					<p class="legend-hint" data-testid="graph-legend-hint">
+						Hover an edge to identify its relation.
+					</p>
 				</div>
 			</Panel>
+
+			{#if sharedGaps.length > 0}
+				<!-- Shared corridors stay separate lines; this marker only states
+				     how many run there and how to inspect one. -->
+				<Panel position="bottom-left">
+					<div class="graph-gap-counts" data-testid="graph-gap-counts">
+						{#each sharedGaps as gap (gap.key)}
+							<p
+								class="graph-gap-count"
+								data-testid="graph-gap-count"
+								data-gap={gap.key}
+								data-count={gap.count}
+							>
+								{gap.count} dependency lines share {gap.description}. Hover a line to inspect it.
+							</p>
+						{/each}
+					</div>
+				</Panel>
+			{/if}
 		</SvelteFlow>
 		</div>
 
