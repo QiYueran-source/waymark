@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import PaneState from './PaneState.svelte';
 	import ReadFailure from './ReadFailure.svelte';
 	import Shape from './Shape.svelte';
 	import type { Failure } from '$lib/failure';
@@ -102,15 +103,18 @@
 	</div>
 
 	{#if loading}
+		<!-- Loading is a status, not one of the five blocking/empty states. -->
 		<p class="status" role="status">Loading item…</p>
 	{:else if failure}
-		<ReadFailure
-			failure={failure}
-			title="Could not load this item"
-			level={3}
-			testId="detail-failure"
-			note="No detail is shown: the panel renders only a complete read."
-		/>
+		<PaneState testId="detail-failure-state" kind="detail-failure">
+			<ReadFailure
+				failure={failure}
+				title="Could not load this item"
+				level={3}
+				testId="detail-failure"
+				note="No detail is shown: the panel renders only a complete read."
+			/>
+		</PaneState>
 	{:else if detail}
 		<div class="detail-body">
 			<dl class="facts">
