@@ -114,6 +114,24 @@ export interface WorkGraph {
 const EMPTY_CONTEXT: ReadonlySet<string> = new Set();
 
 /**
+ * The direction the hierarchy is read in.
+ *
+ * `TB` puts each generation in its own row, with parents above their children;
+ * `LR` turns the same hierarchy on its side, with generations in columns and
+ * parents to the left of their children. It is an explicit reading choice, not
+ * something derived from depth, item count, or the viewport.
+ */
+export type GraphDirection = 'TB' | 'LR';
+
+/** The first-use reading direction: top to bottom, the directory-style view. */
+export const DEFAULT_GRAPH_DIRECTION: GraphDirection = 'TB';
+
+/** A stored or supplied value that names a real direction, or `null`. */
+export function graphDirection(value: unknown): GraphDirection | null {
+	return value === 'TB' || value === 'LR' ? value : null;
+}
+
+/**
  * The card geometry the graph layout shares.
  *
  * A card's width is fixed — the drawing is a column of cards, and a node must
@@ -398,11 +416,16 @@ export interface DependencyGap {
  * Count the dependency edges that share each generation gap.
  *
  * Rows come from the model's depth, not from measured pixels: dependencies
- * between two items of one generation travel along that row, and dependencies
- * between different generations cross the corridor between them. The result is
- * ordered by route key, so the same drawing always reports the same gaps.
+ * between two items of one generation travel along that generation's corridor,
+ * and dependencies between different generations cross the gap between them.
+ * In `LR` a generation is a column rather than a row, so the wording follows
+ * the direction the reader chose while the route keys stay stable. The result
+ * is ordered by route key, so the same drawing always reports the same gaps.
  */
-export function dependencyGaps(graph: WorkGraph): DependencyGap[] {
+export function dependencyGaps(
+	graph: WorkGraph,
+	direction: GraphDirection = DEFAULT_GRAPH_DIRECTION
+): DependencyGap[] {
 	const depthById = new Map(graph.nodes.map((node) => [node.id, node.depth]));
 	const groups = new Map<string, DependencyGap>();
 
@@ -414,8 +437,9 @@ export function dependencyGaps(graph: WorkGraph): DependencyGap[] {
 		const high = Math.max(from, to);
 		const sameRow = low === high;
 		const key = sameRow ? `row:${low}` : `gap:${low}:${high}`;
+		const corridor = direction === 'LR' ? 'column' : 'row';
 		const description = sameRow
-			? `generation ${low} row`
+			? `generation ${low} ${corridor}`
 			: `the gap between generations ${low} and ${high}`;
 		const existing = groups.get(key);
 		if (existing === undefined) {
@@ -441,6 +465,8 @@ export function dependencyGaps(graph: WorkGraph): DependencyGap[] {
  */
 export interface GraphNodePayload extends Record<string, unknown> {
 	node: GraphNode;
+	/** Left edge of the node's place in the drawing: one column per generation. */
+	graphX: number;
 	/** Top edge of the node's place in the drawing: one row per generation. */
 	graphY: number;
 	/**

@@ -68,6 +68,12 @@ describe('project identifier', () => {
 		expect(preferenceKey(namespace, 'graphAlternative')).toBe(
 			`${namespace}:graphAlternative`
 		);
+		// The direction is one choice per project, shared by both data views and
+		// stored on its own key rather than folded into the viewport.
+		expect(preferenceKey(namespace, 'direction')).toBe(`${namespace}:direction`);
+		expect(preferenceKey(namespace, 'direction')).not.toBe(
+			preferenceKey(namespace, 'viewport')
+		);
 	});
 
 	it('refuses a raw project root where a project id is required', () => {
@@ -335,11 +341,19 @@ const PREFERENCES: PreferenceCase[] = [
 		defaulted: null
 	},
 	{
+		name: 'direction',
+		write: (store) => store.writeDirection('LR'),
+		read: (store) => store.readDirection(),
+		expected: 'LR',
+		raw: 'LR',
+		defaulted: 'TB'
+	},
+	{
 		name: 'viewport',
 		write: (store) => store.writeViewport({ x: 12.5, y: -3, zoom: 0.75 }),
 		read: (store) => store.readViewport(),
 		expected: { x: 12.5, y: -3, zoom: 0.75 },
-		raw: JSON.stringify({ x: 12.5, y: -3, zoom: 0.75 }),
+		raw: JSON.stringify({ x: 12.5, y: -3, zoom: 0.75, direction: 'TB' }),
 		defaulted: null
 	},
 	{
@@ -526,6 +540,8 @@ describe('malformed stored values', () => {
 			['view', 'sideways', 'combined'],
 			['presentation', 'diagram', 'tree'],
 			['graphAlternative', 'sideways', 'false'],
+			['direction', 'diagonal', 'TB'],
+			['direction', '', 'TB'],
 			['categories', '{"bug":true}', 'null'],
 			['expanded', '{not json', 'null'],
 			['expanded', '"wm-h-root"', 'null'],
@@ -616,5 +632,60 @@ describe('malformed stored values', () => {
 			expect(() => preference.write(store)).not.toThrow();
 		}
 		expect(store.failed).toBe(true);
+	});
+});
+
+describe('the viewport remembers its direction', () => {
+	it('restores a viewport for the direction it was saved in', () => {
+		const storage = memoryStorage();
+		const store = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+		store.writeViewport({ x: 4, y: 6, zoom: 1.25 }, 'LR');
+
+		// The stored record names its direction, so the same record can never be
+		// mistaken for a top-to-bottom view of a differently shaped drawing.
+		expect(
+			JSON.parse(storage.getItem(preferenceKey(store.projectId, 'viewport')) ?? 'null')
+		).toEqual({ x: 4, y: 6, zoom: 1.25, direction: 'LR' });
+		const reopened = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+		expect(reopened.readViewport('LR')).toEqual({ x: 4, y: 6, zoom: 1.25 });
+		// The default reading is top-to-bottom, so it finds nothing usable.
+		expect(reopened.readViewport()).toBeNull();
+		expect(reopened.readViewport('TB')).toBeNull();
+	});
+
+	it('treats a legacy record without a direction as top-to-bottom', () => {
+		const storage = memoryStorage();
+		const store = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+		storage.setItem(
+			preferenceKey(store.projectId, 'viewport'),
+			JSON.stringify({ x: 12, y: 8, zoom: 0.3 })
+		);
+		// A viewport written before the direction existed was a top-to-bottom
+		// view: it stays restorable there and is not applied to the new layout.
+		expect(store.readViewport()).toEqual({ x: 12, y: 8, zoom: 0.3 });
+		expect(store.readViewport('TB')).toEqual({ x: 12, y: 8, zoom: 0.3 });
+		expect(store.readViewport('LR')).toBeNull();
+	});
+
+	it('rejects a record whose direction is unreadable', () => {
+		const storage = memoryStorage();
+		const store = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+		storage.setItem(
+			preferenceKey(store.projectId, 'viewport'),
+			JSON.stringify({ x: 1, y: 2, zoom: 1, direction: 'diagonal' })
+		);
+		expect(store.readViewport()).toBeNull();
+		expect(store.readViewport('LR')).toBeNull();
+	});
+
+	it('keeps the direction preference apart from the viewport', () => {
+		const storage = memoryStorage();
+		const store = new PreferenceStore(storage, projectIdFor('/projects/alpha'));
+		store.writeDirection('LR');
+		store.writeViewport({ x: 1, y: 2, zoom: 1 }, 'LR');
+		expect(storedKeys(storage)).toEqual([
+			preferenceKey(store.projectId, 'direction'),
+			preferenceKey(store.projectId, 'viewport')
+		]);
 	});
 });

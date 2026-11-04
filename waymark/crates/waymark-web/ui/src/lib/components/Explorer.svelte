@@ -21,7 +21,7 @@
 	import { ApiFailure, fetchHealth, fetchItem, fetchTree } from '$lib/api';
 	import type { Failure } from '$lib/failure';
 	import { buildGraph, collapseGraph, graphOutline } from '$lib/graph';
-	import type { GraphViewport } from '$lib/graph';
+	import type { GraphDirection, GraphViewport } from '$lib/graph';
 	import {
 		allIds,
 		categoryScopeKeys,
@@ -84,6 +84,12 @@
 	let collapsedIds = $state<string[]>([]);
 	/** The viewport this project last left, applied when the graph next mounts. */
 	let restoredViewport = $state<GraphViewport | null>(null);
+	/**
+	 * The graph's reading direction, one choice per project and shared by both
+	 * data views. It is explicit only: nothing derives it from the hierarchy,
+	 * the item count, or the canvas size.
+	 */
+	let direction = $state<GraphDirection>('TB');
 	/**
 	 * The category keys this project has in scope, in configured order, or `null`
 	 * before a grouped read has resolved them. `[]` is a real choice — the reader
@@ -263,7 +269,10 @@
 			// graph draws whichever view is selected, so switching the view must
 			// not reopen a branch or move the drawing.
 			collapsedIds = store?.readCollapsed() ?? [];
-			restoredViewport = store?.readViewport() ?? null;
+			// The stored viewport belongs to the direction it was saved in, so
+			// the record for the other orientation is not applied here; the
+			// drawing fits instead.
+			restoredViewport = store?.readViewport(direction) ?? null;
 			restoreToken += 1;
 			syncNotice();
 		} catch (error) {
@@ -284,6 +293,7 @@
 			// restore it once, before the first tree read.
 			presentation = store.readPresentation();
 			graphAlternative = store.readGraphAlternative();
+			direction = store.readDirection();
 			await loadTree(store.readView());
 		} catch (error) {
 			readFailure = toFailure(error);
@@ -322,6 +332,20 @@
 	function toggleGraphAlternative(): void {
 		graphAlternative = !graphAlternative;
 		persist((current) => current.writeGraphAlternative(graphAlternative));
+	}
+
+	/**
+	 * Choose the graph's reading direction.
+	 *
+	 * Only the drawing's geometry changes: the category scope, selection, open
+	 * detail, graph collapse set, and dependency overlay are untouched. The
+	 * drawing refits itself for the new orientation and reports that fit back,
+	 * so the remembered viewport is saved for the direction it belongs to.
+	 */
+	function selectDirection(next: GraphDirection): void {
+		if (next === direction) return;
+		direction = next;
+		persist((current) => current.writeDirection(next));
 	}
 
 	function toggleNode(id: string): void {
@@ -380,7 +404,7 @@
 	/** Remember where the reader left the drawing, for this project only. */
 	function rememberViewport(viewport: GraphViewport): void {
 		restoredViewport = viewport;
-		persist((current) => current.writeViewport(viewport));
+		persist((current) => current.writeViewport(viewport, direction));
 	}
 
 	/**
@@ -723,8 +747,10 @@
 					<GraphView
 						graph={visibleGraph}
 						{selectedId}
+						{direction}
 						{restoredViewport}
 						categoryControl={categoryControl}
+						onDirectionChange={selectDirection}
 						onSelect={(id, trigger) => void selectItem(id, trigger)}
 						onToggle={toggleCollapse}
 						onExpandAll={expandAllGraph}

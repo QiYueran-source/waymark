@@ -20,6 +20,7 @@
  * | scroll          | the work-items pane's scrollTop  | per view   |
  * | collapsed       | the graph node's fold control    | project    |
  * | viewport        | pan / zoom / Fit / Reset         | project    |
+ * | direction       | Top to bottom / Left to right    | project    |
  */
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
@@ -122,11 +123,12 @@ const KNOWN_PREFERENCES = [
 	'categories',
 	'collapsed',
 	'viewport',
-	'graphAlternative'
+	'graphAlternative',
+	'direction'
 ] as const;
 
 describe('every control writes only under the project namespace', () => {
-	it('uses the nine known keys and no others', async () => {
+	it('uses the ten known keys and no others', async () => {
 		const storage = localStorage;
 		const rendered = await renderLoaded({ trees: BOTH_VIEWS });
 		await fireEvent.click(screen.getByLabelText('By category'));
@@ -139,6 +141,7 @@ describe('every control writes only under the project namespace', () => {
 		await fireEvent.scroll(treePane);
 		await fireEvent.click(screen.getByLabelText('Graph'));
 		await screen.findByTestId('graph');
+		await fireEvent.click(screen.getByTestId('graph-direction-lr'));
 		await fireEvent.click(screen.getByLabelText('Structured list'));
 		await screen.findByTestId('graph-text');
 		rendered.unmount();
@@ -184,6 +187,30 @@ describe('round-trips, per preference', () => {
 		await screen.findByTestId('graph');
 		expect(checked('Graph')).toBe(true);
 		expect(screen.queryByLabelText('Work item tree')).toBeNull();
+	});
+
+	it('remembers the graph direction for the project, not for one data view', async () => {
+		const first = await renderLoaded({ trees: BOTH_VIEWS });
+		await fireEvent.click(screen.getByLabelText('Graph'));
+		await screen.findByTestId('graph');
+		await fireEvent.click(screen.getByTestId('graph-direction-lr'));
+		expect(localStorage.getItem(preferenceKey(projectIdFor(ROOT_A), 'direction'))).toBe(
+			'LR'
+		);
+
+		// The combined and grouped graphs share the one choice.
+		await fireEvent.click(screen.getByLabelText('By category'));
+		await screen.findByTestId('graph-node-wm-task-ship');
+		expect(
+			(screen.getByTestId('graph-direction-lr') as HTMLInputElement).checked
+		).toBe(true);
+		first.unmount();
+
+		await renderLoaded({ trees: BOTH_VIEWS });
+		await screen.findByTestId('graph');
+		expect(
+			(screen.getByTestId('graph-direction-lr') as HTMLInputElement).checked
+		).toBe(true);
 	});
 
 	it('remembers the structured-list choice', async () => {

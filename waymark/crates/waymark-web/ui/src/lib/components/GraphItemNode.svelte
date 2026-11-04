@@ -17,6 +17,7 @@
 	node={data.node}
 	selected={data.selected}
 	collapsed={data.collapsed}
+	graphX={data.graphX}
 	graphY={data.graphY}
 	height={data.height}
 	onSelect={data.onSelect}
