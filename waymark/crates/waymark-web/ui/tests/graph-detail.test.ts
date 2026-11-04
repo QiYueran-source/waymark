@@ -275,7 +275,9 @@ describe('the graph node detail', () => {
 			'graph-toggle-wm-bug-login',
 			'graph-select-wm-task-child',
 			'graph-select-wm-task-ship',
-			// The canvas controls follow the drawing.
+			// The graph-wide density pair, then the canvas controls.
+			'graph-expand-all',
+			'graph-collapse-all',
 			'graph-zoom-out',
 			'graph-zoom-in',
 			'graph-fit',

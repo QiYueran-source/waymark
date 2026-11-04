@@ -367,6 +367,28 @@
 	}
 
 	/**
+	 * Graph-wide collapse: fold every drawn node that has children.
+	 *
+	 * The complete filtered drawing decides which nodes have children, so the
+	 * stored set is limited to drawn work: an item outside the current category
+	 * scope, an archived item, or a stale id is never added. Every non-root is
+	 * below one of these nodes, so only the roots stay visible.
+	 */
+	function collapseAllGraph(): void {
+		if (workGraph === null) return;
+		collapsedIds = workGraph.nodes
+			.filter((node) => node.hasChildren)
+			.map((node) => node.id);
+		persist((current) => current.writeCollapsed(collapsedIds));
+	}
+
+	/** Graph-wide expand: clear the drawing's collapse set. */
+	function expandAllGraph(): void {
+		collapsedIds = [];
+		persist((current) => current.writeCollapsed(collapsedIds));
+	}
+
+	/**
 	 * Fold or unfold one node's descendants.
 	 *
 	 * Only the drawing changes. The stored set is written whole, so it survives
@@ -604,8 +626,46 @@
 		{/if}
 
 		<div class="tree-actions">
-			<button type="button" onclick={expandAll} disabled={!treeData}>Expand all</button>
-			<button type="button" onclick={collapseAll} disabled={!treeData}>Collapse all</button>
+			{#if presentation === 'tree'}
+				<!-- The tree's own density controls. They never render as graph
+				     controls, and the graph owns a separate pair in its canvas
+				     cluster (or its list toolbar). -->
+				<button
+					type="button"
+					data-testid="tree-expand-all"
+					onclick={expandAll}
+					disabled={!treeData}
+				>
+					Expand all
+				</button>
+				<button
+					type="button"
+					data-testid="tree-collapse-all"
+					onclick={collapseAll}
+					disabled={!treeData}
+				>
+					Collapse all
+				</button>
+			{:else if graphAlternative}
+				<!-- The structured list has no canvas to host the floating cluster,
+				     so the same graph-wide actions stay in the top toolbar. -->
+				<button
+					type="button"
+					data-testid="graph-expand-all"
+					onclick={expandAllGraph}
+					disabled={!treeData}
+				>
+					Expand all
+				</button>
+				<button
+					type="button"
+					data-testid="graph-collapse-all"
+					onclick={collapseAllGraph}
+					disabled={!treeData}
+				>
+					Collapse all
+				</button>
+			{/if}
 			<label class="deps-toggle">
 				<input type="checkbox" checked={dependenciesVisible} onchange={toggleDependencies} />
 				Show dependency edges
@@ -680,6 +740,8 @@
 						{outline}
 						{selectedId}
 						onSelect={(id, trigger) => void selectItem(id, trigger)}
+						onExpand={toggleCollapse}
+						onShowAll={expandAllGraph}
 					/>
 				{:else if presentation === 'graph' && visibleGraph}
 					<GraphView
@@ -691,6 +753,8 @@
 						onDirectionChange={selectDirection}
 						onSelect={(id, trigger) => void selectItem(id, trigger)}
 						onToggle={toggleCollapse}
+						onExpandAll={expandAllGraph}
+						onCollapseAll={collapseAllGraph}
 						onViewportChange={rememberViewport}
 						onViewportReset={forgetViewport}
 					/>

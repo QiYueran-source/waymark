@@ -70,6 +70,8 @@
 		onDirectionChange,
 		onSelect,
 		onToggle,
+		onExpandAll,
+		onCollapseAll,
 		restoredViewport = null,
 		onViewportChange,
 		onViewportReset,
@@ -99,6 +101,10 @@
 		onSelect: (id: string, trigger?: HTMLElement) => void;
 		/** Collapsing or expanding a node; the item itself is never changed. */
 		onToggle: (id: string) => void;
+		/** Graph-wide expand: clear the drawing's collapse set. */
+		onExpandAll: () => void;
+		/** Graph-wide collapse: fold every drawn node that has children. */
+		onCollapseAll: () => void;
 		/**
 		 * The viewport this project last left, if any. It is applied once, on
 		 * entry, instead of fitting; a stored viewport the drawing cannot use is
@@ -990,6 +996,16 @@
 						{#if onDirectionChange}
 							<GraphDirectionControl {direction} onChange={onDirectionChange} />
 						{/if}
+						<!-- Graph-wide density: presentation only, on the graph's own
+						     collapse set. The tree's pair never appears here. -->
+						<div class="graph-controls-row" role="group" aria-label="Expansion">
+							<button type="button" data-testid="graph-expand-all" onclick={onExpandAll}>
+								Expand all
+							</button>
+							<button type="button" data-testid="graph-collapse-all" onclick={onCollapseAll}>
+								Collapse all
+							</button>
+						</div>
 						<!-- Pan and zoom are the canvas's own gestures: dragging the
 						     background, the wheel, a trackpad pinch, or two fingers on a
 						     touch screen. These controls only repeat or undo them. -->

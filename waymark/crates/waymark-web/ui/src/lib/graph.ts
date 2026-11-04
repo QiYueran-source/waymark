@@ -61,6 +61,12 @@ export interface GraphNode {
 	 * drawn. Set by [`collapseGraph`]; a complete graph has none collapsed.
 	 */
 	collapsed?: boolean;
+	/**
+	 * How many direct children [`collapseGraph`] hid under this node. It is set
+	 * only on a collapsed node, so a reader of the structured alternative can
+	 * say how much a folded branch contains without rebuilding the hierarchy.
+	 */
+	collapsedChildren?: number;
 }
 
 /** A solid parent-child edge. */
@@ -546,6 +552,14 @@ export interface OutlineItemEntry {
 	context: boolean;
 	/** "Context: …" when `context` is true, otherwise null. */
 	contextNote: string | null;
+	/**
+	 * True when the drawing has this branch folded, so its children are absent
+	 * from the alternative too. The entry itself stays, which is what makes the
+	 * fold a described row rather than a silent gap.
+	 */
+	collapsed: boolean;
+	/** Direct children the fold hides; 0 when the entry is not collapsed. */
+	collapsedChildren: number;
 }
 
 /** One unresolved item, with the reason its parent cannot be reached. */
@@ -580,6 +594,13 @@ export function collapseGraph(graph: WorkGraph, collapsed: ReadonlySet<string>):
 	// node below a hidden or collapsed parent is hidden in turn.
 	const hidden = new Set<string>();
 	const kept: GraphNode[] = [];
+	// Count direct children from the complete drawing before anything is hidden:
+	// a folded branch still knows how many children its own row stands for.
+	const directChildren = new Map<string, number>();
+	for (const node of graph.nodes) {
+		if (node.parentId === null) continue;
+		directChildren.set(node.parentId, (directChildren.get(node.parentId) ?? 0) + 1);
+	}
 	for (const node of graph.nodes) {
 		if (node.parentId !== null && hidden.has(node.parentId)) {
 			hidden.add(node.id);
@@ -587,7 +608,11 @@ export function collapseGraph(graph: WorkGraph, collapsed: ReadonlySet<string>):
 		}
 		if (collapsed.has(node.id)) {
 			hidden.add(node.id);
-			kept.push({ ...node, collapsed: true });
+			kept.push({
+				...node,
+				collapsed: true,
+				collapsedChildren: directChildren.get(node.id) ?? 0
+			});
 			continue;
 		}
 		kept.push(node);
@@ -755,7 +780,9 @@ export function graphOutline(graph: WorkGraph): OutlineEntry[] {
 			context: node.context,
 			contextNote: node.context
 				? `Context: outside the category selection (${CONTEXT_NOTE}).`
-				: null
+				: null,
+			collapsed: node.collapsed === true,
+			collapsedChildren: node.collapsed === true ? (node.collapsedChildren ?? 0) : 0
 		};
 	});
 
