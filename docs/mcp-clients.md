@@ -133,8 +133,7 @@ project and omit `--project`:
     "waymark": {
       "type": "stdio",
       "command": "/path/to/waymark-mcp",
-      "cwd": "/path/to/project",
-      "args": []
+      "cwd": "/path/to/project"
     }
   }
 }
