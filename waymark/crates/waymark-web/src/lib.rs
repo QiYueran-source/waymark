@@ -24,23 +24,41 @@
 //! `localhost` or a loopback IP at the actual listening port, and an `Origin`
 //! header, when present, must be the matching `http://host:port` origin.
 //!
-//! # The asset seam (phase 2)
+//! # The asset seam
 //!
-//! The frontend is a SvelteKit build in a directory chosen by the launcher.
-//! `GET /` serves `<assets>/index.html`; `GET /assets/<path>` serves
-//! `<assets>/<path>`. Nothing is embedded and nothing is generated: a build
-//! without assets starts (so `cargo test` needs no npm) but `GET /` explains the
-//! missing assets instead of serving a placeholder. [`ensure_assets`] is the
-//! launcher's startup check.
+//! The frontend is a SvelteKit build. In a development run the launcher names a
+//! directory and `GET /` serves `<assets>/index.html`; `GET /assets/<path>`
+//! serves `<assets>/<path>`. With the off-by-default `embed` feature,
+//! `build.rs` compiles the built tree into the binary instead, gzipped at build
+//! time, and [`WebConfig::embedded`] serves it with `Content-Encoding: gzip`.
+//! A build without `embed` has no embedded tree and still starts without assets
+//! (so `cargo test` needs no npm); `GET /` explains missing development assets
+//! instead of serving a placeholder. [`ensure_assets`] is the launcher's startup
+//! check.
+//!
+//! [`embedded_manifest`] exposes the provenance manifest a Web build embeds, so
+//! an adapter (`waymark version --json`, `waymark doctor`) can report exactly
+//! which tree the binary carries.
 
 mod api;
 mod assets;
+mod embedded;
 mod guard;
+pub mod manifest;
 mod render;
 mod respond;
 mod server;
 
 pub use api::{CategoryView, SHAPES};
+pub use manifest::{AssetFile, AssetManifest};
+
+/// The provenance manifest embedded by an `embed` build, or `None`.
+///
+/// The manifest and the asset table come from the same build script run, so a
+/// `Some` value describes exactly the bytes this binary serves.
+pub fn embedded_manifest() -> Option<&'static AssetManifest> {
+    embedded::manifest()
+}
 pub use server::{
     bind, default_assets_dir, ensure_assets, serve, Running, WebConfig, WebError, LOOPBACK,
 };

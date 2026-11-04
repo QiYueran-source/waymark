@@ -56,10 +56,7 @@ async fn run(args: Args) -> Result<(), String> {
         other => other.to_string(),
     })?;
 
-    let config = WebConfig {
-        port: args.port,
-        assets,
-    };
+    let config = WebConfig::new(assets).with_port(args.port);
     let running = waymark_web::bind(project.clone(), config)
         .await
         .map_err(|error| error.to_string())?;

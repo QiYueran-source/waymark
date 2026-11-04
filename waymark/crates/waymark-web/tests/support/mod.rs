@@ -104,10 +104,7 @@ pub fn assets() -> TempDir {
 pub async fn start(fixture: &Fixture, assets: &Path) -> waymark_web::Running {
     waymark_web::bind(
         fixture.project.clone(),
-        waymark_web::WebConfig {
-            port: 0,
-            assets: assets.to_path_buf(),
-        },
+        waymark_web::WebConfig::new(assets).with_port(0),
     )
     .await
     .expect("the loopback listener binds")

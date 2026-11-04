@@ -26,6 +26,18 @@ use crate::{respond, DEFAULT_PORT};
 /// The one address the service ever binds.
 pub const LOOPBACK: Ipv4Addr = Ipv4Addr::LOCALHOST;
 
+/// Where the static frontend comes from.
+///
+/// The development launcher reads a directory the developer built; a Web
+/// release embeds the same tree at compile time. The server itself does not care
+/// which, and a plain build has no embedded tree to reach for.
+#[derive(Debug, Clone)]
+pub(crate) enum AssetSource {
+    Directory(PathBuf),
+    #[cfg(feature = "embed")]
+    Embedded,
+}
+
 /// Everything the service needs that is not the project.
 #[derive(Debug, Clone)]
 pub struct WebConfig {
@@ -34,8 +46,7 @@ pub struct WebConfig {
     /// There is deliberately no host/interface field: the service binds
     /// [`LOOPBACK`] and nothing else.
     pub port: u16,
-    /// The built frontend directory: `index.html` plus hashed asset files.
-    pub assets: PathBuf,
+    pub(crate) assets: AssetSource,
 }
 
 impl WebConfig {
@@ -43,7 +54,19 @@ impl WebConfig {
     pub fn new(assets: impl Into<PathBuf>) -> Self {
         Self {
             port: DEFAULT_PORT,
-            assets: assets.into(),
+            assets: AssetSource::Directory(assets.into()),
+        }
+    }
+
+    /// A configuration for the frontend embedded in this binary.
+    ///
+    /// Only available with the `embed` feature: a build without a frontend must
+    /// not be able to claim it serves one.
+    #[cfg(feature = "embed")]
+    pub fn embedded() -> Self {
+        Self {
+            port: DEFAULT_PORT,
+            assets: AssetSource::Embedded,
         }
     }
 
@@ -120,7 +143,7 @@ pub(crate) struct AppState {
     pub(crate) project: Project,
     /// The actual bound port, which is the only port Host/Origin may name.
     pub(crate) port: u16,
-    pub(crate) assets: Arc<PathBuf>,
+    pub(crate) assets: Arc<AssetSource>,
 }
 
 /// A running loopback listener.
