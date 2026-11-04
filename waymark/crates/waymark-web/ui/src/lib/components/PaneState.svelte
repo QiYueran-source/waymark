@@ -15,18 +15,33 @@
 	 */
 	import type { Snippet } from 'svelte';
 
+	/** The five states that own their pane; no other kind may use this wrapper. */
+	type PaneStateKind =
+		| 'categories-cleared'
+		| 'no-active-work'
+		| 'empty-project'
+		| 'read-failure'
+		| 'detail-failure';
+
 	let {
 		testId,
 		kind,
-		emptyKind,
 		children
 	}: {
 		testId: string;
-		kind: string;
-		/** The older `data-empty-kind` hook the filtered-empty contract uses. */
-		emptyKind?: string;
+		kind: PaneStateKind;
 		children: Snippet;
 	} = $props();
+
+	/**
+	 * The older `data-empty-kind` hook the filtered-empty contract uses.
+	 *
+	 * Only the two filtered-empty states carry it; the project-empty and the
+	 * two failure states are not filter results and omit the attribute.
+	 */
+	const emptyKind = $derived(
+		kind === 'categories-cleared' || kind === 'no-active-work' ? kind : undefined
+	);
 </script>
 
 <div

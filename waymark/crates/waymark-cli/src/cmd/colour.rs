@@ -27,7 +27,7 @@ pub enum ColourChoice {
 /// `NO_COLOR` suppresses `auto` only: an explicit `--color=always` is the
 /// caller asking for colour and wins over the environment, while `never` is
 /// always plain.
-pub fn enabled(choice: ColourChoice, no_color: bool, stream_is_tty: bool) -> bool {
+fn enabled(choice: ColourChoice, no_color: bool, stream_is_tty: bool) -> bool {
     match choice {
         ColourChoice::Always => true,
         ColourChoice::Never => false,
@@ -39,7 +39,7 @@ pub fn enabled(choice: ColourChoice, no_color: bool, stream_is_tty: bool) -> boo
 ///
 /// This is the no-color.org convention: a merely present but empty variable is
 /// not a request to disable colour.
-pub fn no_color_is_set(value: Option<&OsStr>) -> bool {
+fn no_color_is_set(value: Option<&OsStr>) -> bool {
     value.is_some_and(|value| !value.is_empty())
 }
 
@@ -57,12 +57,15 @@ pub enum Palette {
 }
 
 impl Palette {
-    /// Resolve the palette for human output from the global flag.
+    /// Resolve the palette for human output from the global flag, `NO_COLOR`,
+    /// and the terminal capability of the stream it writes to.
     ///
-    /// Human prose goes to stderr, so stderr is the stream whose terminal
-    /// capability decides `auto`; stdout carries JSON, `show --raw` documents,
-    /// and raw `git diff` patches, which are never coloured.
-    pub fn for_human_stream(choice: ColourChoice) -> Self {
+    /// The name names the reads: this is not a pure conversion, it consults
+    /// the environment and asks the OS whether stderr is a terminal. Human
+    /// prose goes to stderr, so stderr is the stream whose capability decides
+    /// `auto`; stdout carries JSON, `show --raw` documents, and raw `git diff`
+    /// patches, which are never coloured.
+    pub fn from_human_environment(choice: ColourChoice) -> Self {
         if enabled(choice, no_color_from_env(), std::io::stderr().is_terminal()) {
             Self::Ansi
         } else {

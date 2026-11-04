@@ -84,6 +84,32 @@ function wideDependencyTree(count: number): CombinedTree {
 	return { view: 'combined', roots, unresolved: [], categories: [BUG, TASK] };
 }
 
+/**
+ * A wide row of roots plus one short cross-generation dependency.
+ *
+ * The row makes the fitted zoom low; the child sits directly under the first
+ * root and depends on it, so that dependency's straight chord is only about
+ * one generation gap — shorter on screen than one full dash plus gap.
+ */
+function shortCrossGenerationTree(count: number): CombinedTree {
+	const roots = Array.from({ length: count }, (_, index) =>
+		treeNode({
+			id: `wm-short-${index}`,
+			title: `Short item ${index}`,
+			category: index % 2 === 0 ? BUG : TASK
+		})
+	);
+	const child = treeNode({
+		id: 'wm-short-child',
+		title: 'Short child',
+		category: TASK,
+		parent: roots[0].id,
+		dependencies: [roots[0].id]
+	});
+	roots[0] = { ...roots[0], children: [child] };
+	return { view: 'combined', roots, unresolved: [], categories: [BUG, TASK] };
+}
+
 /** The two lengths a dash pattern draws with, in drawing units. */
 function pattern(zoom: number): [number, number] {
 	const parts = dependencyDashArray(zoom)
@@ -117,6 +143,29 @@ describe('the dependency dash pattern', () => {
 			expect(dash).toBeGreaterThan(0);
 			expect(gap).toBeGreaterThan(0);
 		}
+	});
+
+	it('caps the pattern when the chord is too short for two full periods', () => {
+		const zoom = 0.11;
+		const screenSpan = 6;
+		const parts = dependencyDashArray(zoom, screenSpan)
+			.split(' ')
+			.map((part) => Number(part));
+		expect(parts).toHaveLength(2);
+		const [dash, gap] = parts;
+		expect(dash).toBeGreaterThan(0);
+		expect(gap).toBeGreaterThan(0);
+		// The dash and gap keep their ratio, and two periods — so at least one
+		// complete gap — fit along the edge's straight chord.
+		expect(dash / gap).toBeCloseTo(DEPENDENCY_DASH_SCREEN / DEPENDENCY_GAP_SCREEN, 1);
+		expect(2 * (dash + gap) * zoom).toBeLessThanOrEqual(screenSpan);
+		expect((dash + gap) * zoom).toBeLessThan(
+			DEPENDENCY_DASH_SCREEN + DEPENDENCY_GAP_SCREEN
+		);
+	});
+
+	it('leaves a chord long enough for the full pattern uncapped', () => {
+		expect(dependencyDashArray(0.25, 100)).toBe(dependencyDashArray(0.25));
 	});
 
 	it('falls back to the neutral pattern for a zoom a denominator cannot use', () => {
@@ -155,6 +204,25 @@ describe('drawn relationship lines', () => {
 		const [dash, gap] = drawnPattern(path);
 		expect(dash * shown.zoom).toBeGreaterThanOrEqual(DEPENDENCY_DASH_SCREEN - 0.01);
 		expect(gap * shown.zoom).toBeGreaterThanOrEqual(DEPENDENCY_GAP_SCREEN - 0.01);
+	});
+
+	it('caps a short cross-generation edge so it keeps a gap at a low fit zoom', async () => {
+		await openGraph({ trees: { combined: shortCrossGenerationTree(20) } });
+		await fireEvent.click(dependencyToggle());
+		await waitFor(() => expect(edges('dependency')).toHaveLength(1));
+
+		const shown = viewport();
+		// The wide drawing fits low; the dependency spans one generation gap, so
+		// its straight chord is shorter than two full 8+6 periods on screen.
+		expect(shown.zoom).toBeLessThan(0.5);
+		const path = edgePath(edges('dependency')[0]);
+		const [dash, gap] = drawnPattern(path);
+		const fullPeriod = DEPENDENCY_DASH_SCREEN + DEPENDENCY_GAP_SCREEN;
+		// Capped below the ordinary pattern, so the chord is not a single dash…
+		expect((dash + gap) * shown.zoom).toBeLessThan(fullPeriod);
+		// …and the gap is still there at the reader's scale.
+		expect(dash).toBeGreaterThan(0);
+		expect(gap * shown.zoom).toBeGreaterThan(0);
 	});
 
 	it('recomputes the dash after zooming out, so its screen-space size is kept', async () => {

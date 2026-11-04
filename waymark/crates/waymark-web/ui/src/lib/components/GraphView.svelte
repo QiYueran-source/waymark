@@ -180,35 +180,40 @@
 
 	/**
 	 * The two line treatments are painted explicitly on the path, not left to
-	 * the renderer's defaults: hierarchy is a 1.5px guide-coloured solid stroke,
+	 * the renderer's defaults: hierarchy is a guide-coloured solid stroke,
 	 * dependency is a thicker blue-grey dashed one. Colour, weight, and dash all
-	 * differ, so the kinds never rest on colour alone.
+	 * differ, so the kinds never rest on colour alone. Each kind names both of
+	 * its weights, and a raised one is thicker than the same kind at rest.
 	 */
+	const PARENT_CHILD_WEIGHT = 1.5;
+	const PARENT_CHILD_RAISED_WEIGHT = 2.5;
 	const DEPENDENCY_WEIGHT = 2.5;
-	const RAISED_WEIGHT = 3.5;
+	const DEPENDENCY_RAISED_WEIGHT = 3.5;
 	const RAISED_Z_INDEX = 1000;
 
-	function edgeStyle(kind: 'parent-child' | 'dependency', zoom: number, raised: boolean): string {
+	function edgeStyle(
+		kind: 'parent-child' | 'dependency',
+		zoom: number,
+		raised: boolean,
+		screenSpan?: number
+	): string {
 		const width =
 			kind === 'dependency'
 				? raised
-					? RAISED_WEIGHT
+					? DEPENDENCY_RAISED_WEIGHT
 					: DEPENDENCY_WEIGHT
 				: raised
-					? 2.5
-					: 1.5;
+					? PARENT_CHILD_RAISED_WEIGHT
+					: PARENT_CHILD_WEIGHT;
 		if (kind === 'parent-child') return `stroke: var(--guide); stroke-width: ${width};`;
 		return `stroke: var(--dep-edge); stroke-width: ${width}; stroke-dasharray: ${dependencyDashArray(
-			zoom
+			zoom,
+			screenSpan
 		)};`;
 	}
 
-	function edgeClass(kind: 'parent-child' | 'dependency', raised: boolean): string {
-		return [
-			'graph-edge',
-			`graph-edge-${kind}`,
-			raised ? 'graph-edge-raised' : 'graph-edge-idle'
-		].join(' ');
+	function edgeClass(kind: 'parent-child' | 'dependency'): string {
+		return `graph-edge graph-edge-${kind}`;
 	}
 
 	interface PlacedNode {
@@ -315,12 +320,15 @@
 
 	const placed = $derived(placeNodes(graph, measuredHeights, direction));
 
-	/** Where each node sits, so an overlay can leave by the nearest side. */
+	/**
+	 * Where each node sits, so an overlay can leave by the nearest side and can
+	 * measure the straight chord between two cards.
+	 */
 	const placedById = $derived(
 		new Map(
 			placed.map((entry) => [
 				entry.payload.node.id,
-				{ x: entry.x, y: entry.y, depth: entry.payload.node.depth }
+				{ x: entry.x, y: entry.y, height: entry.height, depth: entry.payload.node.depth }
 			])
 		)
 	);
@@ -556,7 +564,7 @@
 				sourceHandle: handles.source,
 				targetHandle: handles.target,
 				style: edgeStyle('parent-child', 1, raised),
-				class: edgeClass('parent-child', raised),
+				class: edgeClass('parent-child'),
 				zIndex: raised ? RAISED_Z_INDEX : 0,
 				label: raised ? edgeLabel(graph, edge) : undefined,
 				ariaLabel: edgeLabel(graph, edge),
@@ -574,9 +582,29 @@
 	);
 
 	/**
+	 * The straight-line screen distance between two cards' centres.
+	 *
+	 * A dependency between adjacent generations spans only about one row gap,
+	 * so at a low fit zoom it can be shorter on screen than one whole
+	 * dash-plus-gap and would draw as a single solid dash. The dash helper
+	 * needs that chord to cap the pattern. An edge whose ends are not both
+	 * placed has no chord, which keeps the ordinary zoom-only pattern.
+	 */
+	function dependencyScreenSpan(from: string, to: string, zoom: number): number | undefined {
+		const source = placedById.get(from);
+		const target = placedById.get(to);
+		if (source === undefined || target === undefined) return undefined;
+		const dx = source.x + NODE_WIDTH / 2 - (target.x + NODE_WIDTH / 2);
+		const dy = source.y + source.height / 2 - (target.y + target.height / 2);
+		return Math.hypot(dx, dy) * zoom;
+	}
+
+	/**
 	 * One dashed, directed edge per dependency, arrow pointing at the item
 	 * depended on. `data-arrow="target"` is the app-owned hook that states the
 	 * direction without geometry; the accessible name says it in words too.
+	 * Its dash is capped by the edge's own screen span, so a short chord keeps
+	 * a visible gap even at the fitted zoom of a large drawing.
 	 */
 	function dependencyEdge(edge: GraphDependencyEdge, zoom: number): Edge {
 		const coincident = parentPairs.has(
@@ -585,14 +613,15 @@
 		const handles = dependencyHandles(edge.from, edge.to, coincident, direction);
 		const gap = gapByEdge.get(edge.id);
 		const raised = hoveredEdgeId === edge.id;
+		const screenSpan = dependencyScreenSpan(edge.from, edge.to, zoom);
 		return {
 			id: edge.id,
 			source: edge.from,
 			target: edge.to,
 			sourceHandle: handles.source,
 			targetHandle: handles.target,
-			style: edgeStyle('dependency', zoom, raised),
-			class: edgeClass('dependency', raised),
+			style: edgeStyle('dependency', zoom, raised, screenSpan),
+			class: edgeClass('dependency'),
 			zIndex: raised ? RAISED_Z_INDEX : 0,
 			label: raised ? edgeLabel(graph, edge) : undefined,
 			markerEnd: DEPENDENCY_MARKER,
