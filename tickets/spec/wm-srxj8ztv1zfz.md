@@ -3,11 +3,12 @@ schema: 1
 id: wm-srxj8ztv1zfz
 title: Waymark functional specification
 category: spec
-status: open
+status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-03T23:52:21Z
+updated_at: 2026-11-04T00:14:49Z
+closed_at: 2026-11-04T00:14:49Z
 ---
 ## Problem Statement
 
