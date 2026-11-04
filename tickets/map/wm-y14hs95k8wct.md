@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-04T12:33:22Z
+updated_at: 2026-11-04T12:34:12Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -262,10 +262,13 @@ Investigated on 2026-11-04 against the real project payload and a synthetic over
 - Two arrowheads can also be a mutual dependency pair (a dependency cycle); mediated writes reject cycles with `CYCLE_DETECTED`, so that shape only comes from externally edited cyclic data.
 - At the default fit for a large project (about 11%), a 6/4 dash is sub-pixel, so even an isolated dependency edge looks solid. Low zoom is an independent cause.
 - Duplicate dependency entries collapse to one rendered edge; soft links are not drawn.
+- The graph currently offers no annotation for overlapping or coincident edges: the legend has only the two edge-kind entries, and there is no hover label, edge count, or per-edge identification. The reported double-arrow and solid-line appearances therefore have no on-screen explanation.
 
 ### Resolved Web page optimization
 
 Confirmed by the user on 2026-11-04. These extend the accepted Web specification; the specification and implementation tickets have not yet been synchronized.
+
+- Graph direction switch: settled in Graph layout direction discussion above and synchronized into the Web specification; the graph offers top-to-bottom (default) and left-to-right, with one per-project preference.
 
 #### Graph canvas
 
