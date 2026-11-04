@@ -182,6 +182,11 @@ code {
 	background: var(--accent);
 }
 
+/*
+ * Non-blocking notices — persistence, lock/refresh, and other warnings — stay
+ * inline in the chrome at the top. They must never be wrapped in `.pane-state`:
+ * only the five blocking/empty states are centred.
+ */
 .notice {
 	flex: none;
 	margin: 0;
@@ -487,6 +492,38 @@ code {
 .empty-action:hover {
 	border-color: var(--accent);
 	color: var(--accent);
+}
+
+/* Blocking and empty states ----------------------------------------------- */
+
+/*
+ * Exactly five states centre: no categories selected, selected categories with
+ * no active work, an empty project, a project read failure, and a detail-load
+ * failure in the detail panel. They are the whole content of their pane, so
+ * they fill the area the pane has and centre their message in it.
+ *
+ * `min-height` serves the scrolling tree pane (a block); `flex` serves the
+ * graph pane and the detail panel (flex columns). No state introduces a fixed
+ * height, so the canvas layout remains free to size the same pane.
+ */
+.pane-state {
+	display: flex;
+	flex: 1 1 auto;
+	align-items: center;
+	justify-content: center;
+	min-width: 0;
+	min-height: 100%;
+}
+
+/* The message keeps its own readable width and is centred as a block. */
+.pane-state > .empty,
+.pane-state > .failure {
+	width: 100%;
+}
+
+/* The pane already centres this block, so it needs no vertical offset. */
+.pane-state .empty {
+	padding: 0;
 }
 
 /* Tree -------------------------------------------------------------------- */
@@ -1432,6 +1469,21 @@ button.graph-text-title:hover {
 	overflow-wrap: anywhere;
 }
 
+/*
+ * Findings scroll inside a bounded, width-limited block: a long diagnostic is
+ * readable prose that wraps, never one line stretched across the pane.
+ */
+.failure-diagnostics-block {
+	max-width: 100%;
+	max-height: 15rem;
+	overflow-x: hidden;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	padding-right: 0.35rem;
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+
 /* Findings that name a document or a path: one per row, place first. */
 .problems {
 	display: grid;
@@ -1488,12 +1540,23 @@ button.graph-text-title:hover {
 /* Detail ------------------------------------------------------------------ */
 
 .detail {
+	display: flex;
 	flex: none;
+	flex-direction: column;
 	width: min(26rem, 42vw);
 	overflow-y: auto;
 	background: var(--panel);
 	border-left: 1px solid var(--line-strong);
 	animation: detail-enter 160ms var(--ease-out) both;
+}
+
+/*
+ * A detail-load failure centres in the area left below the sticky header, not
+ * against the panel's full scroll height, so the flex column owns the space.
+ */
+.detail > .pane-state {
+	min-height: 0;
+	padding: 0.85rem 1.1rem;
 }
 
 @keyframes detail-enter {
@@ -1507,6 +1570,7 @@ button.graph-text-title:hover {
 	position: sticky;
 	top: 0;
 	z-index: 1;
+	flex: none;
 	display: flex;
 	align-items: flex-start;
 	justify-content: space-between;

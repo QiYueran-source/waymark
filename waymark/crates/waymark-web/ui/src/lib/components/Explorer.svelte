@@ -14,6 +14,7 @@
 	import DetailPanel from './DetailPanel.svelte';
 	import GraphText from './GraphText.svelte';
 	import GraphView from './GraphView.svelte';
+	import PaneState from './PaneState.svelte';
 	import ReadFailure from './ReadFailure.svelte';
 	import TreeView from './TreeView.svelte';
 	import UnresolvedList from './UnresolvedList.svelte';
@@ -479,7 +480,15 @@
 	</header>
 
 	{#if persistenceNotice}
-		<p class="notice" role="status" data-testid="persistence-notice">{persistenceNotice}</p>
+		<!-- Non-blocking: this stays inline above the toolbar, never centred. -->
+		<p
+			class="notice"
+			role="status"
+			data-state-layout="inline"
+			data-testid="persistence-notice"
+		>
+			{persistenceNotice}
+		</p>
 	{/if}
 
 	<div class="toolbar">
@@ -578,49 +587,56 @@
 			tabindex="-1"
 		>
 			{#if loadingTree}
+				<!-- Loading is a status, not one of the five blocking/empty states. -->
 				<p class="status" role="status">Reading the project tree…</p>
 			{:else if readFailure}
-				<ReadFailure failure={readFailure} />
+				<PaneState testId="read-failure-state" kind="read-failure">
+					<ReadFailure failure={readFailure} />
+				</PaneState>
 			{:else if isEmpty}
-				<div class="empty" data-testid="empty-state">
-					<h2>No active work items</h2>
-					<p>
-						This project has no non-archived work items. Archived items stay out of this
-						view.
-					</p>
-				</div>
+				<PaneState testId="empty-state" kind="empty-project">
+					<div class="empty">
+						<h2>No active work items</h2>
+						<p>
+							This project has no non-archived work items. Archived items stay out of this
+							view.
+						</p>
+					</div>
+				</PaneState>
 			{:else if isFilteredEmpty}
 				<!-- Two ways to reach an empty filtered pane — every category cleared,
 				     or selected categories that hold no active work — and one recovery
 				     for both, repeated where the reader is looking. -->
-				<div
-					class="empty"
-					data-testid="filtered-empty-state"
-					data-empty-kind={noCategorySelected ? 'categories-cleared' : 'no-active-work'}
+				<PaneState
+					testId="filtered-empty-state"
+					kind={noCategorySelected ? 'categories-cleared' : 'no-active-work'}
+					emptyKind={noCategorySelected ? 'categories-cleared' : 'no-active-work'}
 				>
-					{#if noCategorySelected}
-						<h2>No categories selected</h2>
-						<p>
-							The by-category {presentation === 'graph' ? 'graph' : 'view'} shows only the
-							categories you select, and none is selected right now.
-						</p>
-					{:else}
-						<h2>Nothing in the selected categories</h2>
-						<p>
-							The by-category {presentation === 'graph' ? 'graph' : 'view'} shows only the
-							categories you select, and none of the selected ones has active work right
-							now.
-						</p>
-					{/if}
-					<button
-						class="empty-action"
-						type="button"
-						data-testid="select-all-from-empty"
-						onclick={selectAllCategories}
-					>
-						Select all categories
-					</button>
-				</div>
+					<div class="empty">
+						{#if noCategorySelected}
+							<h2>No categories selected</h2>
+							<p>
+								The by-category {presentation === 'graph' ? 'graph' : 'view'} shows only the
+								categories you select, and none is selected right now.
+							</p>
+						{:else}
+							<h2>Nothing in the selected categories</h2>
+							<p>
+								The by-category {presentation === 'graph' ? 'graph' : 'view'} shows only the
+								categories you select, and none of the selected ones has active work right
+								now.
+							</p>
+						{/if}
+						<button
+							class="empty-action"
+							type="button"
+							data-testid="select-all-from-empty"
+							onclick={selectAllCategories}
+						>
+							Select all categories
+						</button>
+					</div>
+				</PaneState>
 			{:else if treeData}
 				{#if readingAlternative && visibleGraph}
 					<GraphText
