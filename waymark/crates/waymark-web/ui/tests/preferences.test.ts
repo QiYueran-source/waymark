@@ -36,6 +36,7 @@ import {
 	groupedTreeWithEmptyCategory,
 	makeFetch
 } from './fixtures';
+import { categoryOption, clickCategory } from './category-helpers';
 
 type FetchOptions = Parameters<typeof makeFetch>[0];
 
@@ -130,7 +131,7 @@ describe('every control writes only under the project namespace', () => {
 		const rendered = await renderLoaded({ trees: BOTH_VIEWS });
 		await fireEvent.click(screen.getByLabelText('By category'));
 		await screen.findByTestId('group-bug');
-		await fireEvent.click(screen.getByTestId('category-option-docs'));
+		await clickCategory('docs');
 		await fireEvent.click(screen.getByTestId('toggle-wm-bug-login'));
 		await fireEvent.click(screen.getByLabelText('Show dependency edges'));
 		const treePane = screen.getByLabelText('Work items');
@@ -204,17 +205,17 @@ describe('round-trips, per preference', () => {
 		const first = await renderLoaded({ trees: BOTH_VIEWS });
 		await fireEvent.click(screen.getByLabelText('By category'));
 		await screen.findByTestId('group-bug');
-		await fireEvent.click(screen.getByTestId('category-option-bug'));
-		await fireEvent.click(screen.getByTestId('category-option-docs'));
+		await clickCategory('bug');
+		await clickCategory('docs');
 		first.unmount();
 
 		await renderLoaded({ trees: BOTH_VIEWS });
 		await screen.findByTestId('group-task');
 		expect(
-			screen.getByTestId('category-option-bug').getAttribute('aria-pressed')
+			(await categoryOption('bug')).getAttribute('aria-pressed')
 		).toBe('false');
 		expect(
-			screen.getByTestId('category-option-task').getAttribute('aria-pressed')
+			(await categoryOption('task')).getAttribute('aria-pressed')
 		).toBe('true');
 	});
 
@@ -406,7 +407,7 @@ describe('two projects on one origin', () => {
 	const choices = async () => {
 		await fireEvent.click(screen.getByLabelText('By category'));
 		await screen.findByTestId('group-bug');
-		await fireEvent.click(screen.getByTestId('category-option-bug'));
+		await clickCategory('bug');
 		await fireEvent.click(screen.getByTestId('toggle-wm-bug-login'));
 		await fireEvent.click(screen.getByLabelText('Show dependency edges'));
 		await fireEvent.click(screen.getByLabelText('Graph'));
@@ -431,7 +432,7 @@ describe('two projects on one origin', () => {
 		expect(checked('Tree')).toBe(true);
 		await fireEvent.click(screen.getByLabelText('By category'));
 		await screen.findByTestId('group-bug');
-		expect(screen.getByTestId('category-option-bug').getAttribute('aria-pressed')).toBe(
+		expect((await categoryOption('bug')).getAttribute('aria-pressed')).toBe(
 			'true'
 		);
 		expect(checked('Show dependency edges')).toBe(false);
@@ -548,9 +549,9 @@ describe('a hostile store', () => {
 			await fireEvent.click(screen.getByRole('button', { name: 'Collapse all' }));
 			await fireEvent.click(screen.getByLabelText('By category'));
 			await screen.findByTestId('group-bug');
-			await fireEvent.click(screen.getByTestId('category-option-docs'));
+			await clickCategory('docs');
 			expect(
-				screen.getByTestId('category-option-docs').getAttribute('aria-pressed')
+				(await categoryOption('docs')).getAttribute('aria-pressed')
 			).toBe('false');
 			await fireEvent.click(screen.getByLabelText('Graph'));
 			await screen.findByTestId('graph');
@@ -683,7 +684,7 @@ describe('read-only traffic', () => {
 		});
 		await fireEvent.click(screen.getByLabelText('By category'));
 		await screen.findByTestId('group-bug');
-		await fireEvent.click(screen.getByTestId('category-option-docs'));
+		await clickCategory('docs');
 		await fireEvent.click(screen.getByTestId('toggle-wm-bug-login'));
 		await fireEvent.click(screen.getByLabelText('Show dependency edges'));
 		await fireEvent.click(screen.getByLabelText('Graph'));

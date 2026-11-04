@@ -12,6 +12,12 @@ import {
 	makeFetch,
 	unresolvedReasonsTree
 } from './fixtures';
+import {
+	categoryOption,
+	clickCategory,
+	clickCategoryAction,
+	openCategories
+} from './category-helpers';
 
 type FetchOptions = Parameters<typeof makeFetch>[0];
 
@@ -48,7 +54,7 @@ function textOf(element: Element | null): string {
 /** Unselect every category from a fully selected start. */
 async function clearCategories(keys: string[]): Promise<void> {
 	for (const key of keys) {
-		await fireEvent.click(screen.getByTestId(`category-option-${key}`));
+		await clickCategory(key);
 	}
 }
 
@@ -61,8 +67,8 @@ describe('the category filter governs the graph', () => {
 
 		// Task-only: the tree keeps the whole unselected chain down to the task,
 		// and the graph must draw the same items in the same order.
-		await fireEvent.click(screen.getByTestId('category-option-bug'));
-		await fireEvent.click(screen.getByTestId('category-option-docs'));
+		await clickCategory('bug');
+		await clickCategory('docs');
 		await waitFor(() =>
 			expect(cards().map((element) => element.getAttribute('data-node-id'))).toEqual([
 				'wm-docs-umbrella',
@@ -96,28 +102,27 @@ describe('the category filter governs the graph', () => {
 		await openGroupedGraph({ trees: DEEP });
 
 		expect(screen.getByTestId('category-filter')).not.toBeNull();
-		expect(screen.getByTestId('category-option-bug').getAttribute('aria-pressed')).toBe('true');
+		expect((await categoryOption('bug')).getAttribute('aria-pressed')).toBe('true');
 
-		await fireEvent.click(screen.getByTestId('category-option-bug'));
+		await clickCategory('bug');
 		// The bug leaves the selection but stays as the task's required ancestor,
 		// now marked context; its unrelated sibling leaves entirely.
 		await waitFor(() => expect(card('wm-bug-mid').getAttribute('data-context')).toBe('true'));
 		expect(screen.queryByTestId('graph-node-wm-bug-sibling')).toBeNull();
-		expect(screen.getByTestId('category-option-bug').getAttribute('aria-pressed')).toBe('false');
+		expect((await categoryOption('bug')).getAttribute('aria-pressed')).toBe('false');
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Clear all categories' }));
+		await clickCategoryAction('Clear all categories');
 		expect(cards()).toHaveLength(0);
-		// Two recovery actions are on screen at once — the toolbar's and the empty
-		// pane's — so scope this to the filter control itself.
-		const filter = screen.getByTestId('category-filter');
-		await fireEvent.click(within(filter).getByRole('button', { name: 'Select all categories' }));
+		// The popover's select-all and the pane's recovery action reach the same
+		// state; the control is available again in the toolbar.
+		await clickCategoryAction('Select all categories');
 		await waitFor(() => expect(cards()).toHaveLength(6));
 	});
 
 	it('draws the required unselected ancestors as marked context', async () => {
 		await openGroupedGraph({ trees: DEEP });
-		await fireEvent.click(screen.getByTestId('category-option-bug'));
-		await fireEvent.click(screen.getByTestId('category-option-docs'));
+		await clickCategory('bug');
+		await clickCategory('docs');
 
 		await waitFor(() =>
 			expect(card('wm-docs-umbrella').getAttribute('data-context')).toBe('true')
@@ -141,8 +146,8 @@ describe('the category filter governs the graph', () => {
 
 	it('never promotes a selected item under an unselected parent to a root', async () => {
 		await openGroupedGraph({ trees: DEEP });
-		await fireEvent.click(screen.getByTestId('category-option-bug'));
-		await fireEvent.click(screen.getByTestId('category-option-docs'));
+		await clickCategory('bug');
+		await clickCategory('docs');
 		await waitFor(() => expect(cards()).toHaveLength(4));
 
 		expect(card('wm-task-leaf').getAttribute('data-parent-id')).toBe('wm-bug-mid');
@@ -169,8 +174,8 @@ describe('the category filter governs the graph', () => {
 
 	it('counts only selected work in the summary, not context rows', async () => {
 		await openGroupedGraph({ trees: DEEP });
-		await fireEvent.click(screen.getByTestId('category-option-bug'));
-		await fireEvent.click(screen.getByTestId('category-option-docs'));
+		await clickCategory('bug');
+		await clickCategory('docs');
 		// Two tasks are selected work; the blocked context ancestors are not.
 		expect(screen.getByTestId('tree-summary').textContent).toBe('2 items · 0 blocked');
 	});
@@ -196,7 +201,7 @@ describe('empty states in the graph pane', () => {
 		expect(empty.textContent).toContain('graph');
 		expect(screen.queryByTestId('graph')).toBeNull();
 
-		await fireEvent.click(within(empty).getByRole('button', { name: 'Select all categories' }));
+		await clickCategoryAction('Select all categories');
 		await screen.findByTestId('graph');
 		await waitFor(() => expect(cards()).toHaveLength(6));
 		expect(screen.queryByTestId('filtered-empty-state')).toBeNull();
@@ -205,17 +210,17 @@ describe('empty states in the graph pane', () => {
 	it('shows the empty state when the selected categories hold no active work', async () => {
 		// Docs is configured but holds no active work in this read.
 		await openGroupedGraph({ trees: { combined: combinedTree, grouped: groupedTreeWithEmptyCategory } });
-		await fireEvent.click(screen.getByTestId('category-option-bug'));
-		await fireEvent.click(screen.getByTestId('category-option-task'));
+		await clickCategory('bug');
+		await clickCategory('task');
 
 		const empty = await screen.findByTestId('filtered-empty-state');
 		expect(empty.getAttribute('data-empty-kind')).toBe('no-active-work');
 		expect(textOf(empty.querySelector('h2'))).toBe('Nothing in the selected categories');
 		expect(screen.queryByTestId('graph')).toBeNull();
 
-		await fireEvent.click(within(empty).getByRole('button', { name: 'Select all categories' }));
+		await clickCategoryAction('Select all categories');
 		await waitFor(() => expect(cards().length).toBeGreaterThan(0));
-		expect(screen.getByTestId('category-option-docs').getAttribute('aria-pressed')).toBe('true');
+		expect((await categoryOption('docs')).getAttribute('aria-pressed')).toBe('true');
 	});
 
 	it('keeps the toolbar recovery action and the pane one in agreement', async () => {
@@ -223,6 +228,7 @@ describe('empty states in the graph pane', () => {
 		await clearCategories(DEEP_CATEGORIES);
 		const empty = await screen.findByTestId('filtered-empty-state');
 		// The toolbar's control and the pane's recovery action say the same thing.
+		await openCategories();
 		const recovery = screen.getAllByRole('button', { name: 'Select all categories' });
 		expect(recovery).toHaveLength(2);
 		expect(within(empty).getByTestId('select-all-from-empty')).not.toBeNull();
@@ -258,7 +264,7 @@ describe('archive, unresolved, and damaged reads in the graph', () => {
 	it('drops a dependency target that filtering leaves out', async () => {
 		await openGroupedGraph({ trees: { combined: combinedTree, grouped: groupedDependencyTree } });
 		await fireEvent.click(screen.getByLabelText('Show dependency edges'));
-		await fireEvent.click(screen.getByTestId('category-option-bug'));
+		await clickCategory('bug');
 
 		await waitFor(() =>
 			expect(cards().map((element) => element.getAttribute('data-node-id'))).toEqual([

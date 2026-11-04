@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 
 import Explorer from '$lib/components/Explorer.svelte';
@@ -22,6 +22,13 @@ import {
 	unresolvedTree,
 	validationFinding
 } from './fixtures';
+import {
+	categoryOption,
+	clickCategory,
+	clickCategoryAction,
+	openCategories
+} from './category-helpers';
+
 
 /**
  * The one sentence the projection's summary finding and its error both use.
@@ -471,12 +478,12 @@ async function renderGrouped(options: Parameters<typeof makeFetch>[0]) {
 	return rendered;
 }
 
-function optionLabel(key: string): string {
-	return screen.getByTestId(`category-option-${key}`).getAttribute('aria-label') ?? '';
+async function optionLabel(key: string): Promise<string> {
+	return (await categoryOption(key)).getAttribute('aria-label') ?? '';
 }
 
-function pressed(key: string): string | null {
-	return screen.getByTestId(`category-option-${key}`).getAttribute('aria-pressed');
+async function pressed(key: string): Promise<string | null> {
+	return (await categoryOption(key)).getAttribute('aria-pressed');
 }
 
 describe('category selection', () => {
@@ -484,7 +491,7 @@ describe('category selection', () => {
 
 	it('offers one control per configured category, including one with no active work', async () => {
 		await renderGrouped({ trees: bothViews });
-		const filter = screen.getByTestId('category-filter');
+		const filter = await openCategories();
 		// `docs` is configured but holds no active work, so it has no group…
 		expect(screen.queryByTestId('group-docs')).toBeNull();
 		// …yet it must still be offered, because selection is about categories,
@@ -499,6 +506,7 @@ describe('category selection', () => {
 
 	it('carries each category’s shape and name, and states its selected state in words', async () => {
 		await renderGrouped({ trees: bothViews });
+		await openCategories();
 		const option = screen.getByTestId('category-option-docs');
 		const shape = option.querySelector('[data-shape]');
 		expect(shape?.getAttribute('data-shape')).toBe('triangle');
@@ -506,24 +514,24 @@ describe('category selection', () => {
 		expect(option.textContent).toContain('Docs');
 		// Every category starts selected, and the accessible name says so: the
 		// state is never carried by colour or by `aria-pressed` alone.
-		expect(optionLabel('docs')).toBe('Docs, selected');
-		expect(pressed('docs')).toBe('true');
-		expect(screen.getByRole('group', { name: 'Categories' })).not.toBeNull();
+		expect(await optionLabel('docs')).toBe('Docs, selected');
+		expect(await pressed('docs')).toBe('true');
+		expect(screen.getByRole('dialog', { name: 'Categories' })).not.toBeNull();
 	});
 
 	it('filters to one category, then to several, keeping a required ancestor as context', async () => {
 		await renderGrouped({ trees: bothViews });
 		// Off: the category's group and its work items leave.
-		await fireEvent.click(screen.getByTestId('category-option-task'));
+		await clickCategory('task');
 		expect(screen.queryByTestId('group-task')).toBeNull();
 		expect(screen.getByTestId('group-bug')).not.toBeNull();
-		expect(optionLabel('task')).toBe('Tasks, not selected');
-		expect(pressed('task')).toBe('false');
+		expect(await optionLabel('task')).toBe('Tasks, not selected');
+		expect(await pressed('task')).toBe('false');
 
 		// Back on, then everything except `task` turned off: only `task` is left.
-		await fireEvent.click(screen.getByTestId('category-option-task'));
-		await fireEvent.click(screen.getByTestId('category-option-bug'));
-		await fireEvent.click(screen.getByTestId('category-option-docs'));
+		await clickCategory('task');
+		await clickCategory('bug');
+		await clickCategory('docs');
 		// The bug group stays as context: `wm-task-child`'s real parent is a bug,
 		// and promoting the task to a root would falsify its parentage.
 		expect(screen.queryByTestId('group-docs')).toBeNull();
@@ -537,9 +545,9 @@ describe('category selection', () => {
 		expect(screen.getByTestId('tree-summary').textContent).toBe('2 items · 0 blocked');
 
 		// Two categories selected at once: work items from both are shown.
-		await fireEvent.click(screen.getByTestId('category-option-bug'));
-		expect(pressed('bug')).toBe('true');
-		expect(pressed('task')).toBe('true');
+		await clickCategory('bug');
+		expect(await pressed('bug')).toBe('true');
+		expect(await pressed('task')).toBe('true');
 		expect(screen.getByTestId('group-bug')).not.toBeNull();
 		expect(screen.getByTestId('group-task')).not.toBeNull();
 		expect(screen.getByTestId('node-wm-task-ship')).not.toBeNull();
@@ -551,8 +559,8 @@ describe('category selection', () => {
 		await renderLoaded({ trees: { combined: combinedTree, grouped: deepGroupedTree } });
 		await fireEvent.click(screen.getByLabelText('By category'));
 		await screen.findByTestId('group-docs');
-		await fireEvent.click(screen.getByTestId('category-option-bug'));
-		await fireEvent.click(screen.getByTestId('category-option-docs'));
+		await clickCategory('bug');
+		await clickCategory('docs');
 
 		// Docs and Bugs are out of scope; both survive only as the chain down to
 		// the task, and their unrelated children do not come along.
@@ -589,8 +597,8 @@ describe('category selection', () => {
 		await renderLoaded({ trees: { combined: combinedTree, grouped: withUnresolved } });
 		await fireEvent.click(screen.getByLabelText('By category'));
 		await screen.findByTestId('group-docs');
-		await fireEvent.click(screen.getByTestId('category-option-bug'));
-		await fireEvent.click(screen.getByTestId('category-option-docs'));
+		await clickCategory('bug');
+		await clickCategory('docs');
 
 		expect(screen.getByTestId('node-wm-docs-umbrella').getAttribute('data-context')).toBe('true');
 		const unresolved = screen.getByTestId('unresolved');
@@ -615,26 +623,25 @@ describe('category selection', () => {
 
 	it('selects all and clears all with real buttons', async () => {
 		await renderGrouped({ trees: bothViews });
-		await fireEvent.click(screen.getByTestId('category-option-bug'));
-		await fireEvent.click(screen.getByTestId('category-option-task'));
-		await fireEvent.click(screen.getByTestId('category-option-docs'));
+		await clickCategory('bug');
+		await clickCategory('task');
+		await clickCategory('docs');
 		expect(screen.queryByTestId('group-bug')).toBeNull();
 		expect(screen.queryByTestId('group-task')).toBeNull();
 		expect(screen.getByTestId('filtered-empty-state')).not.toBeNull();
 
 		// The toolbar's control, not the recovery action the empty pane repeats.
-		const filter = screen.getByTestId('category-filter');
-		await fireEvent.click(within(filter).getByRole('button', { name: 'Select all categories' }));
+		await clickCategoryAction('Select all categories');
 		expect(screen.getByTestId('group-bug')).not.toBeNull();
 		expect(screen.getByTestId('group-task')).not.toBeNull();
-		expect(pressed('docs')).toBe('true');
+		expect(await pressed('docs')).toBe('true');
 		expect(screen.queryByTestId('filtered-empty-state')).toBeNull();
 
-		await fireEvent.click(within(filter).getByRole('button', { name: 'Clear all categories' }));
+		await clickCategoryAction('Clear all categories');
 		expect(screen.queryByTestId('group-bug')).toBeNull();
 		expect(screen.queryByTestId('group-task')).toBeNull();
-		expect(pressed('bug')).toBe('false');
-		expect(pressed('task')).toBe('false');
+		expect(await pressed('bug')).toBe('false');
+		expect(await pressed('task')).toBe('false');
 	});
 
 	it('leaves the combined view alone, whatever the stored grouped scope says', async () => {
@@ -660,14 +667,14 @@ describe('category selection', () => {
 		await renderGrouped({ trees: bothViews });
 		expect(screen.getByTestId('group-bug')).not.toBeNull();
 		expect(screen.queryByTestId('group-task')).toBeNull();
-		expect(pressed('bug')).toBe('true');
-		expect(pressed('task')).toBe('false');
+		expect(await pressed('bug')).toBe('true');
+		expect(await pressed('task')).toBe('false');
 		expect(screen.queryByTestId('category-option-obsolete')).toBeNull();
 	});
 
 	it('remembers the scope per project across a reload', async () => {
 		const first = await renderGrouped({ trees: bothViews });
-		await fireEvent.click(screen.getByTestId('category-option-bug'));
+		await clickCategory('bug');
 		// The bug group stays as context for the task nested under it, but no bug
 		// is selected work any more.
 		expect(screen.getByTestId('node-wm-bug-login').getAttribute('data-context')).toBe('true');
@@ -677,9 +684,9 @@ describe('category selection', () => {
 		render(Explorer, { fetchImpl: second.fetchImpl, storage: localStorage });
 		await screen.findByTestId('group-task');
 		// The stored view is `grouped`, so the scope is visible straight away.
-		expect(pressed('bug')).toBe('false');
-		expect(pressed('task')).toBe('true');
-		expect(pressed('docs')).toBe('true');
+		expect(await pressed('bug')).toBe('false');
+		expect(await pressed('task')).toBe('true');
+		expect(await pressed('docs')).toBe('true');
 		expect(screen.getByTestId('node-wm-bug-login').getAttribute('data-context')).toBe('true');
 		expect(
 			localStorage.getItem(preferenceKey(projectIdFor(ROOT_A), 'categories'))
@@ -688,8 +695,8 @@ describe('category selection', () => {
 
 	it('does not hand one project’s scope to another on the same origin', async () => {
 		const first = await renderGrouped({ root: ROOT_A, trees: bothViews });
-		await fireEvent.click(screen.getByTestId('category-option-bug'));
-		await fireEvent.click(screen.getByTestId('category-option-docs'));
+		await clickCategory('bug');
+		await clickCategory('docs');
 		first.unmount();
 
 		const second = makeFetch({ root: ROOT_B, trees: bothViews });
@@ -697,8 +704,8 @@ describe('category selection', () => {
 		await screen.findByTestId('node-wm-bug-login');
 		await fireEvent.click(screen.getByLabelText('By category'));
 		await screen.findByTestId('group-bug');
-		expect(pressed('bug')).toBe('true');
-		expect(pressed('task')).toBe('true');
+		expect(await pressed('bug')).toBe('true');
+		expect(await pressed('task')).toBe('true');
 		expect(screen.getByTestId('group-task')).not.toBeNull();
 	});
 
@@ -709,10 +716,10 @@ describe('category selection', () => {
 		await fireEvent.click(screen.getByLabelText('By category'));
 		await screen.findByTestId('group-bug');
 
-		await fireEvent.click(screen.getByTestId('category-option-task'));
+		await clickCategory('task');
 		expect(screen.queryByTestId('group-task')).toBeNull();
 		expect(screen.getByTestId('group-bug')).not.toBeNull();
-		await fireEvent.click(screen.getByRole('button', { name: 'Select all categories' }));
+		await clickCategoryAction('Select all categories');
 		expect(screen.getByTestId('group-task')).not.toBeNull();
 
 		// Still exactly one notice, even after the scope writes failed.

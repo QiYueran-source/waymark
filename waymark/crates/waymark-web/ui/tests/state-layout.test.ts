@@ -16,6 +16,7 @@ import {
 	makeFetch,
 	unresolvedTree
 } from './fixtures';
+import { clickCategory, clickCategoryAction } from './category-helpers';
 
 type FetchOptions = Parameters<typeof makeFetch>[0];
 
@@ -60,8 +61,7 @@ function centredHost(element: Element | null): HTMLElement {
 describe('blocking and empty states are centred', () => {
 	it('centres the no-category-selected state, with its recovery action', async () => {
 		await openGrouped({ trees: { combined: combinedTree, grouped: groupedTreeWithEmptyCategory } });
-		const filter = screen.getByTestId('category-filter');
-		await fireEvent.click(within(filter).getByRole('button', { name: 'Clear all categories' }));
+		await clickCategoryAction('Clear all categories');
 
 		const empty = await screen.findByTestId('filtered-empty-state');
 		expect(empty.getAttribute('data-state-kind')).toBe('categories-cleared');
@@ -77,8 +77,8 @@ describe('blocking and empty states are centred', () => {
 	it('centres the selected-categories-with-no-active-work state', async () => {
 		await openGrouped({ trees: { combined: combinedTree, grouped: groupedTreeWithEmptyCategory } });
 		// Docs is configured but holds no active work: select only it.
-		await fireEvent.click(screen.getByTestId('category-option-bug'));
-		await fireEvent.click(screen.getByTestId('category-option-task'));
+		await clickCategory('bug');
+		await clickCategory('task');
 
 		const empty = await screen.findByTestId('filtered-empty-state');
 		expect(empty.getAttribute('data-state-kind')).toBe('no-active-work');

@@ -28,7 +28,7 @@
 	import { Graph as DagreGraph, layout as dagreLayout } from '@dagrejs/dagre';
 	import { MarkerType, Panel, Position, SvelteFlow } from '@xyflow/svelte';
 	import type { Edge, EdgeMarker, Node, NodeTypes } from '@xyflow/svelte';
-	import { untrack } from 'svelte';
+	import { untrack, type Snippet } from 'svelte';
 
 	import GraphBridge from './GraphBridge.svelte';
 	import GraphItemNode from './GraphItemNode.svelte';
@@ -63,7 +63,8 @@
 		onToggle,
 		restoredViewport = null,
 		onViewportChange,
-		onViewportReset
+		onViewportReset,
+		categoryControl
 	}: {
 		/**
 		 * The drawing to render. Whether the dependency overlay is included is
@@ -73,6 +74,11 @@
 		graph: WorkGraph;
 		/** The item whose detail panel is open, if any. */
 		selectedId?: string | null;
+		/**
+		 * The category control, supplied by Explorer so the drawing keeps no
+		 * category state of its own. It shares the upper-left control cluster.
+		 */
+		categoryControl?: Snippet;
 		/** Selecting a node; the trigger lets focus return after the panel closes. */
 		onSelect: (id: string, trigger?: HTMLElement) => void;
 		/** Collapsing or expanding a node; the item itself is never changed. */
@@ -692,18 +698,28 @@
 		>
 			<GraphBridge onReady={(handle) => (flow = handle)} />
 
-			<Panel position="top-right">
+			<!-- The controls float together at the canvas's upper-left: the
+			     category picker, the canvas row, and the place where the direction
+			     control joins the same cluster. -->
+			<Panel position="top-left">
 				<div class="graph-controls" data-testid="graph-controls">
-					<!-- Pan and zoom are the canvas's own gestures: dragging the
-					     background, the wheel, a trackpad pinch, or two fingers on a
-					     touch screen. These controls only repeat or undo them. -->
-					<div class="graph-controls-row" role="group" aria-label="Canvas">
-						<button type="button" data-testid="graph-zoom-out" onclick={zoomOut}>Zoom out</button>
-						<button type="button" data-testid="graph-zoom-in" onclick={zoomIn}>Zoom in</button>
-						<button type="button" data-testid="graph-fit" onclick={fitToView}>Fit to view</button>
-						<button type="button" data-testid="graph-reset" onclick={resetViewport}>
-							Reset viewport
-						</button>
+					<div class="graph-controls-cluster" data-testid="graph-controls-cluster">
+						{#if categoryControl}
+							{@render categoryControl()}
+						{/if}
+						<!-- Pan and zoom are the canvas's own gestures: dragging the
+						     background, the wheel, a trackpad pinch, or two fingers on a
+						     touch screen. These controls only repeat or undo them. -->
+						<div class="graph-controls-row" role="group" aria-label="Canvas">
+							<button type="button" data-testid="graph-zoom-out" onclick={zoomOut}>
+								Zoom out
+							</button>
+							<button type="button" data-testid="graph-zoom-in" onclick={zoomIn}>Zoom in</button>
+							<button type="button" data-testid="graph-fit" onclick={fitToView}>Fit to view</button>
+							<button type="button" data-testid="graph-reset" onclick={resetViewport}>
+								Reset viewport
+							</button>
+						</div>
 					</div>
 					<p
 						class="graph-readout"
@@ -721,7 +737,7 @@
 				</div>
 			</Panel>
 
-			<Panel position="top-left">
+			<Panel position="top-right">
 				<div class="graph-legend" data-testid="graph-legend">
 					<span class="legend-entry" data-legend-kind="parent-child">
 						<svg class="legend-edge" viewBox="0 0 24 8" aria-hidden="true" focusable="false">
