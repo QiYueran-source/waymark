@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-03T23:52:21Z
+updated_at: 2026-11-04T02:01:24Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -200,6 +200,21 @@ Codes with no exit class, used as warnings and findings: `OWNER_MISMATCH` (warni
 - Exactly one normative document survives. The specification absorbs the settled command and tool catalog and the shared business contract from `docs/superpower/WAYMARK-CLI-MCP-INTERFACE-DESIGN.md`; that working document then retires. It already describes itself as transitional and predicts a new functional specification once the interface details land.
 - The working document's unresolved interface questions do not enter the specification. They join this map's Not yet specified list, where the specification is forbidden to infer an answer.
 - The specification lives in the Clove tracker as its own work item under `.clove/issues/`, not in `docs/`. No spec-like document remains under `docs/`; such documents are retired or migrated into it.
+
+### DSH sidebar integration
+
+- The DSH sidebar plugin reuses the existing Waymark Web logic and remains strictly read-only; it must not offer work-item mutations. Confirmed by the user on 2026-11-04.
+- The sidebar aims to retain all existing Web read-only browsing capabilities, including the tree, filtering, item detail, and existing view controls. Layout may adapt to the narrow sidebar, but the plugin does not introduce separate work-item semantics.
+- For the initial integration, users may prepare Waymark and required Web assets in advance. If a dependency or asset is missing, the plugin explains what is needed; it must not automatically download or install dependencies. Determine the actual prerequisites from the existing build and packaging. These decisions were confirmed by the user on 2026-11-04.
+- The integration effort first produces an implementable specification and route; implementation follows after the map is complete.
+- Reuse the existing `waymark-mcp` server rather than building a second MCP server. The integration work covers its installation, configuration, and connection to hosts. MCP retains its existing read and write capabilities; the read-only restriction applies to the sidebar, not to MCP.
+- MCP host integration is generic: provide installation, stdio command and configuration guidance, verification, and troubleshooting; each harness configures and starts the server according to its own conventions. Do not build a DSH-specific MCP installer or setup flow in this effort. Clove's generic MCP registration can be used as prior art, without requiring its Claude-specific plugin or setup behavior. Confirmed by the user on 2026-11-04.
+- Provide the DSH sidebar plugin first. Do not implement a VS Code or Cursor plugin in this effort; Cursor is expected to reuse the VS Code extension approach if those hosts are addressed later. Consider future host integration in the design without promising compatibility that has not been verified. These decisions were confirmed by the user on 2026-11-04.
+- The DSH view is a right-sidebar tab associated with an active session, so it can be used alongside the conversation. The right sidebar is unavailable without an active session.
+- The sidebar follows the current DSH session workspace to the corresponding Waymark project rather than maintaining a separate project list. On session or workspace changes it follows the new context. If no Waymark project is found, explain the condition without automatically initializing one.
+- Initial DSH sidebar support targets the DSH server and browser running on the same machine. Supporting a remote browser requires separate future work and a security-reviewed access design. These decisions were confirmed by the user on 2026-11-04.
+- For this planning effort, do not add project-wide tracker fields just to distinguish decision-ticket type or claim state; the user does not need that distinction for now. Keep work items in Waymark and use its native parent and dependency relations.
+- Keep research results local for now; do not push branches or open pull requests. These planning-process decisions were confirmed by the user on 2026-11-04.
 
 ### Reopened decisions: Web, MCP, and distribution
 
