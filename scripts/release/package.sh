@@ -101,7 +101,9 @@ target_dir="$(cargo metadata --format-version 1 --no-deps --locked \
     --manifest-path "$WAYMARK_DIR/Cargo.toml" \
     | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')"
 bin_dir="$target_dir"
-[[ -n "$target" ]] && bin_dir="$bin_dir/$target"
+if [[ -n "$target" ]]; then
+    bin_dir="$bin_dir/$target"
+fi
 bin_dir="$bin_dir/release"
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/waymark-package.XXXXXX")"

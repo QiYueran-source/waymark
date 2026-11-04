@@ -195,7 +195,9 @@ PY
 
     if [[ "$variant" == "web" ]]; then
         local provenance_args=(--binary "$root/waymark" --version "$version" --git-sha "$git_sha")
-        [[ -n "$manifest" ]] && provenance_args+=(--manifest "$manifest")
+        if [[ -n "$manifest" ]]; then
+            provenance_args+=(--manifest "$manifest")
+        fi
         "$RELEASE_ROOT/scripts/release/verify-web-provenance.sh" "${provenance_args[@]}" \
             || fail "$label: the Web provenance check failed"
     else
@@ -226,7 +228,11 @@ PY
     fi
 
     executed=$((executed + 1))
-    printf 'OK: %s (version, capabilities, provenance)\n' "$label"
+    if [[ "$variant" == "web" ]]; then
+        printf 'OK: %s (version, capabilities, provenance)\n' "$label"
+    else
+        printf 'OK: %s (version, capabilities, WEB_NOT_INCLUDED)\n' "$label"
+    fi
 }
 
 # Verify one source archive at `root`.
