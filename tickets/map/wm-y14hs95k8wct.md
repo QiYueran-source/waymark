@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-04T06:34:57Z
+updated_at: 2026-11-04T11:41:08Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -237,6 +237,17 @@ Codes with no exit class, used as warnings and findings: `OWNER_MISMATCH` (warni
 - Refreshing or reopening restores the last saved graph viewport for the current direction when a usable record exists; otherwise fit the visible graph. This differs from an explicit direction switch, which always fits the visible graph immediately. Confirmed on 2026-11-04.
 - The direction control is keyboard-operable and exposes the selected direction to screen readers; icons or color alone must not be the only way to distinguish its choices. Confirmed on 2026-11-04.
 
+### Web page optimization requests
+
+The following are the user's requested directions for the existing Web page. They are not a claim that the changes have been implemented or synchronized to a functional specification or implementation tickets.
+
+- Graph context nodes: for an unselected-category ancestor retained to preserve hierarchy (for example, a spec ancestor when only implement is selected), use the basic layout of an ordinary node. Distinguish the context node with a dashed outline around the entire card and place a prominent context indicator outside the outline, above or below it. The specific position remains open.
+- Graph expansion controls: the user questioned the presence of the tree's Expand all and Collapse all buttons in graph presentation. The current buttons change tree expansion rather than the graph's separate collapse state; they should not misleadingly appear as graph controls. Per-node graph folding remains a separate capability.
+- Graph canvas: the user wants to avoid the small framed graph area and let the graph display across the available canvas instead. This concerns usable area, not merely the visual border; the precise relationship to global controls, details, and unresolved content remains open.
+- Project categories and controls: category options such as Implement, Map, and Spec are project-defined and may be numerous, so they should not occupy the page's top toolbar as a fixed set of inline options. The user proposed placing category selection together with zoom and other graph controls at the upper left of the canvas, with the relationship legend at the upper right. The scalable selector design and behavior outside the graphical presentation remain open.
+- Messages: the user requested that warnings, errors, and notices, including the case where no category is selected, be considered for centered presentation. Which message types should be centered, and how non-blocking warnings or lengthy diagnostics behave, remains open.
+- Relationship lines: the user observed sibling nodes connected not only by dashed arrows but also by solid lines with no arrow, one arrow, or two arrows, without clear annotation, and asked for an analysis. The current source defines solid parent-child lines and optional dashed dependency arrows, with an existing two-entry legend. A parent-child and dependency edge may both exist for the same pair, but overlap is only a hypothesis for the observed appearance, not a verified explanation; the screenshot or equivalent reproduction and the cause of one- and two-arrow solid appearances remain to be verified before assigning semantics or adding annotations.
+
 ### Reopened decisions: Web, MCP, and distribution
 
 The following decisions extend the accepted specification. The Web implementation and behavior decisions have been synchronized to `wm-srxj8ztv1zfz` and T12 (`wm-a22prtcw8kda`); the MCP and formal distribution decisions and their implementation tickets have not yet been synchronized.
@@ -261,6 +272,16 @@ The following decisions extend the accepted specification. The Web implementatio
 - Create a separate Wayfinder map for Waymark build, packaging and distribution, covering basic/Web variants, source installation, prebuilt packages, frontend assets, version verification and release workflow. Consult Clove's build, packaging and distribution as prior art while retaining Waymark's decisions and scope; do not copy its fallback behavior blindly. The effort leads to its own specification and implementation tickets once decisions are ready. Web UI and MCP business behavior are outside that map. The present T12 design is synchronized to the existing specification and T12 ticket. Defer the distribution map and its implementation for now and prioritize Waymark's core and interfaces; revisit distribution separately when it becomes necessary.
 
 ## Not yet specified
+
+### Web page optimization: not yet specified
+
+- Context-node badge placement above versus below the dashed card, spacing and layout reservation, and reproduction of the reported visual defect.
+- Whether graph-wide expand/collapse actions should be provided separately, and how users of the graph's structured-list alternative can expand branches that were collapsed in the graph.
+- Whether the graph fills only the content area below the toolbar or a larger full-screen area; behavior with the details panel, viewport resizing, fit-to-view, unresolved relations, and narrow sidebar layouts.
+- Category selector's presentation and scaling for many project-defined categories; access in tree and structured-list presentations and when a filtered graph is empty; overlay placement, keyboard access, and avoiding obstruction of graph nodes and controls.
+- Whether all message types should be centered or only blocking/empty states; placement and scrolling of long diagnostics, non-blocking persistence notices, unresolved relations, and detail-specific errors.
+- Reproduce and identify the actual relationship line appearances, including apparently solid one- and two-arrow lines, before choosing any additional legend or edge annotations.
+- Whether and how these page improvements and the separately planned graph-direction switch gate the DSH sidebar specification and implementation.
 
 ### Web, MCP, and distribution follow-up
 
