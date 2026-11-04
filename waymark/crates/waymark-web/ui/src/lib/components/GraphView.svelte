@@ -333,19 +333,6 @@
 	/** The pan/zoom API, once the drawing has mounted and handed it over. */
 	let flow: GraphFlow | null = $state(null);
 
-	/** The viewport applied on entry; the state "reset" returns to. */
-	let initial: GraphViewport | null = $state(null);
-
-	/**
-	 * The canvas's own transform, bound through the drawing.
-	 *
-	 * Every pan, wheel, pinch, or control moves this value, so the readout and
-	 * the "is it fitted" question are answered by what the canvas actually
-	 * shows rather than by what this view last asked for. It stays `undefined`
-	 * until the first transform, which is why the entry viewport stands in.
-	 */
-	let canvasViewport: GraphViewport | undefined = $state(undefined);
-
 	/** Where the whole visible drawing sits, in drawing coordinates. */
 	const bounds = $derived(
 		graphBounds(placed.map(({ x, y }) => ({ x, y, width: NODE_WIDTH, height: NODE_HEIGHT })))
@@ -356,12 +343,35 @@
 		fittedViewport(bounds, canvasWidth(canvasBox), canvasHeight(canvasBox))
 	);
 
+	/** The viewport this drawing entered at; the state "reset" returns to. */
+	let initial: GraphViewport | null = $state(null);
+
+	/**
+	 * The canvas's own transform, bound through the drawing.
+	 *
+	 * Every pan, wheel, pinch, and control moves this value, so the readout and
+	 * the "is it fitted" question are answered by what the canvas actually
+	 * shows. It is unset only until this view enters, because the drawing
+	 * reports a transform only once it has mounted and been given one.
+	 */
+	let canvasViewport: GraphViewport | undefined = $state(undefined);
+
+	/**
+	 * The transform this view asked for last, and has not yet seen reported.
+	 *
+	 * The drawing announces the end of every transform, including one it was
+	 * told to make, so this is what tells a reader's gesture from this view's
+	 * own move: only the former is worth remembering.
+	 */
+	let requested: GraphViewport | null = null;
+
 	/** What the reader sees now. */
 	const shown: GraphViewport = $derived(canvasViewport ?? initial ?? fitted);
 
 	/** True while the drawing shows the whole of itself, centred. */
 	const atFit = $derived(sameViewport(shown, fitted));
 
+	/** How wide the drawing's box is, or the nominal canvas if it has no size. */
 	function canvasWidth(box: HTMLElement | undefined): number {
 		const width = box?.clientWidth ?? 0;
 		return width > 0 ? width : GRAPH_NOMINAL_CANVAS.width;
@@ -373,13 +383,15 @@
 	}
 
 	/**
-	 * Apply a viewport and record it.
+	 * Move the drawing, and record where it was moved to.
 	 *
 	 * The record is written here rather than awaited from the drawing so the
 	 * readout, the fitted marker, and the stored preference move together, with
 	 * the drawing's own report confirming them a moment later.
 	 */
 	function apply(viewport: GraphViewport): void {
+		requested = viewport;
+		canvasViewport = viewport;
 		void flow?.setViewport(viewport);
 	}
 
@@ -391,10 +403,9 @@
 	 * yank the view out from under them, so nothing re-applies it later.
 	 */
 	function enterViewport(): void {
-		if (initial !== null) return;
-		const entry = restoredViewport ?? fitted;
-		initial = entry;
-		apply(entry);
+		if (flow === null || initial !== null) return;
+		initial = restoredViewport ?? fitted;
+		apply(initial);
 	}
 
 	// The drawing hands over its pan/zoom API through `GraphBridge`, and reports
@@ -416,7 +427,6 @@
 	 * fitted rather than at the transform the reader has just discarded.
 	 */
 	function resetViewport(): void {
-		initial = fitted;
 		apply(fitted);
 		onViewportReset?.();
 	}
@@ -429,21 +439,26 @@
 		void flow?.zoomOut();
 	}
 
+	/**
+	 * The reader finished a gesture: remember where the drawing was left.
+	 *
+	 * A transform this view asked for is not the reader's choice, so it is not
+	 * written back; the store would only be told what it already holds.
+	 */
+	function handleMoveEnd(_event: unknown, viewport: GraphViewport): void {
+		if (requested !== null && sameViewport(viewport, requested)) {
+			requested = null;
+			return;
+		}
+		requested = null;
+		onViewportChange?.(viewport);
+	}
+
 	/** A readout is not a measurement log: three decimals is enough for both. */
 	function round(value: number, places = 1): string {
 		return String(Math.round(value * 10 ** places) / 10 ** places);
 	}
 
-	/**
-	 * The reader finished a gesture: remember where the drawing was left.
-	 *
-	 * A no-op when the transform is the one this view just applied, so entering
-	 * or pressing Fit does not rewrite the stored record with itself.
-	 */
-	function handleMoveEnd(_event: unknown, viewport: GraphViewport): void {
-		if (sameViewport(viewport, shown)) return;
-		onViewportChange?.(viewport);
-	}
 </script>
 
 <div class="graph-pane" data-testid="graph" bind:this={canvasBox}>
@@ -460,8 +475,8 @@
 		deleteKey={null}
 		zoomOnDoubleClick={false}
 		panOnDrag
-		panOnScroll={false}
-		zoomOnScroll
+		panOnScroll
+		zoomOnScroll={false}
 		zoomOnPinch
 		minZoom={MIN_GRAPH_ZOOM}
 		maxZoom={MAX_GRAPH_ZOOM}

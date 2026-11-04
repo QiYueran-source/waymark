@@ -463,6 +463,24 @@ code {
 	font-size: 0.9rem;
 }
 
+/* The recovery action sits with the empty pane it repairs, not only in the
+   toolbar above it. */
+.empty-action {
+	margin-top: 0.85rem;
+	min-height: 1.9rem;
+	padding: 0.22rem 0.62rem;
+	border: 1px solid var(--line-strong);
+	border-radius: 3px;
+	background: var(--panel);
+	color: var(--ink);
+	font-size: 0.84rem;
+}
+
+.empty-action:hover {
+	border-color: var(--accent);
+	color: var(--accent);
+}
+
 /* Tree -------------------------------------------------------------------- */
 
 .tree,
@@ -788,6 +806,45 @@ code {
 
 .graph-node[data-state='closed'] {
 	--state-stripe: var(--state-closed-ink);
+}
+
+/*
+ * A context card is not selected work: it is an ancestor kept only so a node
+ * below it keeps its real parent. It carries the tree row's three cues — a
+ * hatched ground, a dashed state stripe, and the text badge in the card — so
+ * the marking survives greyscale and colour-blindness.
+ */
+.graph-node.context {
+	border-left-style: dashed;
+	border-left-color: var(--dash);
+	background: repeating-linear-gradient(135deg, var(--panel-2) 0 6px, var(--panel) 6px 12px);
+}
+
+/* Selecting a context node must still read as selected, so keep the hatch and
+   swap its paper for the selection tint rather than dropping either cue. */
+.graph-node.context.selected {
+	background: repeating-linear-gradient(
+		135deg,
+		var(--accent-soft) 0 6px,
+		var(--panel) 6px 12px
+	);
+	border-color: var(--accent);
+	border-left-style: dashed;
+}
+
+.graph-node.context .graph-node-title {
+	color: var(--muted);
+}
+
+/* The badge is a sentence, not an icon, and the card is a fixed width: let the
+   card's lines wrap rather than overflow into the next column. */
+.graph-node.context .graph-node-line {
+	flex-wrap: wrap;
+	row-gap: 0.1rem;
+}
+
+.graph-node.context .context-marker {
+	white-space: normal;
 }
 
 .graph-node.selected {
