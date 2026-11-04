@@ -72,11 +72,16 @@
 	const selectedCategories: ReadonlySet<string> = $derived(
 		resolveCategoryScope(categories, categoryScope)
 	);
-	/** The grouped view's groups after the scope is applied; the seam for context rows. */
+	/**
+	 * The grouped view's groups after the scope is applied. An ancestor outside
+	 * the scope stays when work in scope sits below it, and is reported in
+	 * `contextIds` so the tree can mark it as outside the selection.
+	 */
 	const scopedGroups: FilteredGroups = $derived(
 		filterGroups(treeData?.view === 'grouped' ? treeData.groups : [], selectedCategories)
 	);
 	const groups: CategoryGroup[] = $derived(scopedGroups.groups);
+	const contextIds: ReadonlySet<string> = $derived(scopedGroups.contextIds);
 	const unresolved = $derived(treeData?.unresolved ?? []);
 	/** The payload holds work, before any category filtering. */
 	const hasWork = $derived(
@@ -392,6 +397,7 @@
 					{view}
 					{roots}
 					{groups}
+					{contextIds}
 					{expanded}
 					{dependenciesVisible}
 					selectedId={selectedId}

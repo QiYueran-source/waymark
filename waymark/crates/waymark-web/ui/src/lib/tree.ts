@@ -234,20 +234,35 @@ export interface FilteredGroups {
 	groups: CategoryGroup[];
 	/** Counts of the work items in scope, not of anything shown as context. */
 	counts: TreeCounts;
+	/**
+	 * Ids of rows kept only to preserve parentage: their category is outside the
+	 * selection, and a selected work item sits below them. They are
+	 * presentation-only and never selected work, so they are left out of
+	 * `counts` — but they do keep their group on screen, because the selected
+	 * item below them has to stay under its real parent.
+	 */
+	contextIds: ReadonlySet<string>;
 }
 
 /**
- * Keep only the work items whose category is in `selected`.
+ * Keep the work items whose category is in `selected`, and any ancestor needed
+ * to keep them under their real parents.
  *
- * Real parentage is never rewritten: a node outside the scope takes its whole
- * subtree with it rather than being spliced out, so nothing is promoted to a
- * root. Categories with nothing left drop out, which is why a selected but empty
- * category shows no group.
+ * The rule, level by level:
  *
- * The `context` seam: `wm-gpjeb92dgz4w` keeps an out-of-scope ancestor, marked
- * as temporary context, when its subtree still holds in-scope work. That goes in
- * the `else` branch below, where the kept ancestor is pushed with its kept
- * descendants and its own item is left out of `counts`.
+ * - an in-scope node is always kept, whether or not it has kept children;
+ * - an out-of-scope node is kept only when its filtered subtree holds at least
+ *   one kept node, so the chain to selected work survives and its unrelated
+ *   out-of-scope siblings do not;
+ * - a kept out-of-scope node is context: its id goes in `contextIds` and it is
+ *   left out of `counts`, while selected descendants below it are counted.
+ *
+ * Nodes are never re-parented or promoted: a selected child stays under its real
+ * parent, and when several levels are out of scope the whole chain is kept.
+ * Groups are never re-homed either: a context ancestor keeps the group its real
+ * root belongs to, and a group with nothing left drops out. That is why an
+ * unselected category can still appear — as a context-only group — while a
+ * selected category with no active work still shows nothing.
  */
 export function filterGroups(
 	groups: CategoryGroup[],
@@ -255,33 +270,47 @@ export function filterGroups(
 ): FilteredGroups {
 	const kept: CategoryGroup[] = [];
 	const counts: TreeCounts = { items: 0, blocked: 0 };
+	const contextIds = new Set<string>();
 	for (const group of groups) {
-		if (!selected.has(group.category.key)) continue;
 		const filtered = filterNodes(group.roots, selected);
 		if (filtered.nodes.length === 0) continue;
 		kept.push({ category: group.category, roots: filtered.nodes });
 		counts.items += filtered.counts.items;
 		counts.blocked += filtered.counts.blocked;
+		for (const id of filtered.contextIds) contextIds.add(id);
 	}
-	return { groups: kept, counts };
+	return { groups: kept, counts, contextIds };
 }
 
 interface FilteredNodes {
 	nodes: TreeNode[];
 	counts: TreeCounts;
+	contextIds: Set<string>;
 }
 
 function filterNodes(nodes: TreeNode[], selected: ReadonlySet<string>): FilteredNodes {
 	const kept: TreeNode[] = [];
 	const counts: TreeCounts = { items: 0, blocked: 0 };
+	const contextIds = new Set<string>();
 	for (const node of nodes) {
-		if (!selected.has(node.category.key)) continue;
+		const inScope = selected.has(node.category.key);
 		const children = filterNodes(node.children, selected);
+		// An out-of-scope node survives only as the chain to kept work. Keeping
+		// an in-scope node is unconditional: it is selected work in its own
+		// right, and a leaf is not hidden just because it has no kept children.
+		if (!inScope && children.nodes.length === 0) continue;
 		kept.push({ ...node, children: children.nodes });
-		counts.items += 1 + children.counts.items;
-		counts.blocked += (node.state === 'blocked' ? 1 : 0) + children.counts.blocked;
+		if (inScope) {
+			counts.items += 1 + children.counts.items;
+			counts.blocked += (node.state === 'blocked' ? 1 : 0) + children.counts.blocked;
+		} else {
+			contextIds.add(node.id);
+			counts.items += children.counts.items;
+			counts.blocked += children.counts.blocked;
+		}
+		for (const id of children.contextIds) contextIds.add(id);
 	}
-	return { nodes: kept, counts };
+	return { nodes: kept, counts, contextIds };
 }
 
 /** The summary wording for a set of counts, so a filtered view reads the same. */

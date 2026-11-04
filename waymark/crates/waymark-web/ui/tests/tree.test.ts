@@ -17,6 +17,7 @@ import {
 	TASK,
 	bugRoot,
 	combinedTree,
+	deepGroupedTree,
 	emptyTree,
 	groupedTree,
 	taskRoot,
@@ -136,20 +137,75 @@ describe('grouped filtering', () => {
 		expect(filtered.counts).toEqual({ items: 3, blocked: 1 });
 	});
 
-	it('does not promote a selected child out of an unselected parent', () => {
-		// `wm-task-child`'s parent is a bug. A task-only scope drops it for now:
-		// promoting it to a root would falsify parentage. Keeping it under a
-		// marked context ancestor is wm-gpjeb92dgz4w.
+	it('keeps a required unselected parent as context instead of promoting its child', () => {
+		// `wm-task-child`'s parent is a bug. A task-only scope keeps that bug as
+		// temporary context: the child stays at depth 1 under its real parent.
 		const filtered = filterGroups(groupedTree.groups, selected('task'));
-		const roots = filtered.groups.flatMap((group) => group.roots);
-		expect(roots.map((node) => node.id)).toEqual(['wm-task-ship']);
-		expect(filtered.counts).toEqual({ items: 1, blocked: 0 });
+		const bugs = filtered.groups.find((group) => group.category.key === 'bug');
+		expect(bugs?.roots.map((node) => node.id)).toEqual(['wm-bug-login']);
+		expect(bugs?.roots[0].children.map((node) => node.id)).toEqual(['wm-task-child']);
+
+		// The context ancestor is presentation only: the two tasks are the
+		// selected work, so the blocked bug above them is not counted.
+		expect(filtered.counts).toEqual({ items: 2, blocked: 0 });
+		expect(filtered.contextIds).toEqual(new Set(['wm-bug-login']));
+	});
+
+	it('keeps the whole unselected ancestor chain when several levels are out of scope', () => {
+		// Docs root → Bug → Task leaf, with unrelated out-of-scope siblings at
+		// both unselected levels.
+		const filtered = filterGroups(deepGroupedTree.groups, selected('task'));
+		const docs = filtered.groups.find((group) => group.category.key === 'docs');
+		expect(docs?.roots.map((node) => node.id)).toEqual(['wm-docs-umbrella']);
+		expect(docs?.roots[0].children.map((node) => node.id)).toEqual(['wm-bug-mid']);
+		expect(docs?.roots[0].children[0].children.map((node) => node.id)).toEqual(['wm-task-leaf']);
+
+		// Both unselected ancestors are context; only the task is selected work,
+		// and the blocked context ancestor does not inflate the blocked count.
+		expect(filtered.contextIds).toEqual(new Set(['wm-docs-umbrella', 'wm-bug-mid']));
+		expect(filtered.counts).toEqual({ items: 2, blocked: 0 });
+	});
+
+	it('does not drag in out-of-scope siblings of a kept context ancestor', () => {
+		const filtered = filterGroups(deepGroupedTree.groups, selected('task'));
+		const ids = allIds(filtered.groups.flatMap((group) => group.roots));
+		expect(ids).not.toContain('wm-docs-sibling');
+		expect(ids).not.toContain('wm-bug-sibling');
+		expect(filtered.contextIds.has('wm-docs-sibling')).toBe(false);
+		expect(filtered.contextIds.has('wm-bug-sibling')).toBe(false);
+	});
+
+	it('keeps in-scope descendants under a context ancestor', () => {
+		const filtered = filterGroups(groupedTree.groups, selected('task'));
+		expect(allIds(filtered.groups.flatMap((group) => group.roots))).toEqual([
+			'wm-bug-login',
+			'wm-task-child',
+			'wm-task-ship'
+		]);
+	});
+
+	it('keeps a context ancestor when its own category is unselected but holds selected work', () => {
+		// Both Bugs and Tasks are in scope; the Docs umbrella only has to keep the
+		// chain, while the Bugs in the chain are real selected work.
+		const filtered = filterGroups(deepGroupedTree.groups, selected('bug', 'task'));
+		expect(filtered.groups.map((group) => group.category.key)).toEqual(['docs', 'task']);
+		expect(filtered.contextIds).toEqual(new Set(['wm-docs-umbrella']));
+		expect(filtered.counts).toEqual({ items: 4, blocked: 1 });
+	});
+
+	it('keeps a group only when it holds selected work or a required ancestor', () => {
+		// Docs is configured but holds no active work: nothing to show.
+		const filtered = filterGroups(groupedTree.groups, selected('docs'));
+		expect(filtered.groups).toEqual([]);
+		expect(filtered.counts).toEqual({ items: 0, blocked: 0 });
+		expect(filtered.contextIds).toEqual(new Set());
 	});
 
 	it('shows nothing when no category is selected', () => {
 		const filtered = filterGroups(groupedTree.groups, selected());
 		expect(filtered.groups).toEqual([]);
 		expect(filtered.counts).toEqual({ items: 0, blocked: 0 });
+		expect(filtered.contextIds).toEqual(new Set());
 	});
 
 	it('keeps the payload order and drops a selected category with no active work', () => {

@@ -2325,13 +2325,50 @@ takes the `ArchiveRange` and `Projection` explicitly because those are caller ch
   cost is that selecting such a category shows no group, which is why the
   grouped view has its own "nothing in the selected categories" state distinct
   from the project-wide "no active work items" state.
-- **Filtering the grouped tree does not promote or splice nodes.** Work items
-  outside the scope take their whole subtree with them; a node in scope whose
-  parent's category is out of scope disappears rather than becoming a root,
-  because inventing a root would falsify parentage. Keeping such an ancestor as
-  marked temporary context is a later ticket; `filterGroups` already returns
-  counts separately from the groups, so that ticket can add context rows without
-  changing its signature or its call sites.
+- **Filtering the grouped tree never promotes or splices nodes; it keeps the
+  ancestors it needs as marked context.** A work item whose ancestors are all in
+  scope is kept exactly where it is. A work item in scope whose parent's
+  category is out of scope keeps that parent, and every further unselected level
+  above it, so the item never becomes a root: parentage is preserved rather than
+  invented. Filtering is applied to each group's subtree in place, so a context
+  ancestor stays inside the group its real root belongs to and no group is
+  re-homed.
+- **A context-only group keeps its category's heading, even though the filter
+  control shows that category as off.** The group is where the real root lives,
+  so the heading tells the truth about the item's category; the context badge on
+  the row is what explains why it is on screen while its category is
+  deselected. Re-homing the chain under the selected category's heading, or
+  inventing a "context" group, would both misreport the category of the items
+  shown.
+- **A context ancestor contributes only the chain down to selected work.** An
+  out-of-scope node is kept if and only if its filtered subtree still holds at
+  least one kept node; otherwise it is dropped. That single rule yields both
+  halves of the behavior: the whole unselected chain above a selected item
+  survives, and an out-of-scope sibling of that chain — a child of a kept
+  context ancestor that holds no selected work — does not appear. In-scope
+  descendants of a kept context ancestor are ordinary selected work and keep
+  their true depth.
+- **Context rows are presentation only.** `filterGroups` returns their ids
+  separately in `FilteredGroups.contextIds` instead of marking the nodes, so the
+  payload shape the server sends is untouched and a row is marked at render time
+  by asking whether its id is in that set. They are excluded from
+  `FilteredGroups.counts`, so the summary counts selected work only and a blocked
+  context ancestor does not inflate the blocked count. They are not
+  unresolved-relations material either: that area stays reserved for genuine
+  parent problems in the payload, and hiding a kept ancestor there instead would
+  turn a presentation decision into an error report.
+- **A context row is marked in words, in its accessible name, and in its
+  treatment.** The row carries a visible `Context — outside the selection`
+  badge, a hatched ground and a dashed state stripe, and the badge text also
+  enters the title button's and the toggle's accessible names. Colour alone
+  would fail both a screen reader and a grey-scale reading of the screen, and a
+  subtle shade would not be "unmistakable at a glance", so the three markings
+  are redundant on purpose. The badge itself is `aria-hidden` only because the
+  accessible name already carries the same words; nothing is conveyed solely by
+  the badge element.
+- **The combined view is never filtered or marked.** It is one hierarchy across
+  all categories, so it has no category scope and therefore no context rows; the
+  Explorer derives `contextIds` from the grouped scope only.
 - **The filter lives in `ui/src/lib/tree.ts`, not in the component.** The scope
   resolution, the group filtering and the count wording are pure functions with
   their own unit tests, so the graph ticket reuses the same semantics rather
