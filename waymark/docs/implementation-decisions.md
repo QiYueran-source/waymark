@@ -2240,6 +2240,28 @@ takes the `ArchiveRange` and `Projection` explicitly because those are caller ch
   to collide with a real category). `visibleRoots`, `summarize`, and `countNodes`
   are pure helpers in `tree.ts`, and Explorer calls them; the persistence notice
   is raised by one `persist()` wrapper around every preference write.
+- **The read-failure block groups diagnostics by the codes the projection sent.**
+  `failure.ts::readDiagnostics` sorts a failure's diagnostics into the causes a
+  reader can act on, using `Finding.code` and `Location.kind` — never a pattern
+  matched against message text. `INCOMPLETE_PROJECTION` *with* a location is the
+  inventory's own uncertainty finding (`projection::inventory_finding`), so it is
+  the uncertain-path group; the same code *without* a location is the
+  count-bearing summary of the whole projection, which names no document and is
+  therefore set aside rather than listed as a cause. Every other located finding
+  is a document problem, including the `DUPLICATE_ID` and `PARSE_ERROR` the
+  inventory reuses for a case-variant path: a path that claims a live ID, or is
+  not the lowercase form of its own, still names a document to repair. A finding
+  located at a config key or a relationship keeps its own group instead of being
+  folded into either document cause, and a diagnostic that is not a finding at
+  all (a bare string, or an object without a string `code` and `message`) is
+  rendered verbatim by the existing `diagnosticText`, so no version skew can make
+  the block throw or silently drop what the service said. The guidance line
+  ("This view is read-only… Run `waymark validate`") is gated on the failure
+  actually being a blocked projection, so a transport failure such as
+  `PROJECT_NOT_FOUND` never claims that project documents need repair. Groups are
+  lists of findings, not of documents: one document can contribute several field
+  findings, and the block states no document count it cannot know. No envelope
+  field, endpoint, or write path was added to support any of this.
 
 # Review fixes — adapters
 
@@ -2301,6 +2323,78 @@ takes the `ArchiveRange` and `Projection` explicitly because those are caller ch
   rule. `blocked_by` remains the CLI/JSON fact, and the Web derives
   `blocked_reason` from the same helper rather than owning the prose.
 
+
+# By-category filtering
+
+- **The category scope is stored per project, not per view, and an absent value
+  is not an empty selection.** Two tree shapes (`grouped`, and the dependency
+  graph a later ticket adds) filter by the same "which categories am I looking
+  at" question, so it lives at `waymark.web.v1:<hash>:categories` and is a JSON
+  array of category keys. A missing key means "every configured category", which
+  is the default a reader meets; `[]` means the reader cleared them all, which
+  must survive a reload. Collapsing the two (for example, storing the
+  complement, or treating an empty array as unset) would make "clear all" undo
+  itself on reload.
+- **Stale keys are ignored where the scope meets the payload, not when it is
+  read.** `resolveCategoryScope` takes the payload's `categories` and drops keys
+  the project no longer configures; `PreferenceStore.readCategories` stays a
+  faithful read of what was written. That keeps the resolution testable without
+  a browser and lets a project whose categories were renamed be re-added without
+  a migration.
+- **The control is built from the payload's `categories`, never its `groups`.**
+  `groups` only carries categories that have roots, so building the control from
+  it would hide a configured-but-quiet category and make it unselectable. The
+  cost is that selecting such a category shows no group, which is why the
+  grouped view has its own "nothing in the selected categories" state distinct
+  from the project-wide "no active work items" state.
+- **Filtering the grouped tree never promotes or splices nodes; it keeps the
+  ancestors it needs as marked context.** A work item whose ancestors are all in
+  scope is kept exactly where it is. A work item in scope whose parent's
+  category is out of scope keeps that parent, and every further unselected level
+  above it, so the item never becomes a root: parentage is preserved rather than
+  invented. Filtering is applied to each group's subtree in place, so a context
+  ancestor stays inside the group its real root belongs to and no group is
+  re-homed.
+- **A context-only group keeps its category's heading, even though the filter
+  control shows that category as off.** The group is where the real root lives,
+  so the heading tells the truth about the item's category; the context badge on
+  the row is what explains why it is on screen while its category is
+  deselected. Re-homing the chain under the selected category's heading, or
+  inventing a "context" group, would both misreport the category of the items
+  shown.
+- **A context ancestor contributes only the chain down to selected work.** An
+  out-of-scope node is kept if and only if its filtered subtree still holds at
+  least one kept node; otherwise it is dropped. That single rule yields both
+  halves of the behavior: the whole unselected chain above a selected item
+  survives, and an out-of-scope sibling of that chain — a child of a kept
+  context ancestor that holds no selected work — does not appear. In-scope
+  descendants of a kept context ancestor are ordinary selected work and keep
+  their true depth.
+- **Context rows are presentation only.** `filterGroups` returns their ids
+  separately in `FilteredGroups.contextIds` instead of marking the nodes, so the
+  payload shape the server sends is untouched and a row is marked at render time
+  by asking whether its id is in that set. They are excluded from
+  `FilteredGroups.counts`, so the summary counts selected work only and a blocked
+  context ancestor does not inflate the blocked count. They are not
+  unresolved-relations material either: that area stays reserved for genuine
+  parent problems in the payload, and hiding a kept ancestor there instead would
+  turn a presentation decision into an error report.
+- **A context row is marked in words, in its accessible name, and in its
+  treatment.** The row carries a visible `Context — outside the selection`
+  badge, a hatched ground and a dashed state stripe, and the badge text also
+  enters the title button's and the toggle's accessible names. Colour alone
+  would fail both a screen reader and a grey-scale reading of the screen, and a
+  subtle shade would not be "unmistakable at a glance", so the three markings
+  are redundant on purpose. The badge itself is `aria-hidden` only because the
+  accessible name already carries the same words; nothing is conveyed solely by
+  the badge element.
+- **The combined view is never filtered or marked.** It is one hierarchy across
+  all categories, so it has no category scope and therefore no context rows; the
+  Explorer derives `contextIds` from the grouped scope only.
+- **The filter lives in `ui/src/lib/tree.ts`, not in the component.** The scope
+  resolution, the group filtering and the count wording are pure functions with
+  their own unit tests, so the graph ticket reuses the same semantics rather
+  than a second copy in another component.
 
 # Web graph view — rendering library
 

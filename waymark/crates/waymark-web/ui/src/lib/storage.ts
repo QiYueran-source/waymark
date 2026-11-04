@@ -46,7 +46,7 @@ export function projectIdFor(root: string): ProjectId {
 /** The key for one preference of one view in one project. */
 export function preferenceKey(
 	projectId: ProjectId,
-	preference: 'view' | 'presentation' | 'expanded' | 'dependencies' | 'scroll',
+	preference: 'view' | 'presentation' | 'expanded' | 'dependencies' | 'scroll' | 'categories',
 	view?: ViewName
 ): string {
 	return view === undefined
@@ -152,6 +152,23 @@ export class PreferenceStore {
 
 	writePresentation(presentation: PresentationName): void {
 		this.write(preferenceKey(this.projectId, 'presentation'), presentation);
+	}
+
+	/**
+	 * The category keys the reader has in scope, or `null` when this project has
+	 * no stored selection (`null` means "show every configured category"; an
+	 * empty list means "the reader cleared them all").
+	 *
+	 * The scope is one per project, not per view: the grouped tree and the graph
+	 * filter by the same selection. Keys this project no longer configures are
+	 * kept here and dropped where the scope meets the project's categories.
+	 */
+	readCategories(): string[] | null {
+		return parseStringArray(this.read(preferenceKey(this.projectId, 'categories')));
+	}
+
+	writeCategories(keys: string[]): void {
+		this.write(preferenceKey(this.projectId, 'categories'), JSON.stringify(keys));
 	}
 
 	/**

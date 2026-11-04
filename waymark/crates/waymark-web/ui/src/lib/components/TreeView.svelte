@@ -17,6 +17,7 @@
 		view,
 		roots,
 		groups,
+		contextIds = new Set<string>(),
 		expanded,
 		dependenciesVisible,
 		selectedId,
@@ -26,6 +27,11 @@
 		view: ViewName;
 		roots: TreeNode[];
 		groups: CategoryGroup[];
+		/**
+		 * Ids kept only to preserve parentage under the current category scope.
+		 * The combined view never filters, so it ignores this.
+		 */
+		contextIds?: ReadonlySet<string>;
 		expanded: string[];
 		dependenciesVisible: boolean;
 		selectedId: string | null;
@@ -87,6 +93,7 @@
 						expanded={row.expanded}
 						hasChildren={row.hasChildren}
 						selected={selectedId === row.node.id}
+						context={contextIds.has(row.node.id)}
 						{dependenciesVisible}
 						edges={dependenciesVisible ? dependencyEdges(row.node, groupedIndex) : []}
 						references={references.get(row.node.id) ?? noReferences}

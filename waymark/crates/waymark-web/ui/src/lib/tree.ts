@@ -181,6 +181,32 @@ export function visibleRoots(data: TreeData): TreeNode[] {
 	return sectionsFor(data).flatMap((section) => section.roots);
 }
 
+/**
+ * The categories a reader has in scope, out of every configured category.
+ *
+ * `configured` is the payload's `categories` — every category the project
+ * configures, in configured order, whether or not it holds active work. `stored`
+ * is what browser storage remembered, or `null` when this project has no stored
+ * selection yet (the reader then sees everything). Stored keys for categories
+ * this project no longer configures are dropped; a stored empty list means
+ * "nothing selected", which is a real choice and stays empty.
+ */
+export function resolveCategoryScope(
+	configured: Category[],
+	stored: string[] | null
+): Set<string> {
+	if (stored === null) return new Set(configured.map((category) => category.key));
+	const known = new Set(configured.map((category) => category.key));
+	return new Set(stored.filter((key) => known.has(key)));
+}
+
+/** A scope as it is remembered: configured order, no stale or duplicated keys. */
+export function categoryScopeKeys(configured: Category[], selected: ReadonlySet<string>): string[] {
+	return configured
+		.map((category) => category.key)
+		.filter((key) => selected.has(key));
+}
+
 /** How much work is displayed, and how much of it is blocked. */
 export interface TreeCounts {
 	items: number;
@@ -202,12 +228,102 @@ export function countNodes(nodes: TreeNode[]): TreeCounts {
 	return { items, blocked };
 }
 
+/** The outcome of filtering the grouped view by category scope. */
+export interface FilteredGroups {
+	/** The surviving groups, in payload order, with their filtered roots. */
+	groups: CategoryGroup[];
+	/** Counts of the work items in scope, not of anything shown as context. */
+	counts: TreeCounts;
+	/**
+	 * Ids of rows kept only to preserve parentage: their category is outside the
+	 * selection, and a selected work item sits below them. They are
+	 * presentation-only and never selected work, so they are left out of
+	 * `counts` — but they do keep their group on screen, because the selected
+	 * item below them has to stay under its real parent.
+	 */
+	contextIds: ReadonlySet<string>;
+}
+
+/**
+ * Keep the work items whose category is in `selected`, and any ancestor needed
+ * to keep them under their real parents.
+ *
+ * The rule, level by level:
+ *
+ * - an in-scope node is always kept, whether or not it has kept children;
+ * - an out-of-scope node is kept only when its filtered subtree holds at least
+ *   one kept node, so the chain to selected work survives and its unrelated
+ *   out-of-scope siblings do not;
+ * - a kept out-of-scope node is context: its id goes in `contextIds` and it is
+ *   left out of `counts`, while selected descendants below it are counted.
+ *
+ * Nodes are never re-parented or promoted: a selected child stays under its real
+ * parent, and when several levels are out of scope the whole chain is kept.
+ * Groups are never re-homed either: a context ancestor keeps the group its real
+ * root belongs to, and a group with nothing left drops out. That is why an
+ * unselected category can still appear — as a context-only group — while a
+ * selected category with no active work still shows nothing.
+ */
+export function filterGroups(
+	groups: CategoryGroup[],
+	selected: ReadonlySet<string>
+): FilteredGroups {
+	const kept: CategoryGroup[] = [];
+	const counts: TreeCounts = { items: 0, blocked: 0 };
+	const contextIds = new Set<string>();
+	for (const group of groups) {
+		const filtered = filterNodes(group.roots, selected);
+		if (filtered.nodes.length === 0) continue;
+		kept.push({ category: group.category, roots: filtered.nodes });
+		counts.items += filtered.counts.items;
+		counts.blocked += filtered.counts.blocked;
+		for (const id of filtered.contextIds) contextIds.add(id);
+	}
+	return { groups: kept, counts, contextIds };
+}
+
+interface FilteredNodes {
+	nodes: TreeNode[];
+	counts: TreeCounts;
+	contextIds: Set<string>;
+}
+
+function filterNodes(nodes: TreeNode[], selected: ReadonlySet<string>): FilteredNodes {
+	const kept: TreeNode[] = [];
+	const counts: TreeCounts = { items: 0, blocked: 0 };
+	const contextIds = new Set<string>();
+	for (const node of nodes) {
+		const inScope = selected.has(node.category.key);
+		const children = filterNodes(node.children, selected);
+		// An out-of-scope node survives only as the chain to kept work. Keeping
+		// an in-scope node is unconditional: it is selected work in its own
+		// right, and a leaf is not hidden just because it has no kept children.
+		if (!inScope && children.nodes.length === 0) continue;
+		kept.push({ ...node, children: children.nodes });
+		if (inScope) {
+			counts.items += 1 + children.counts.items;
+			counts.blocked += (node.state === 'blocked' ? 1 : 0) + children.counts.blocked;
+		} else {
+			contextIds.add(node.id);
+			counts.items += children.counts.items;
+			counts.blocked += children.counts.blocked;
+		}
+		for (const id of children.contextIds) contextIds.add(id);
+	}
+	return { nodes: kept, counts, contextIds };
+}
+
+/** The summary wording for a set of counts, so a filtered view reads the same. */
+export function summarizeCounts(counts: TreeCounts, unresolved: number): string {
+	const parts = [
+		`${counts.items} item${counts.items === 1 ? '' : 's'}`,
+		`${counts.blocked} blocked`
+	];
+	if (unresolved > 0) parts.push(`${unresolved} unresolved`);
+	return parts.join(' · ');
+}
+
 /** The screen's one finding: how much work there is and what is held up. */
 export function summarize(data: TreeData): string {
-	const { items, blocked } = countNodes(visibleRoots(data));
-	const parts = [`${items} item${items === 1 ? '' : 's'}`, `${blocked} blocked`];
-	if (data.unresolved.length > 0) {
-		parts.push(`${data.unresolved.length} unresolved`);
-	}
-	return parts.join(' · ');
+	return summarizeCounts(countNodes(visibleRoots(data)), data.unresolved.length);
 }

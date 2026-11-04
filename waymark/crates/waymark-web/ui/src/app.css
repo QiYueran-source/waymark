@@ -306,6 +306,113 @@ code {
 	accent-color: var(--accent);
 }
 
+/* Category filter --------------------------------------------------------- */
+
+/*
+ * The filter sits inside the toolbar between the view switch and the summary.
+ * Selected and unselected differ by a filled panel, an ink change, and the
+ * button's own accessible name, so nothing reads by colour alone.
+ */
+
+.category-filter {
+	display: flex;
+	flex: none;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.35rem 0.5rem;
+	padding-left: 0.85rem;
+	border-left: 1px solid var(--line);
+}
+
+.filter-head {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.1rem;
+}
+
+.filter-label {
+	margin-right: 0.2rem;
+	color: var(--muted);
+	font-size: 0.72rem;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+}
+
+.filter-head button {
+	min-height: 1.6rem;
+	padding: 0.16rem 0.4rem;
+	border: 0;
+	border-radius: 3px;
+	background: transparent;
+	color: var(--muted);
+	font-size: 0.78rem;
+	transition:
+		color 130ms ease,
+		background-color 130ms ease;
+}
+
+.filter-head button:hover:not(:disabled) {
+	background: var(--panel-2);
+	color: var(--ink);
+}
+
+.filter-head button:disabled {
+	opacity: 0.45;
+	cursor: default;
+}
+
+.filter-options {
+	display: inline-flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 2px;
+	padding: 2px;
+	border: 1px solid var(--line-strong);
+	border-radius: 4px;
+	background: var(--sheet);
+}
+
+.filter-option {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3rem;
+	min-height: 1.6rem;
+	padding: 0.16rem 0.5rem;
+	border: 0;
+	border-radius: 2px;
+	background: transparent;
+	color: var(--muted);
+	font-size: 0.8rem;
+	transition:
+		background-color 130ms ease,
+		color 130ms ease;
+}
+
+.filter-option:hover {
+	color: var(--ink);
+}
+
+.filter-option .filter-option-name {
+	text-decoration: line-through;
+	text-decoration-thickness: 1px;
+}
+
+/*
+ * A selected option drops the strike-through and takes the panel surface. The
+ * strike-through is the non-colour cue, so the two states stay apart without
+ * relying on hue.
+ */
+.filter-option[aria-pressed='true'] {
+	background: var(--panel);
+	color: var(--ink);
+	font-weight: 600;
+}
+
+.filter-option[aria-pressed='true'] .filter-option-name {
+	text-decoration: none;
+}
+
 /* Layout ------------------------------------------------------------------ */
 
 .layout {
@@ -399,6 +506,28 @@ code {
 
 .node.selected > .node-row {
 	background: var(--accent-soft);
+}
+
+/*
+ * A context row is not selected work: it is an ancestor kept only so the item
+ * below it keeps its real parent. It is marked three ways — a hatched ground, a
+ * dashed state stripe, and a text badge — so the difference survives greyscale,
+ * colour-blindness, and a screenshot taken without hovering.
+ */
+.node.context > .node-row {
+	border-left-style: dashed;
+	border-left-color: var(--dash);
+	background: repeating-linear-gradient(135deg, var(--panel-2) 0 6px, var(--panel) 6px 12px);
+}
+
+/* Opening a context row's detail must still read as selected, so keep the hatch
+   and swap its paper for the selection tint rather than dropping either cue. */
+.node.context.selected > .node-row {
+	background: repeating-linear-gradient(135deg, var(--accent-soft) 0 6px, var(--panel) 6px 12px);
+}
+
+.node.context .node-title {
+	color: var(--muted);
 }
 
 .guide {
@@ -503,6 +632,20 @@ code {
 	max-width: 8.5rem;
 	overflow: hidden;
 	text-overflow: ellipsis;
+}
+
+/* The context badge: the part of the marking that is words, not treatment. */
+.context-marker {
+	flex: none;
+	padding: 0.02rem 0.34rem;
+	border: 1px dashed var(--notice-line);
+	border-radius: 2px;
+	background: var(--notice-bg);
+	color: var(--notice-ink);
+	font-size: 0.74rem;
+	font-weight: 650;
+	letter-spacing: 0.015em;
+	white-space: nowrap;
 }
 
 .node-title {
@@ -884,6 +1027,59 @@ code {
 	margin: 0;
 	padding-left: 1.1rem;
 	font-size: 0.83rem;
+	overflow-wrap: anywhere;
+}
+
+/* Findings that name a document or a path: one per row, place first. */
+.problems {
+	display: grid;
+	gap: 0.45rem;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.problem {
+	display: grid;
+	gap: 0.1rem;
+	padding-left: 0.6rem;
+	border-left: 2px solid var(--line-strong);
+	font-size: 0.83rem;
+	overflow-wrap: anywhere;
+}
+
+.problem-place {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 0.15rem 0.45rem;
+}
+
+/* The code is the finding's identity, not decoration: it keeps its own slot. */
+.problem-code {
+	color: var(--alert);
+	font-size: 0.76rem;
+	font-weight: 650;
+}
+
+.problem-where {
+	font-weight: 600;
+}
+
+.problem-field {
+	color: var(--muted);
+	font-size: 0.8rem;
+}
+
+.problem-message {
+	color: var(--ink);
+}
+
+.failure-guidance {
+	margin: 0.15rem 0 0;
+	padding-top: 0.45rem;
+	border-top: 1px solid var(--line-strong);
+	font-size: 0.84rem;
 	overflow-wrap: anywhere;
 }
 
