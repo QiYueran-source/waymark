@@ -225,15 +225,13 @@ pub fn row_json(row: &ListedItem, projection: &Projection) -> Value {
     crate::query::projected_row(row, projection)
 }
 
-/// The machine form of one configuration document.
+/// The machine form of the shared project configuration document.
 pub fn config_json(config: &Config) -> Value {
     json!({
         "version": config.version.to_string(),
         "generation": config.version.generation,
         "revision": config.version.revision,
         "storage_root": config.storage_root,
-        "operator": config.operator,
-        "timezone": config.timezone.name(),
         "categories": config
             .categories
             .iter()
@@ -263,7 +261,75 @@ pub fn config_json(config: &Config) -> Value {
                 )
             })
             .collect::<Map<String, Value>>(),
-        "cache": {"enabled": config.cache.enabled, "capacity": config.cache.capacity},
+    })
+}
+
+/// The machine form of the local user configuration document.
+///
+/// `null` settings are omitted rather than rendered as `null`, so "the document
+/// does not state it" and "the document states a value" stay distinguishable in
+/// one glance.
+pub fn local_config_json(local: Option<&crate::user_config::UserConfig>) -> Value {
+    let Some(local) = local else {
+        return Value::Null;
+    };
+    let mut document = Map::new();
+    if let Some(operator) = &local.operator {
+        document.insert("operator".to_owned(), json!(operator));
+    }
+    if let Some(zone) = local.timezone {
+        document.insert("timezone".to_owned(), json!(zone.name()));
+    }
+    if !local.cache.is_absent() {
+        let mut cache = Map::new();
+        if let Some(enabled) = local.cache.enabled {
+            cache.insert("enabled".to_owned(), json!(enabled));
+        }
+        if let Some(capacity) = local.cache.capacity {
+            cache.insert("capacity".to_owned(), json!(capacity));
+        }
+        document.insert("cache".to_owned(), Value::Object(cache));
+    }
+    Value::Object(document)
+}
+
+/// The machine form of the effective values and the source of each.
+///
+/// One entry per setting, each naming the value and where it came from, so an
+/// adapter renders precedence instead of deciding it.
+pub fn effective_config_json(effective: &crate::user_config::EffectiveConfig) -> Value {
+    json!({
+        "operator": {
+            "value": effective.operator,
+            "source": effective.operator_source.as_str(),
+        },
+        "timezone": {
+            "value": effective.timezone.name(),
+            "source": effective.timezone_source.as_str(),
+        },
+        "cache": {
+            "enabled": {
+                "value": effective.cache.enabled,
+                "source": effective.cache_enabled_source.as_str(),
+            },
+            "capacity": {
+                "value": effective.cache.capacity,
+                "source": effective.cache_capacity_source.as_str(),
+            },
+        },
+    })
+}
+
+/// The machine form of both documents plus the resolved values.
+///
+/// This is what `config show` prints in machine mode and what the MCP read tool
+/// returns, so the CLI and the MCP server cannot disagree about what "the
+/// configuration" is.
+pub fn config_bundle_json(bundle: &crate::ops::local_config::Bundle) -> Value {
+    json!({
+        "project": config_json(&bundle.project),
+        "local": local_config_json(bundle.local.as_ref()),
+        "effective": effective_config_json(&bundle.effective),
     })
 }
 
@@ -677,7 +743,6 @@ mod tests {
     #[test]
     fn config_json_renders_the_document_the_adapters_publish() {
         let mut config = Config::fresh();
-        config.operator = Some("frank".to_owned());
         config.categories.insert(
             crate::model::CategoryKey::parse("bug").unwrap(),
             Category {
@@ -699,8 +764,9 @@ mod tests {
         assert_eq!(value["generation"], json!(1));
         assert_eq!(value["revision"], json!(config.version.revision));
         assert_eq!(value["storage_root"], json!("work"));
-        assert_eq!(value["operator"], json!("frank"));
-        assert_eq!(value["timezone"], json!("UTC"));
+        assert!(value.get("operator").is_none());
+        assert!(value.get("timezone").is_none());
+        assert!(value.get("cache").is_none());
         assert_eq!(value["categories"]["task"]["key"], json!("task"));
         assert_eq!(value["categories"]["task"]["path"], json!("work/task"));
         assert_eq!(value["categories"]["bug"]["name"], json!("Bugs"));
@@ -708,8 +774,35 @@ mod tests {
         assert_eq!(value["fields"]["effort"]["type"], json!("integer"));
         assert_eq!(value["fields"]["effort"]["required"], json!(true));
         assert_eq!(value["fields"]["effort"]["default"], json!(3));
-        assert_eq!(value["cache"]["enabled"], json!(true));
-        assert_eq!(value["cache"]["capacity"], json!(config.cache.capacity));
+    }
+
+    #[test]
+    fn local_and_effective_json_render_every_source() {
+        use crate::user_config::{EffectiveConfig, LocalEnvironment, UserConfig};
+
+        let mut user = UserConfig::empty();
+        user.operator = Some("frank".to_owned());
+        let environment = LocalEnvironment {
+            operator: Some("ignored".to_owned()),
+            timezone: Some(chrono_tz::Tz::Asia__Shanghai),
+        };
+        let effective = EffectiveConfig::resolve(Some(&user), &environment);
+
+        let local = local_config_json(Some(&user));
+        assert_eq!(local["operator"], json!("frank"));
+        assert!(local.get("timezone").is_none());
+
+        let resolved = effective_config_json(&effective);
+        assert_eq!(resolved["operator"]["value"], json!("frank"));
+        assert_eq!(resolved["operator"]["source"], json!("local_document"));
+        assert_eq!(resolved["timezone"]["value"], json!("Asia/Shanghai"));
+        assert_eq!(resolved["timezone"]["source"], json!("system_time_zone"));
+        assert_eq!(resolved["cache"]["capacity"]["value"], json!(512));
+        assert_eq!(
+            resolved["cache"]["capacity"]["source"],
+            json!("built_in_default")
+        );
+        assert_eq!(local_config_json(None), Value::Null);
     }
 
     fn listing() -> Listing {

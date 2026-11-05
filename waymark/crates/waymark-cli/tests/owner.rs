@@ -181,13 +181,11 @@ fn a_dry_run_reports_the_transfer_and_writes_nothing() {
 fn a_mismatched_operator_warns_in_the_envelope_and_on_stderr() {
     let (_dir, root) = project();
     let id = create(&root);
-    let config_path = root.join(".waymark").join("config.toml");
-    let config = std::fs::read_to_string(&config_path).expect("the configuration exists");
     std::fs::write(
-        &config_path,
-        config.replace("timezone = ", "operator = \"alice\"\ntimezone = "),
+        root.join(".waymark").join("user.toml"),
+        "operator = \"alice\"\n",
     )
-    .expect("the configuration is writable");
+    .expect("the local document is writable");
 
     let envelope = json_ok(&root, &["owner", "transfer", &id, "bob"]);
     assert_eq!(

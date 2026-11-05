@@ -513,7 +513,7 @@ fn prepare(
 
     let creator = match request.creator.as_deref() {
         Some(raw) => Some(raw.trim().to_owned()),
-        None => mediated::effective_operator(project, options).map(str::to_owned),
+        None => mediated::effective_operator(project, options),
     };
 
     let parent = match request.parent.as_deref() {

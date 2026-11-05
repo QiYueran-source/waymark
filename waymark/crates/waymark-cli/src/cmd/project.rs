@@ -55,8 +55,6 @@ fn render_info(project: &Project, json: bool) -> Result<(), WaymarkError> {
                 "version": config.version.to_string(),
                 "generation": config.version.generation,
                 "revision": config.version.revision,
-                "timezone": config.timezone.name(),
-                "operator": config.operator,
                 "categories": config
                     .categories
                     .iter()
@@ -87,10 +85,6 @@ fn render_info(project: &Project, json: bool) -> Result<(), WaymarkError> {
         config.version, config.version.revision
     ));
     err_line(&format!("  storage     {}", config.storage_root));
-    err_line(&format!("  timezone    {}", config.timezone.name()));
-    if let Some(operator) = &config.operator {
-        err_line(&format!("  operator    {operator}"));
-    }
     err_line(&format!(
         "  categories  {}",
         config

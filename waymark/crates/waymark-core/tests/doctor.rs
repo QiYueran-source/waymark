@@ -380,7 +380,7 @@ fn custom_field_configuration_drift_is_reported_per_field() {
     // Remove the field from the configuration after the document was written:
     // that is exactly the drift a schema removal leaves behind.
     config.fields.remove(&FieldKey::parse("effort").unwrap());
-    waymark_core::ops::config::set_scalar(
+    waymark_core::ops::local_config::set_scalar(
         &project,
         waymark_core::ops::config::Scalar::CacheCapacity,
         "512",

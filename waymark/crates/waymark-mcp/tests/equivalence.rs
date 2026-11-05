@@ -476,6 +476,14 @@ async fn config_writes_match_the_cli() {
             json!({"name": "operator", "value": "frank"}),
         ),
         (
+            "waymark_config_set",
+            json!({"name": "timezone", "value": "Asia/Shanghai"}),
+        ),
+        (
+            "waymark_config_set",
+            json!({"name": "cache.capacity", "value": "64"}),
+        ),
+        (
             "waymark_config_add_category",
             json!({"key": "bug", "path": "work/bugs", "name": "Bugs"}),
         ),
@@ -502,6 +510,8 @@ async fn config_writes_match_the_cli() {
     }
 
     common::cli_json(&cli_root, &["config", "set", "operator", "frank"]);
+    common::cli_json(&cli_root, &["config", "set", "timezone", "Asia/Shanghai"]);
+    common::cli_json(&cli_root, &["config", "set", "cache.capacity", "64"]);
     common::cli_json(
         &cli_root,
         &[

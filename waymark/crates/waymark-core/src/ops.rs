@@ -21,6 +21,7 @@ pub mod edit;
 pub mod git;
 pub mod link;
 pub mod list;
+pub mod local_config;
 pub mod mediated;
 pub mod migrate;
 pub mod r#move;

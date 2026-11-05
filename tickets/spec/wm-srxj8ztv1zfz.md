@@ -530,6 +530,7 @@ Error registry:
 | `RECOVERY_MATERIAL_FOUND` | none | no | info | file | `{path, reason}` | temporary or recovery material may exist and requires human inspection |
 | `DIAGNOSTIC_SCOPE_UNCONFIRMED` | none | no | info | file | `{path, reason}` | a diagnostic location could not be checked, so clean coverage is not claimed |
 | `ASSETS_VERSION_MISMATCH` | none | no | error | none | `{kind, expected, actual}` | the embedded frontend manifest disagrees with the release it claims to describe |
+| `TIME_ZONE_UNDETECTED` | none | no | info | none | `{}` | the machine-local time zone could not be determined, so the effective zone falls back to UTC |
 
 - `LOCK_TIMEOUT` and `SNAPSHOT_UNSTABLE` are the only retryable codes. Every other code is terminal. `USAGE_ERROR` at exit 1 is adapter-level and deliberately absent from the registry.
 

@@ -3157,3 +3157,100 @@ table so the hash needs no runtime decompressor.
 **What would change it:** if `serve` ever needs to refuse a mismatched tree, it can call the same
 function and choose its own failure; today it starts regardless.
 
+
+# Local user configuration (wm-qkssvky32ptz)
+
+## Two documents, one resolution boundary
+
+**Choice:** `.waymark/config.toml` keeps only the shared project facts — `version`, `storage_root`,
+`categories`, `fields`. The three per-collaborator settings (`operator`, `timezone`, `cache`) live in
+`.waymark/user.toml`, which carries no `version` and is listed in `.waymark/.gitignore`.
+`waymark_core::user_config` owns the document's shape, validation, and precedence;
+`waymark_core::ops::local_config` is the seam every adapter calls.
+
+**Why:** the shared document is committed and shared by every clone, so a per-collaborator identity and
+a machine-derived zone cannot live in it without producing a dirty tree after every checkout on a
+second machine. Splitting them keeps "the shared baseline is identical for everyone" true, and keeps
+the precedence in one place instead of in the CLI, the MCP server, and the Web view independently.
+
+## The shared schema rejects the local keys by name
+
+**Choice:** `config.rs` recognises `operator`, `timezone`, and `cache` as `LOCAL_ONLY_KEYS` and rejects
+each with "`<key>` belongs to the local user configuration and cannot be set in the shared project
+configuration". Any other unknown key keeps the generic message. There is no migration and no legacy
+fallback, because the project is pre-release.
+
+**Why:** an old-shaped repository is the one case a person will actually hit, and a generic "unknown
+field" would send them looking for a typo instead of moving the value. Naming the destination makes the
+repair obvious from the message alone. The other half is negative: silently accepting the keys would
+mean two documents claiming the same setting, with the resolution order deciding which one wins — the
+exact ambiguity the split exists to remove.
+
+## Reading never creates the local document
+
+**Choice:** `UserConfig::load_optional` returns `Ok(None)` when the file is absent, and
+`local_config::{load, effective, bundle}` only ever read. `init` is the only path that creates the
+document.
+
+**Why:** the document is optional by design — every setting has a fallback — so "absent" and "empty"
+would otherwise be indistinguishable from the user's point of view while producing a different tree.
+Making creation an explicit act also means a `git status` stays clean on a fresh clone of a project
+initialized elsewhere.
+
+## Resolution skips a fallback the document already answers
+
+**Choice:** `LocalEnvironment::detect_for(root, user)` runs the Git probe only when the local document
+does not state an operator, and machine-zone detection only when it does not state a zone.
+`EffectiveConfig::resolve` then applies local → fallback → built-in default. Cache has no environment
+fallback at all, and its two fields resolve independently, so a document pinning only the capacity
+still reports `built_in_default` for enablement.
+
+**Why:** the skip is what makes "an explicit local value never consults system detection" a structural
+property instead of an incidental one — a machine with an unreadable Git identity, a broken `TZ`, or a
+slow subprocess pays nothing for a value the collaborator already chose. Independent cache fields keep
+the source report honest: a single shared `cache` source would have to claim a written value for a
+field that is still defaulted.
+
+## A broken document fails reads that need it and never blocks a diagnosis
+
+**Choice:** `local_config::effective` propagates a `CONFIG_INVALID`; `local_config::effective_lenient`
+treats an unreadable document as absent and is what `validate`, `doctor`, projection cache sizing, and
+the advisory operator path call.
+
+**Why:** an operation that needs a value must not guess at it, but the command that reports the problem
+is the one that has to run — a `Project::open`-level failure would make `validate` unable to name the
+file it is complaining about. Two entry points with one shared `resolve` keep the precedence identical
+and isolate the difference to the error policy.
+
+## A local write does not move the shared revision
+
+**Choice:** `local_config::set_scalar` takes the same project lock, validates the whole document, and
+replaces it atomically, but reports `previous_revision == revision`: the shared document is never read
+for a value and never written. Clearing the operator writes `None`, and a document that would state
+nothing at all is deleted rather than written empty.
+
+**Why:** the revision counts mediated writes to the shared baseline, which is what a second clone can
+observe; a local identity change is invisible to everyone else and must not imply a shared change. An
+absent file is the canonical "no local settings" form, so deleting is both the smaller state and the
+one that matches what an ignored file should look like.
+
+## The UTC fallback warns instead of failing
+
+**Choice:** when no zone is stated and machine detection fails, the effective zone is UTC and the
+resolution carries a `TIME_ZONE_UNDETECTED` warning (severity `info`, no exit class).
+
+**Why:** the fallback is correct — an offset-less timestamp still has to mean something — but a
+surprising UTC offset in rendered output is worth explaining. Registering it as a finding-only code
+keeps it out of the exit-code table, so `validate --strict` and every ordinary operation stay
+successful.
+
+## `config show` prints the shared document verbatim on stdout
+
+**Choice:** human mode writes the shared `config.toml` bytes to stdout and the local document, the
+effective values, and their sources to stderr. `--json` returns `{project, local, effective}` in one
+envelope, with `local: null` when the document is absent and keys omitted rather than set to null.
+
+**Why:** `waymark config show > config.toml` is an existing habit, and it must keep producing a valid
+shared document; putting the local half on stdout would silently corrupt that file. The local settings
+are also the part a person is least likely to want to capture, since they are theirs, not the
+project's.

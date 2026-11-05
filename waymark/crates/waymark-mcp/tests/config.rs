@@ -10,9 +10,9 @@ use waymark_core::lock::LockWait;
 #[tokio::test]
 async fn config_read_returns_the_effective_configuration() {
     let fixture = common::fixture(&["one"]);
-    // Record an operator through the shared configuration operation, so the
-    // read proves it returns the effective document and not a stale copy.
-    waymark_core::ops::config::set_scalar(
+    // Record an operator through the local configuration operation, so the read
+    // proves it returns the effective values and not a stale copy.
+    waymark_core::ops::local_config::set_scalar(
         &fixture.project(),
         waymark_core::ops::config::Scalar::parse("operator").unwrap(),
         "frank",
@@ -24,13 +24,23 @@ async fn config_read_returns_the_effective_configuration() {
     let result = client.call("waymark_config_read", common::no_args()).await;
     let envelope = common::envelope(&result);
     assert_eq!(envelope["ok"], true);
-    assert_eq!(envelope["data"]["config"]["storage_root"], "work");
+    assert_eq!(envelope["data"]["project"]["storage_root"], "work");
     assert_eq!(
-        envelope["data"]["config"]["categories"]["task"]["path"],
+        envelope["data"]["project"]["categories"]["task"]["path"],
         "work/task"
     );
-    assert_eq!(envelope["data"]["config"]["operator"], "frank");
-    assert!(envelope["data"]["config"]["revision"].is_number());
+    assert!(envelope["data"]["project"]["revision"].is_number());
+    // The operator is a local setting: it appears in the local document and in
+    // the resolved values, never in the shared project document.
+    assert_eq!(envelope["data"]["local"]["operator"], "frank");
+    assert_eq!(envelope["data"]["effective"]["operator"]["value"], "frank");
+    assert_eq!(
+        envelope["data"]["effective"]["operator"]["source"],
+        "local_document"
+    );
+    assert!(envelope["data"]["project"].get("operator").is_none());
+    assert!(envelope["data"]["project"].get("timezone").is_none());
+    assert!(envelope["data"]["project"].get("cache").is_none());
     assert_eq!(envelope["_meta"]["source"], "direct_file");
 
     client.shutdown().await;
@@ -64,6 +74,36 @@ async fn config_validate_reports_findings_without_a_business_failure() {
     assert_eq!(findings[0]["code"], "CONFIG_INVALID");
     assert!(common::is_registered_code(&findings[0]["code"]));
     assert_eq!(envelope["_meta"]["diagnostics"], json!(findings));
+
+    // The local document is validated alongside it, and a local finding reuses
+    // the same registry and the same shape.
+    std::fs::write(
+        fixture.root.join(".waymark/config.toml"),
+        waymark_core::config::Config::fresh().to_toml_string(),
+    )
+    .expect("the configuration is healthy again");
+    std::fs::write(
+        fixture.root.join(".waymark/user.toml"),
+        "timezone = \"Mars/Olympus\"\n",
+    )
+    .expect("the local document is replaced");
+    let result = client
+        .call("waymark_config_validate", common::no_args())
+        .await;
+    let envelope = common::envelope(&result);
+    assert_eq!(envelope["ok"], true, "{envelope}");
+    let findings = envelope["data"]["findings"].as_array().expect("findings");
+    assert!(
+        findings.iter().any(|finding| finding["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("timezone")),
+        "{findings:?}"
+    );
+    for finding in findings {
+        assert_eq!(finding["code"], "CONFIG_INVALID");
+        assert!(common::is_registered_code(&finding["code"]));
+    }
 
     client.shutdown().await;
 }
@@ -165,17 +205,23 @@ async fn config_set_writes_a_scalar_and_reports_the_revision() {
         .await;
     let envelope = common::envelope(&result);
     assert_eq!(envelope["ok"], true);
-    assert_eq!(envelope["data"]["config"]["operator"], "frank");
+    assert_eq!(envelope["data"]["local"]["operator"], "frank");
     assert_eq!(envelope["data"]["changed"], true);
     assert_eq!(envelope["data"]["changed_keys"], json!(["operator"]));
     assert_eq!(envelope["data"]["previous_revision"], json!(before));
-    assert_eq!(envelope["data"]["revision"], json!(before + 1));
+    assert_eq!(
+        envelope["data"]["revision"],
+        json!(before),
+        "a local write never moves the shared revision"
+    );
     assert_eq!(envelope["_meta"]["source"], "direct_file");
 
     // The write is on disk, not only in the response.
     let project = fixture.project();
-    assert_eq!(project.config().operator.as_deref(), Some("frank"));
-    assert_eq!(project.config().version.revision, before + 1);
+    let local = waymark_core::user_config::UserConfig::load(&project.user_config_path())
+        .expect("the local document is valid");
+    assert_eq!(local.operator.as_deref(), Some("frank"));
+    assert_eq!(project.config().version.revision, before);
 
     // Repeating the same value is a true no-op: no revision move, no write.
     let result = client
@@ -187,7 +233,7 @@ async fn config_set_writes_a_scalar_and_reports_the_revision() {
     let envelope = common::envelope(&result);
     assert_eq!(envelope["data"]["changed"], false);
     assert_eq!(envelope["data"]["changed_keys"], json!([]));
-    assert_eq!(envelope["data"]["revision"], json!(before + 1));
+    assert_eq!(envelope["data"]["revision"], json!(before));
 
     client.shutdown().await;
 }

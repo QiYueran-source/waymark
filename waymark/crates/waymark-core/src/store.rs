@@ -158,8 +158,11 @@ pub struct InitOptions {
     pub force: bool,
     /// Configuration to write. Defaults to [`Config::fresh`].
     pub config: Option<Config>,
-    /// Operator identity to record.
-    pub operator: Option<String>,
+    /// Local user document to write when this initialization creates one.
+    ///
+    /// `None` seeds nothing beyond what the local fallbacks resolve, and an
+    /// already-initialized project never reaches the write at all.
+    pub local: Option<crate::user_config::UserConfig>,
 }
 
 /// A handle to one Waymark project.
@@ -202,14 +205,30 @@ impl Project {
         fs::create_dir_all(&metadata)
             .map_err(|source| WaymarkError::io(metadata.to_string(), "create", &source))?;
 
-        let mut config = opts.config.unwrap_or_else(Config::fresh);
-        if let Some(operator) = opts.operator {
-            config.operator = Some(operator);
-        }
+        let config = opts.config.unwrap_or_else(Config::fresh);
         config.validate()?;
 
+        // Both documents are validated, and the ignore entry that keeps the
+        // local document out of the shared baseline is repaired, before either
+        // file is written: a project never ends up with a local document that no
+        // ignore rule covers.
+        let local = opts.local.unwrap_or_default();
+        local.validate()?;
+        ensure_gitignore(
+            &metadata,
+            &[
+                LOCK_IGNORE_ENTRY,
+                crate::user_config::USER_CONFIG_IGNORE_ENTRY,
+            ],
+        )?;
+
+        if !local.is_empty() {
+            crate::write::replace_unchecked(
+                &metadata.join(crate::user_config::USER_CONFIG_FILE),
+                local.to_toml_string().as_bytes(),
+            )?;
+        }
         crate::write::replace_unchecked(&config_path, config.to_toml_string().as_bytes())?;
-        ensure_gitignore(&metadata, &[LOCK_IGNORE_ENTRY])?;
 
         for category in config.categories.values() {
             let path = root.join(&category.path);
@@ -268,6 +287,15 @@ impl Project {
     /// The configuration document.
     pub fn config_path(&self) -> Utf8PathBuf {
         self.metadata_dir().join(CONFIG_FILE)
+    }
+
+    /// The local user configuration document.
+    ///
+    /// Absent is normal: every setting it holds has a fallback, and no read
+    /// creates it.
+    pub fn user_config_path(&self) -> Utf8PathBuf {
+        self.metadata_dir()
+            .join(crate::user_config::USER_CONFIG_FILE)
     }
 
     /// The store-wide write lock file.

@@ -38,7 +38,6 @@ use crate::lock::with_project_lock;
 use crate::model::{CategoryKey, FieldKey, FieldValue};
 use crate::ops::OpOptions;
 use crate::store::{Fingerprint, Project};
-use crate::time::parse_timezone;
 
 /// The result of one configuration operation.
 #[derive(Debug, Clone)]
@@ -70,9 +69,9 @@ pub struct InitRequest {
     pub storage_root: Option<String>,
     /// The one category to declare; defaults to `task`.
     pub category: Option<String>,
-    /// Advisory operator identity to record.
+    /// Advisory operator identity to seed into the local document.
     pub operator: Option<String>,
-    /// IANA time zone to record; defaults to `UTC`.
+    /// IANA time zone to seed into the local document.
     pub timezone: Option<String>,
 }
 
@@ -130,15 +129,19 @@ impl InitRequest {
                 name: default_category_name(&key),
             },
         );
-        if let Some(operator) = &self.operator {
-            config.operator = Some(operator.clone());
-        }
-        if let Some(timezone) = &self.timezone {
-            config.timezone = parse_timezone(timezone).map_err(|error| {
-                WaymarkError::config_invalid("init", vec![format!("timezone: {error}")])
-            })?;
-        }
         Ok(config)
+    }
+
+    /// The local document this request seeds, for an initialization that is
+    /// actually creating one.
+    pub fn local(&self, root: &Utf8Path) -> Result<crate::user_config::UserConfig, WaymarkError> {
+        crate::ops::local_config::seeded(
+            root,
+            &crate::ops::local_config::InitSeeds {
+                operator: self.operator.clone(),
+                timezone: self.timezone.clone(),
+            },
+        )
     }
 }
 
@@ -149,12 +152,25 @@ impl InitRequest {
 /// facts, not CLI presentation.
 pub fn init(root: &Utf8Path, request: InitRequest, force: bool) -> Result<Project, WaymarkError> {
     let config = request.config()?;
+    // Re-initialization is a no-op and must not build — let alone write — a
+    // local document, so the seed is only resolved when the shared document is
+    // genuinely absent.
+    let local = if root
+        .join(crate::config::METADATA_DIR)
+        .join(CONFIG_FILE)
+        .exists()
+        && !force
+    {
+        None
+    } else {
+        Some(request.local(root)?)
+    };
     Project::init(
         root,
         crate::store::InitOptions {
             force,
             config: Some(config),
-            operator: None,
+            local,
         },
     )
 }
@@ -220,6 +236,29 @@ pub fn show(project: &Project) -> Result<Config, WaymarkError> {
     Config::load(&project.config_path())
 }
 
+/// Read both configuration documents and the values they resolve to.
+///
+/// This is the one read adapters use for `config show`: the shared document, the
+/// local document, and the effective values with their sources, so no adapter
+/// re-derives a fallback or re-parses the local document.
+pub fn bundle(project: &Project) -> Result<crate::ops::local_config::Bundle, WaymarkError> {
+    crate::ops::local_config::bundle(project)
+}
+
+/// Every complaint about both configuration documents, as findings.
+///
+/// Shared-document issues are reported first, then local-document issues, each
+/// located at the document that carries it. A local-document problem is not a
+/// shared-configuration problem: it never changes the shared revision and says
+/// nothing about another clone.
+pub fn validate_both(project: &Project) -> Vec<Finding> {
+    let mut findings = validate_config(project);
+    findings.extend(crate::ops::local_config::validate_path(
+        &project.user_config_path(),
+    ));
+    findings
+}
+
 /// The configuration file of the nearest project at or above `start`, found
 /// without parsing it.
 ///
@@ -280,80 +319,6 @@ pub fn validate_config_path(path: &Utf8Path) -> Vec<Finding> {
             .collect(),
         Err(error) => vec![Finding::new(Code::ConfigInvalid, error.message())
             .with_location(Location::config_key(CONFIG_FILE))],
-    }
-}
-
-/// Set one scalar.
-///
-/// An empty `operator` value clears the key: the writer omits an absent operator,
-/// and an empty operator is what the parser rejects, so "unset" is expressed by
-/// absence rather than by an empty string.
-pub fn set_scalar(
-    project: &Project,
-    scalar: Scalar,
-    value: &str,
-    options: &OpOptions,
-) -> Result<ConfigOutcome, WaymarkError> {
-    // Parse before taking the lock: a malformed value never needs the write path.
-    let parsed = parse_scalar(scalar, value)?;
-    mediate(project, options, |current| {
-        let mut next = current.clone();
-        apply_scalar(&mut next, &parsed);
-        Ok((next, vec![scalar.name().to_owned()]))
-    })
-}
-
-/// A validated scalar assignment, ready to apply.
-#[derive(Debug, Clone)]
-enum ParsedScalar {
-    /// An explicit operator, or `None` to clear the key.
-    Operator(Option<String>),
-    Timezone(chrono_tz::Tz),
-    CacheEnabled(bool),
-    CacheCapacity(usize),
-}
-
-fn parse_scalar(scalar: Scalar, value: &str) -> Result<ParsedScalar, WaymarkError> {
-    match scalar {
-        Scalar::Operator => {
-            let trimmed = value.trim();
-            Ok(ParsedScalar::Operator(
-                (!trimmed.is_empty()).then(|| trimmed.to_owned()),
-            ))
-        }
-        Scalar::Timezone => {
-            let zone = parse_timezone(value.trim()).map_err(|_| {
-                invalid_scalar(
-                    "timezone",
-                    format!("{value:?} is not a known IANA time zone"),
-                )
-            })?;
-            Ok(ParsedScalar::Timezone(zone))
-        }
-        Scalar::CacheEnabled => match value.trim() {
-            "true" => Ok(ParsedScalar::CacheEnabled(true)),
-            "false" => Ok(ParsedScalar::CacheEnabled(false)),
-            other => Err(invalid_scalar(
-                "cache.enabled",
-                format!("expected `true` or `false`, found {other:?}"),
-            )),
-        },
-        Scalar::CacheCapacity => match value.trim().parse::<usize>() {
-            Ok(capacity) if capacity > 0 => Ok(ParsedScalar::CacheCapacity(capacity)),
-            _ => Err(invalid_scalar(
-                "cache.capacity",
-                format!("expected a positive whole number, found {value:?}"),
-            )),
-        },
-    }
-}
-
-fn apply_scalar(config: &mut Config, parsed: &ParsedScalar) {
-    match parsed {
-        ParsedScalar::Operator(operator) => config.operator.clone_from(operator),
-        ParsedScalar::Timezone(zone) => config.timezone = *zone,
-        ParsedScalar::CacheEnabled(enabled) => config.cache.enabled = *enabled,
-        ParsedScalar::CacheCapacity(capacity) => config.cache.capacity = *capacity,
     }
 }
 
@@ -690,14 +655,10 @@ fn parse_default(ty: &FieldType, raw: &str) -> Result<FieldValue, String> {
 }
 
 /// A `VALIDATION_ERROR` about one configuration key.
-fn invalid(key: impl Into<String>, reason: impl Into<String>) -> WaymarkError {
+pub(crate) fn invalid(key: impl Into<String>, reason: impl Into<String>) -> WaymarkError {
     let key = key.into();
     WaymarkError::validation(key.clone(), vec![ValidationIssue::new(key.clone(), reason)])
         .with_location(Location::config_key(key))
-}
-
-fn invalid_scalar(name: &str, reason: impl Into<String>) -> WaymarkError {
-    invalid(name, reason)
 }
 
 /// The locked read-modify-validate-write cycle every configuration write uses.

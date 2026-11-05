@@ -537,9 +537,15 @@ fn init_accepts_a_custom_category_storage_root_and_operator() {
 
     let config = std::fs::read_to_string(root.join(".waymark/config.toml")).unwrap();
     assert!(config.contains("storage_root = \"items\""), "{config}");
-    assert!(config.contains("operator = \"frank\""), "{config}");
-    assert!(config.contains("timezone = \"Asia/Shanghai\""), "{config}");
     assert!(config.contains("[categories.issue]"), "{config}");
+    // The identity seeds are local, so they never appear in the shared document.
+    assert!(!config.contains("operator ="), "{config}");
+    assert!(!config.contains("timezone ="), "{config}");
+    assert!(!config.contains("[cache]"), "{config}");
+
+    let local = std::fs::read_to_string(root.join(".waymark/user.toml")).unwrap();
+    assert!(local.contains("operator = \"frank\""), "{local}");
+    assert!(local.contains("timezone = \"Asia/Shanghai\""), "{local}");
 
     let created = run(waymark()
         .arg("--json")

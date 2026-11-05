@@ -131,6 +131,8 @@ pub enum Code {
     TimestampIncoherent,
     /// The embedded frontend manifest disagrees with this build.
     AssetsVersionMismatch,
+    /// The machine-local time zone could not be determined.
+    TimeZoneUndetected,
 }
 
 /// The process exit class of a failure.
@@ -302,6 +304,7 @@ impl Code {
         Code::DanglingReference,
         Code::TimestampIncoherent,
         Code::AssetsVersionMismatch,
+        Code::TimeZoneUndetected,
     ];
 
     /// The registry row for this code.
@@ -548,6 +551,7 @@ impl Code {
                 &["kind", "expected", "actual"],
                 &[],
             ),
+            Self::TimeZoneUndetected => spec(None, false, Some(Severity::Info), &[], &[]),
         }
     }
 
@@ -595,6 +599,7 @@ impl Code {
             Self::DanglingReference => "DANGLING_REFERENCE",
             Self::TimestampIncoherent => "TIMESTAMP_INCOHERENT",
             Self::AssetsVersionMismatch => "ASSETS_VERSION_MISMATCH",
+            Self::TimeZoneUndetected => "TIME_ZONE_UNDETECTED",
         }
     }
 
@@ -651,6 +656,7 @@ impl Code {
             "DANGLING_REFERENCE" => Ok(Self::DanglingReference),
             "TIMESTAMP_INCOHERENT" => Ok(Self::TimestampIncoherent),
             "ASSETS_VERSION_MISMATCH" => Ok(Self::AssetsVersionMismatch),
+            "TIME_ZONE_UNDETECTED" => Ok(Self::TimeZoneUndetected),
             other => Err(UnknownCode(other.to_owned())),
         }
     }

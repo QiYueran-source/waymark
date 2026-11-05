@@ -85,10 +85,10 @@ fn declare_required_field(fixture: &common::Fixture, key: &str, ty: FieldType) {
     let path = fixture.root.join(".waymark").join("config.toml");
     let document = std::fs::read_to_string(&path).expect("the configuration reads");
     let declaration = format!(
-        "[fields.{key}]\ntype = \"{}\"\nrequired = true\n\n[cache]",
+        "\n[fields.{key}]\ntype = \"{}\"\nrequired = true\n",
         ty.as_str()
     );
-    std::fs::write(&path, document.replace("[cache]", &declaration))
+    std::fs::write(&path, format!("{document}{declaration}"))
         .expect("the configuration is writable");
 }
 
@@ -421,7 +421,7 @@ async fn transfer_owner_replaces_the_owner_and_reports_the_mismatch_warning() {
     let fixture = common::fixture(&["one"]);
     let id = fixture.ids[0].clone();
     // The configured operator is the identity every mediated write warns about.
-    waymark_core::ops::config::set_scalar(
+    waymark_core::ops::local_config::set_scalar(
         &fixture.project(),
         waymark_core::ops::config::Scalar::Operator,
         "alice",

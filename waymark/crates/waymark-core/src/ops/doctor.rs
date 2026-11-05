@@ -840,7 +840,10 @@ fn repairs(project: &Project, projection: &Projection, findings: &[Finding]) -> 
         )],
         remaining,
     }];
-    if project.config().cache.enabled {
+    if crate::ops::local_config::effective_lenient(project)
+        .cache
+        .enabled
+    {
         repairs.push(Repair {
             kind: RepairKind::CacheRebuild,
             changed: vec![format!(

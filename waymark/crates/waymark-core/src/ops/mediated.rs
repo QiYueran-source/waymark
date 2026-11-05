@@ -109,10 +109,18 @@ pub fn load_entry_any(project: &Project, entry: InventoryEntry) -> Result<Loaded
     })
 }
 
-/// The effective operator identity: the operation override, else the project
-/// configuration.
-pub fn effective_operator<'a>(project: &'a Project, options: &'a OpOptions) -> Option<&'a str> {
-    options.operator().or(project.config().operator.as_deref())
+/// The effective operator identity: the operation override, else the local
+/// document, else Git's effective `user.name`.
+///
+/// Resolution belongs to [`crate::user_config`], not here: this is only the
+/// operation-override layer the spec puts in front of the local document. Note
+/// that the operation override is *not* written anywhere — it applies to this
+/// operation alone.
+pub fn effective_operator(project: &Project, options: &OpOptions) -> Option<String> {
+    if let Some(operator) = options.operator() {
+        return Some(operator.to_owned());
+    }
+    crate::ops::local_config::effective_operator(project)
 }
 
 /// The `OWNER_MISMATCH` warnings this write justifies.
