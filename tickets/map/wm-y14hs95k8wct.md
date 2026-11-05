@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T02:34:47Z
+updated_at: 2026-11-05T02:36:45Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -524,6 +524,11 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - Confirmed by the user on 2026-11-05: the no-existing-target rule for storage migration applies to each actual category directory being moved, not to an existing storage-root container or target parent. For example, migration from `work` to `.` can move `work/task` to an absent `task` beneath the existing project root. It does not move, delete, or replace the project root itself; if an actual category destination is the existing project root, reject that move. All actual category destinations remain subject to no-overwrite guarantees.
 - Retain support for category paths outside the configured storage root rather than imposing a new containment requirement. Default storage-root Git history/diff may omit those categories and must not claim complete work-item coverage; individual items can be queried by ID. If a storage-root migration cannot derive a destination for an out-of-root category, refuse and identify that category rather than guessing or moving it automatically.
 - Unicode data upgrades are explicit compatibility changes: before affected writes, a newer release validates existing configuration with its new comparison rules, reports concrete collisions, and preserves configuration diagnostics and an explicit manual-repair path. Do not silently rename or merge. Release notes must warn collaborators to coordinate versions, since old and new releases may judge a path pair differently. Precise release/version representation remains open.
+
+
+- Confirmed by the user on 2026-11-05: an untracked single-work-item patch represents the actual working-tree file content at the time requested, not a guess at Git's future staged representation. For supported ordinary text it should reproduce that content when applied to a compatible clean target worktree. No byte-identical promise is made after target-side line-ending conversions, filters or special `git apply` configuration. If a safe applicable patch cannot be produced, fail explicitly. Exact supported attributes and native verification remain open.
+- When producing an applicable untracked single-item patch, do not invoke external diff or textconv that could produce arbitrary or irreversible output. Preserve correct Git path quoting/escaping. If other Git attributes prevent a safe ordinary-text applicable patch, report an error, not a fake patch. The supported attribute combinations and Git/version/platform verification remain open.
+- Inventory and projection scans do not follow any Windows reparse point as a work-item document, including forms that are not ordinary symbolic links. Report the path as a diagnostic and do not represent an uncertain scan as a complete projection. Valid work items may still be read independently under the existing scoped-read rules. Allowed project-root aliases and the stated limit on adversarial ancestor replacement remain unchanged. Direct-read details and native verification remain open.
 
 ## Not yet specified
 
