@@ -6,7 +6,7 @@ category: map
 status: open
 owner: frank
 created_at: 2026-11-05T00:53:10Z
-updated_at: 2026-11-05T02:40:48Z
+updated_at: 2026-11-05T03:50:21Z
 parent: wm-4wbvzsv34g2p
 dependencies:
   - wm-78d0sa7jaxpb
@@ -82,6 +82,11 @@ How should project-relative paths and work-item files remain safe and portable a
 - Category paths cannot equal or descend into the project `.waymark` metadata directory, including conservative case/Unicode-equivalent forms, on any platform. Diagnose old incompatible configs without moving files; standalone storage root `.` remains permitted.
 - `git history --path` uses `/` separators, rejects backslashes and every `..` component, permits `.` for the project root, and treats wildcards literally. A historical path need not exist now; scope remains project-internal.
 - Required project or work-item paths not losslessly representable as UTF-8 cause an affected operation failure or diagnostic, not operation on a replacement-character path or a false complete projection. Other valid scoped reads remain possible; lossless diagnostic representation is open.
+
+
+- Validate persisted path inputs without silently trimming: reject trailing spaces, retain permitted leading ordinary spaces as part of names, and diagnose the original input and cause. Do not rewrite existing config.
+- Initialization with storage root `.` generates category paths such as `task` rather than `./task`; old `./task` is diagnosed rather than silently normalized.
+- No universal cross-platform path-length limit is promised. Report actual platform/filesystem failures, without truncation or automatic renaming; long-path tests and supported bounds belong to verification/release.
 
 ## Still to resolve
 

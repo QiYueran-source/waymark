@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T02:40:48Z
+updated_at: 2026-11-05T03:50:21Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -539,6 +539,11 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - Confirmed by the user on 2026-11-05: category paths may not be the project-root `.waymark` metadata directory or lie inside it, on any platform. Apply the agreed conservative case/Unicode path comparison, including variants, and diagnose existing incompatible configuration without moving files automatically. The storage root may still be standalone `.`.
 - `git history --path` uses `/` separators on every platform, rejects backslashes and any `..` component, and allows standalone `.` for the Waymark project root. Wildcard characters are literal. A history filter need not exist in the current working tree, since it may refer to a deleted path; query scope remains inside the project.
 - Do not silently replace invalid or non-UTF-8 path data and then operate on the altered path. If a required project or work-item path cannot be represented losslessly as UTF-8, the affected operation fails or reports a diagnostic; do not claim a complete projection. Valid work items may still be read independently under scoped-read rules. A lossless diagnostic representation is an open interface question.
+
+
+- Confirmed by the user on 2026-11-05: validate persisted project-relative path inputs as provided; do not silently trim or change them. Reject a trailing space under the existing portability rule; a leading ordinary space in a component is part of its name if otherwise permitted. Diagnose the actual input and reason. Do not silently rewrite existing configuration.
+- When initializing a project with storage root `.`, generate default category paths like `task`, not `./task`. This is the correct spelling for newly generated paths, not permission to normalize old `./task` configurations silently; diagnose those under the existing transition policy.
+- Do not claim a single universal cross-platform path-length limit. Platform and filesystem length failures are reported explicitly; never truncate or automatically rename a path. Test long paths and failure handling; supported environments and exact length guarantees are deferred to verification and release planning.
 
 ## Not yet specified
 
