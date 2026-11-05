@@ -39,6 +39,8 @@ Reach an implementable cross-platform adaptation design and a basis for revising
 
 - [Define cross-platform verification and release gates](wm-9ghaw0aqapyf.md): Native MSVC and GNU legs with no cross-compilation substitute, an explicit skip allowlist, MSVC-only publishing, narrow filesystem support, and a no-retry rule for safety gates.
 
+- [Reconcile cross-platform decisions with existing specifications](wm-bpz94xwr28qa.md): One surviving normative document, synchronized before any implementation ticket, with superseded text rewritten in place and the frozen registry updated with its snapshot in the same commit.
+
 ## Not yet specified
 
 - Further compatibility cases, limitations, or trade-offs uncovered by research and decisions that cannot yet be stated as precise questions.
