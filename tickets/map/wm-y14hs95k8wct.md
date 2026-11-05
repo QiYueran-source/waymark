@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T02:39:39Z
+updated_at: 2026-11-05T02:40:48Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -534,6 +534,11 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - Confirmed by the user on 2026-11-05: direct reads by work-item ID refuse final targets that are symbolic links or any Windows reparse point and do not follow them. Inability to reliably establish the target's type is an error; a separate pre-read path check alone is not sufficient. Existing scoped reads of other valid items remain available; permitted project-root aliases are unaffected. Native mechanism and tests remain open, and the existing limitation for malicious ancestor replacement still applies.
 - `git history --path` is a literal project-internal query path on every platform: reject absolute, Windows drive-relative and project-escaping paths, and do not treat wildcard characters as patterns. Do not automatically apply every Windows-portability restriction for persisted configuration paths to this temporary query input. Exact representation of special names and scope verification require testing.
 - Cleanup of parent directories created by a failed storage migration attempts removal only when the directory can still be confirmed as the same one this run created and is empty. If replaced or identity cannot be established, leave it in place and report incomplete cleanup; a matching pathname alone is insufficient. Mechanism and native feasibility remain open.
+
+
+- Confirmed by the user on 2026-11-05: category paths may not be the project-root `.waymark` metadata directory or lie inside it, on any platform. Apply the agreed conservative case/Unicode path comparison, including variants, and diagnose existing incompatible configuration without moving files automatically. The storage root may still be standalone `.`.
+- `git history --path` uses `/` separators on every platform, rejects backslashes and any `..` component, and allows standalone `.` for the Waymark project root. Wildcard characters are literal. A history filter need not exist in the current working tree, since it may refer to a deleted path; query scope remains inside the project.
+- Do not silently replace invalid or non-UTF-8 path data and then operate on the altered path. If a required project or work-item path cannot be represented losslessly as UTF-8, the affected operation fails or reports a diagnostic; do not claim a complete projection. Valid work items may still be read independently under scoped-read rules. A lossless diagnostic representation is an open interface question.
 
 ## Not yet specified
 

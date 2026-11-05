@@ -6,7 +6,7 @@ category: map
 status: open
 owner: frank
 created_at: 2026-11-05T00:53:10Z
-updated_at: 2026-11-05T02:39:39Z
+updated_at: 2026-11-05T02:40:48Z
 parent: wm-4wbvzsv34g2p
 dependencies:
   - wm-78d0sa7jaxpb
@@ -77,6 +77,11 @@ How should project-relative paths and work-item files remain safe and portable a
 - Direct work-item reads refuse final symbolic links and all Windows reparse points, fail if target type cannot be established, and cannot rely on a separate pre-read path check alone. Other valid scoped reads and project-root aliases remain allowed; native mechanism is open.
 - `git history --path` is a literal project-internal query path on all platforms; reject absolute, drive-relative and project-escaping forms, not all Windows-portability restrictions for persisted configuration. Special names and scope verification need testing.
 - Remove a migration-created parent directory on failure only if it is still identifiable as the same directory this run created and is empty; otherwise leave it and report incomplete cleanup. Matching path alone is insufficient; implementation feasibility remains open.
+
+
+- Category paths cannot equal or descend into the project `.waymark` metadata directory, including conservative case/Unicode-equivalent forms, on any platform. Diagnose old incompatible configs without moving files; standalone storage root `.` remains permitted.
+- `git history --path` uses `/` separators, rejects backslashes and every `..` component, permits `.` for the project root, and treats wildcards literally. A historical path need not exist now; scope remains project-internal.
+- Required project or work-item paths not losslessly representable as UTF-8 cause an affected operation failure or diagnostic, not operation on a replacement-character path or a false complete projection. Other valid scoped reads remain possible; lossless diagnostic representation is open.
 
 ## Still to resolve
 
