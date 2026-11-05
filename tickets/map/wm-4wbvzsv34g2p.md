@@ -35,6 +35,7 @@ Reach an implementable cross-platform adaptation design and a basis for revising
 
 - [Define platform adaptation module design](wm-rn893kzbg524.md): Compile-time capability declarations with per-filesystem checks, an internal capability-organised module, a narrow Windows binding, limited fault injection, and the requirements the first manual Windows pilot must exercise.
 - [Define platform response interface details](wm-r6bmw1xrk5mn.md): A single warning code with registered details, three-state rollback reporting that replaces the ambiguous lists, and a tagged union that keeps UTF-8 paths readable while representing non-UTF-8 paths losslessly.
+- [Define safe temporary and recovery file diagnostics](wm-dq6f226w3g5k.md): Configuration-derived candidate locations, unconfirmed coverage reported instead of assumed clean, and two read-only finding codes that reuse the existing diagnostic surface.
 
 ## Not yet specified
 
