@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T02:36:45Z
+updated_at: 2026-11-05T02:39:39Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -529,6 +529,11 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - Confirmed by the user on 2026-11-05: an untracked single-work-item patch represents the actual working-tree file content at the time requested, not a guess at Git's future staged representation. For supported ordinary text it should reproduce that content when applied to a compatible clean target worktree. No byte-identical promise is made after target-side line-ending conversions, filters or special `git apply` configuration. If a safe applicable patch cannot be produced, fail explicitly. Exact supported attributes and native verification remain open.
 - When producing an applicable untracked single-item patch, do not invoke external diff or textconv that could produce arbitrary or irreversible output. Preserve correct Git path quoting/escaping. If other Git attributes prevent a safe ordinary-text applicable patch, report an error, not a fake patch. The supported attribute combinations and Git/version/platform verification remain open.
 - Inventory and projection scans do not follow any Windows reparse point as a work-item document, including forms that are not ordinary symbolic links. Report the path as a diagnostic and do not represent an uncertain scan as a complete projection. Valid work items may still be read independently under the existing scoped-read rules. Allowed project-root aliases and the stated limit on adversarial ancestor replacement remain unchanged. Direct-read details and native verification remain open.
+
+
+- Confirmed by the user on 2026-11-05: direct reads by work-item ID refuse final targets that are symbolic links or any Windows reparse point and do not follow them. Inability to reliably establish the target's type is an error; a separate pre-read path check alone is not sufficient. Existing scoped reads of other valid items remain available; permitted project-root aliases are unaffected. Native mechanism and tests remain open, and the existing limitation for malicious ancestor replacement still applies.
+- `git history --path` is a literal project-internal query path on every platform: reject absolute, Windows drive-relative and project-escaping paths, and do not treat wildcard characters as patterns. Do not automatically apply every Windows-portability restriction for persisted configuration paths to this temporary query input. Exact representation of special names and scope verification require testing.
+- Cleanup of parent directories created by a failed storage migration attempts removal only when the directory can still be confirmed as the same one this run created and is empty. If replaced or identity cannot be established, leave it in place and report incomplete cleanup; a matching pathname alone is insufficient. Mechanism and native feasibility remain open.
 
 ## Not yet specified
 

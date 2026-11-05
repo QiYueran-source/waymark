@@ -6,7 +6,7 @@ category: map
 status: open
 owner: frank
 created_at: 2026-11-05T00:53:10Z
-updated_at: 2026-11-05T02:36:45Z
+updated_at: 2026-11-05T02:39:39Z
 parent: wm-4wbvzsv34g2p
 dependencies:
   - wm-78d0sa7jaxpb
@@ -72,6 +72,11 @@ How should project-relative paths and work-item files remain safe and portable a
 - An untracked single-item patch represents actual working-tree file content when requested, not a predicted staged representation, and for supported ordinary text should reproduce it on a compatible clean target worktree. Do not promise byte identity after target-side conversion, filtering or special apply settings. Fail explicitly if a safe applicable patch cannot be produced.
 - Do not invoke external diff or textconv for the applicable untracked-item patch; preserve Git path quoting. Fail rather than emit a fake patch when other attributes prevent safety. Supported Git attributes and platform/version tests remain open.
 - Inventory/projection scans do not follow any Windows reparse point as a work-item document; diagnose the path and never claim an uncertain scan is complete. Independent valid scoped reads remain available; project-root aliases and adversarial ancestor limits are unchanged. Direct-read details and native verification remain open.
+
+
+- Direct work-item reads refuse final symbolic links and all Windows reparse points, fail if target type cannot be established, and cannot rely on a separate pre-read path check alone. Other valid scoped reads and project-root aliases remain allowed; native mechanism is open.
+- `git history --path` is a literal project-internal query path on all platforms; reject absolute, drive-relative and project-escaping forms, not all Windows-portability restrictions for persisted configuration. Special names and scope verification need testing.
+- Remove a migration-created parent directory on failure only if it is still identifiable as the same directory this run created and is empty; otherwise leave it and report incomplete cleanup. Matching path alone is insufficient; implementation feasibility remains open.
 
 ## Still to resolve
 
