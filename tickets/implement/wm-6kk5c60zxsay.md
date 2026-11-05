@@ -3,10 +3,11 @@ schema: 1
 id: wm-6kk5c60zxsay
 title: Validate and doctor cover the local document
 category: implement
-status: open
+status: closed
 owner: frank
 created_at: 2026-11-05T09:02:46Z
-updated_at: 2026-11-05T09:02:46Z
+updated_at: 2026-11-05T11:53:46Z
+closed_at: 2026-11-05T11:53:46Z
 ---
 ## Parent
 

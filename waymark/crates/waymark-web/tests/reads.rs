@@ -356,3 +356,51 @@ async fn missing_assets_return_a_clear_unavailable_page_not_a_placeholder() {
     assert!(response.text().contains("assets are missing"));
     running.shutdown().await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn item_times_use_the_effective_zone_from_the_shared_boundary() {
+    let fixture = populated();
+    // The Web adapter parses no local document: the zone and the rendered
+    // values it reports are exactly what the shared boundary resolves.
+    let fallback = waymark_core::ops::local_config::effective_lenient(&fixture.project).timezone;
+    let assets = assets();
+    let running = start(&fixture, assets.path()).await;
+
+    let detail = get(running.addr(), "/api/item/wm-000000000009").json();
+    let data = &detail["data"];
+    assert_eq!(data["display_times"]["timezone"], fallback.name());
+    assert_eq!(
+        data["display_times"]["created_at"],
+        waymark_core::time::format_local(waymark_core::testing::instant().get(), fallback)
+    );
+    // The persisted fields stay UTC: only the display pair is local.
+    assert_eq!(
+        data["created_at"],
+        waymark_core::time::format_utc(waymark_core::testing::instant().get())
+    );
+    running.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_explicit_local_zone_reaches_the_web_view() {
+    let fixture = populated();
+    waymark_core::ops::local_config::set_scalar(
+        &fixture.project,
+        waymark_core::ops::config::Scalar::Timezone,
+        "Pacific/Auckland",
+        &waymark_core::ops::OpOptions::new(),
+    )
+    .expect("the local zone is written");
+    let zone = waymark_core::time::parse_timezone("Pacific/Auckland").expect("a known zone");
+
+    let assets = assets();
+    let running = start(&fixture, assets.path()).await;
+    let detail = get(running.addr(), "/api/item/wm-000000000009").json();
+    let times = &detail["data"]["display_times"];
+    assert_eq!(times["timezone"], "Pacific/Auckland");
+    assert_eq!(
+        times["created_at"],
+        waymark_core::time::format_local(waymark_core::testing::instant().get(), zone)
+    );
+    running.shutdown().await.unwrap();
+}

@@ -3,10 +3,11 @@ schema: 1
 id: wm-k3netb2kb3a4
 title: Route local scalars to the local document
 category: implement
-status: open
+status: closed
 owner: frank
 created_at: 2026-11-05T09:02:40Z
-updated_at: 2026-11-05T09:02:40Z
+updated_at: 2026-11-05T11:53:46Z
+closed_at: 2026-11-05T11:53:46Z
 ---
 ## Parent
 

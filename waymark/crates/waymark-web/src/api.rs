@@ -292,6 +292,13 @@ fn item_data(project: &Project, id: &str) -> Result<Value, WaymarkError> {
         "created_at": item.created_at,
         "updated_at": item.updated_at,
         "closed_at": item.closed_at,
+        // The effective zone and the display forms of every persisted instant:
+        // the local user document decides the zone, the shared core boundary
+        // resolves it, and this adapter only carries the result.
+        "display_times": waymark_core::view::item_display_times_json(
+            &item,
+            waymark_core::ops::local_config::effective_lenient(project).timezone,
+        ),
         "archived": item.is_archived(),
         "custom_fields": custom_fields,
         "relationships": {

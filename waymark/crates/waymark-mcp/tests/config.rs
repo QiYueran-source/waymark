@@ -103,6 +103,16 @@ async fn config_validate_reports_findings_without_a_business_failure() {
     for finding in findings {
         assert_eq!(finding["code"], "CONFIG_INVALID");
         assert!(common::is_registered_code(&finding["code"]));
+        // The location names the document that carries the problem, so a client
+        // repairs the local file rather than the shared one.
+        assert_eq!(finding["location"]["kind"], "file");
+        assert!(
+            finding["location"]["path"]
+                .as_str()
+                .unwrap_or_default()
+                .ends_with("user.toml"),
+            "{finding}"
+        );
     }
 
     client.shutdown().await;

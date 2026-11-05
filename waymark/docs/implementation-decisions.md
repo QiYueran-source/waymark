@@ -3289,3 +3289,36 @@ both entries (`write.lock` and `user.toml`).
 refusing is the only way "an unwritable ignore file stops the write" can be true. Repairing on every
 lock acquisition means a project cloned without the entry heals on its first mediated write instead of
 leaving preferences exposed until someone runs `init` again.
+
+## A local write guards its own document with the same fingerprint option
+
+**Choice:** `local_config::set_scalar` honours `OpOptions::expected_config_fingerprint` against the
+bytes of the local document, reporting `WRITE_CONFLICT` with `actual_fingerprint: "missing"` when the
+document is absent.
+
+**Why:** the option already means "the document I am about to write must still be the one I read", and
+the local document is the document a local write touches. Reusing it keeps one write contract instead
+of a second conflict vocabulary, and reporting `missing` (not a fabricated hash) keeps an absent file
+distinguishable from a changed one.
+
+## Local findings are located at their file, not at a bare key
+
+**Choice:** a local-document finding carries `Location::File` naming the local document, and its
+message names the offending key. Shared-document findings keep `Location::ConfigKey`.
+
+**Why:** a key alone does not say which of the two documents to open, and a person repairing a
+preference needs the file to open. The key stays in the message, where it reads as `timezone: …`, so
+the finding is still a named one. The two documents have different shapes and different authorities;
+making their findings distinguishable in the location is the cheapest honest way to say so.
+
+## The Web view renders timestamps in the machine's effective zone
+
+**Choice:** `view::item_display_times_json` produces `{timezone, created_at, updated_at, closed_at}`
+from the effective zone, and the Web item payload carries it beside the unchanged UTC fields, which it
+reads through `local_config::effective_lenient`.
+
+**Why:** the zone belongs to the person at that machine, and the Web server runs on it; resolving it
+through the one shared boundary is what keeps the browser from inventing a zone or copying a
+precedence. Persisted machine fields stay UTC, so the local context is presentation only. An
+undetectable machine zone degrades to the documented UTC fallback, and a project with no local document
+renders the same way as one that states nothing.

@@ -521,3 +521,112 @@ fn a_shared_document_carrying_a_local_setting_is_refused_by_name() {
         "{error}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Local scalar routing
+// ---------------------------------------------------------------------------
+
+/// Run `git` in `root` with a fixed identity, panicking on failure.
+fn git(root: &Utf8PathBuf, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .current_dir(root)
+        .args([
+            "-c",
+            "user.name=Waymark Test",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(args)
+        .output()
+        .expect("the git binary runs");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+#[test]
+fn clearing_the_local_operator_restores_the_fallback() {
+    let (_dir, root) = project();
+    config(&root, &["set", "operator", "frank"]);
+    let shown = run(waymark()
+        .arg("--json")
+        .arg("config")
+        .arg("show")
+        .arg("--project")
+        .arg(&root));
+    assert_eq!(shown.status(), 0, "stderr: {}", shown.stderr());
+    assert_eq!(
+        shown.json()["data"]["effective"]["operator"]["source"],
+        json!("local_document")
+    );
+
+    let cleared = run(waymark()
+        .arg("--json")
+        .arg("config")
+        .arg("set")
+        .arg("operator")
+        .arg("")
+        .arg("--project")
+        .arg(&root));
+    assert_eq!(cleared.status(), 0, "stderr: {}", cleared.stderr());
+    let local = std::fs::read_to_string(root.join(".waymark").join("user.toml")).unwrap();
+    assert!(!local.contains("operator"), "{local}");
+
+    // Clearing is an override removal, not an opt-out: the fallback applies.
+    let shown = run(waymark()
+        .arg("--json")
+        .arg("config")
+        .arg("show")
+        .arg("--project")
+        .arg(&root));
+    assert_eq!(shown.status(), 0, "stderr: {}", shown.stderr());
+    assert_eq!(
+        shown.json()["data"]["effective"]["operator"]["source"],
+        json!("unset"),
+        "no Git identity outside a repository, so nothing supplies one"
+    );
+}
+
+#[test]
+fn setting_a_tracked_local_document_fails_with_untracking_guidance() {
+    if waymark_core::git::find_executable().is_none() {
+        eprintln!("skipping: no `git` executable on PATH");
+        return;
+    }
+    let (_dir, root) = project();
+    git(&root, &["init", "--quiet"]);
+    git(&root, &["add", "--force", ".waymark/user.toml"]);
+    let before = std::fs::read_to_string(root.join(".waymark/user.toml")).expect("the document");
+
+    let result = config(&root, &["set", "operator", "someone"]);
+    assert_eq!(result.status(), 3, "stderr: {}", result.stderr());
+    assert!(
+        result.stderr().contains("untrack"),
+        "the refusal names the repair: {}",
+        result.stderr()
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join(".waymark/user.toml")).expect("the document"),
+        before
+    );
+}
+
+#[test]
+fn a_malformed_local_document_fails_the_write_rather_than_being_overwritten() {
+    let (_dir, root) = project();
+    let path = root.join(".waymark/user.toml");
+    std::fs::write(&path, "operator = \n").unwrap();
+
+    let result = config(&root, &["set", "operator", "frank"]);
+    assert_eq!(result.status(), 3, "stderr: {}", result.stderr());
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "operator = \n",
+        "the broken document is preserved for repair"
+    );
+}

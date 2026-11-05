@@ -18,7 +18,7 @@ use waymark_core::config::CacheSettings;
 use waymark_core::error::Code;
 use waymark_core::ops::config::{InitRequest, Scalar};
 use waymark_core::ops::{create, local_config, OpOptions};
-use waymark_core::store::InitOptions;
+use waymark_core::store::{Fingerprint, InitOptions};
 use waymark_core::testing::fixtures;
 use waymark_core::user_config::{
     EffectiveConfig, LocalEnvironment, UserCache, UserConfig, ValueSource, USER_CONFIG_FILE,
@@ -161,8 +161,8 @@ fn a_local_finding_is_located_at_the_document_and_names_the_key() {
         findings[0]
             .location
             .as_ref()
-            .is_some_and(|location| format!("{location:?}").contains("timezone")),
-        "{findings:?}"
+            .is_some_and(|location| format!("{location}").contains(USER_CONFIG_FILE)),
+        "a local finding is located at the local document: {findings:?}"
     );
 
     // An absent document is not a finding: absence is a normal state.
@@ -863,4 +863,170 @@ fn a_tracked_local_document_is_reported_and_never_written() {
         index,
         "the Git index is unmodified"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Local writes
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_conflicting_local_fingerprint_is_refused_and_writes_nothing() {
+    let (_dir, project) = fixtures::deterministic_project();
+    let path = project.user_config_path();
+
+    // An expectation cannot be met by an absent document.
+    let error = local_config::set_scalar(
+        &project,
+        Scalar::Operator,
+        "frank",
+        &options().with_expected_config_fingerprint(Fingerprint::of(b"operator = \"frank\"\n")),
+    )
+    .expect_err("an absent document does not match an expectation");
+    assert_eq!(error.code(), Code::WriteConflict);
+    assert!(!path.exists(), "a conflict writes nothing");
+
+    // A hand edit between the read and the write is a conflict, not a rebase.
+    local_config::set_scalar(&project, Scalar::Operator, "frank", &options())
+        .expect("the first write succeeds");
+    let expected = Fingerprint::of(&std::fs::read(&path).expect("the document"));
+    std::fs::write(&path, "operator = \"manual\"\n").expect("a concurrent hand edit");
+
+    let error = local_config::set_scalar(
+        &project,
+        Scalar::Timezone,
+        "UTC",
+        &options().with_expected_config_fingerprint(expected),
+    )
+    .expect_err("the hand edit is a conflict");
+    assert_eq!(error.code(), Code::WriteConflict);
+    assert_ne!(
+        error.details()["actual_fingerprint"],
+        "missing",
+        "the conflict carries the fingerprint on disk"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("the document"),
+        "operator = \"manual\"\n",
+        "a conflicted write leaves the file alone"
+    );
+}
+
+#[test]
+fn a_dry_run_reports_the_change_and_writes_nothing() {
+    let (_dir, project) = fixtures::deterministic_project();
+    let outcome =
+        local_config::set_scalar(&project, Scalar::CacheCapacity, "64", &options().dry_run())
+            .expect("the dry run succeeds");
+    assert!(outcome.changed);
+    assert_eq!(outcome.changed_keys, ["cache.capacity"]);
+    assert_eq!(outcome.local.cache.capacity, Some(64));
+    assert_eq!(outcome.revision, outcome.previous_revision);
+    assert!(
+        !project.user_config_path().exists(),
+        "a dry run never creates the document"
+    );
+}
+
+#[test]
+fn a_malformed_local_document_is_refused_rather_than_overwritten() {
+    let (_dir, project) = fixtures::deterministic_project();
+    let path = project.user_config_path();
+    let broken = "operator = \n";
+    std::fs::write(&path, broken).expect("a hand-broken document");
+
+    let error = local_config::set_scalar(&project, Scalar::Operator, "frank", &options())
+        .expect_err("a broken document fails the write");
+    assert_eq!(error.code(), Code::ConfigInvalid);
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("the document"),
+        broken,
+        "the broken document is preserved for repair"
+    );
+}
+
+#[test]
+fn project_configuration_writes_never_create_the_local_document() {
+    let (_dir, project) = fixtures::deterministic_project();
+    let key = waymark_core::model::CategoryKey::parse("bug").expect("a valid key");
+    waymark_core::ops::config::add_category(&project, &key, "work/bug", None, &options())
+        .expect("the shared write succeeds");
+    waymark_core::ops::config::set_category_name(&project, &key, "Defect", &options())
+        .expect("the shared rename succeeds");
+    assert!(
+        !project.user_config_path().exists(),
+        "project configuration never lands in the local document"
+    );
+}
+
+#[test]
+fn a_local_write_repairs_a_missing_ignore_entry_before_writing() {
+    let (_dir, project) = fixtures::deterministic_project();
+    let ignore = project.metadata_dir().join(".gitignore");
+    std::fs::write(&ignore, "write.lock\n").expect("an ignore file missing the local entry");
+
+    local_config::set_scalar(&project, Scalar::Operator, "frank", &options())
+        .expect("the local write succeeds");
+    let contents = std::fs::read_to_string(&ignore).expect("the ignore file");
+    assert_eq!(contents.matches(USER_CONFIG_FILE).count(), 1, "{contents}");
+    assert_eq!(contents.matches("write.lock").count(), 1, "{contents}");
+}
+
+#[test]
+fn an_unsafe_ignore_file_refuses_a_local_write_before_it_happens() {
+    let (_dir, project) = fixtures::deterministic_project();
+    let ignore = project.metadata_dir().join(".gitignore");
+    std::fs::write(&ignore, "").expect("an empty ignore file");
+    // A directory in place of the ignore file is not something to write through.
+    std::fs::remove_file(&ignore).expect("the file is removable");
+    std::fs::create_dir(&ignore).expect("a directory in its place");
+
+    let error = local_config::set_scalar(&project, Scalar::Operator, "frank", &options())
+        .expect_err("an unsafe ignore file stops the write");
+    assert_eq!(error.code(), Code::LockFailed);
+    assert!(
+        !project.user_config_path().exists(),
+        "nothing is written before the ignore file is safe"
+    );
+}
+
+#[test]
+fn every_local_document_problem_becomes_a_named_finding_at_the_document() {
+    let (_dir, project) = fixtures::deterministic_project();
+    let path = project.user_config_path();
+    let revision = project.config().version.revision;
+
+    for (document, key) in [
+        ("timezone = \"Mars/Olympus\"\n", "timezone"),
+        ("[cache]\ncapacity = 0\n", "capacity"),
+        ("operator = \"\"\n", "operator"),
+        ("nickname = \"frank\"\n", "nickname"),
+        ("storage_root = \"work\"\n", "storage_root"),
+    ] {
+        std::fs::write(&path, document).expect("a broken local document");
+        let findings = waymark_core::ops::config::validate_both(&project);
+        assert_eq!(findings.len(), 1, "{document}: {findings:?}");
+        let finding = &findings[0];
+        assert_eq!(finding.code, Code::ConfigInvalid);
+        assert_eq!(finding.severity, waymark_core::Severity::Error);
+        assert!(
+            finding.message.contains(key),
+            "{document}: the message names `{key}`: {finding:?}"
+        );
+        assert!(
+            finding
+                .location
+                .as_ref()
+                .is_some_and(|location| format!("{location}").contains(USER_CONFIG_FILE)),
+            "{document}: the finding is located at the local document: {finding:?}"
+        );
+        assert_eq!(
+            project.config().version.revision,
+            revision,
+            "a local finding never moves the shared revision"
+        );
+    }
+
+    // An absent document is normal and produces nothing.
+    std::fs::remove_file(&path).expect("the document is removable");
+    assert!(waymark_core::ops::config::validate_both(&project).is_empty());
 }

@@ -854,3 +854,54 @@ fn diagnose_from_derives_the_root_and_maps_a_broken_configuration() {
         );
     }
 }
+
+#[test]
+fn a_broken_local_document_is_reported_at_its_own_file() {
+    let (_dir, project) = project();
+    std::fs::write(
+        project.user_config_path(),
+        "timezone = \"Mars/Olympus\"\n[cache]\ncapacity = 0\n",
+    )
+    .unwrap();
+
+    let report = doctor::diagnose(&project).unwrap();
+    let local: Vec<&Finding> = report
+        .findings
+        .iter()
+        .filter(|finding| {
+            finding
+                .location
+                .as_ref()
+                .is_some_and(|location| matches!(location, Location::File { path, .. } if path.ends_with("user.toml")))
+        })
+        .collect();
+    assert_eq!(local.len(), 2, "{:?}", report.findings);
+    assert!(local
+        .iter()
+        .all(|finding| finding.code == Code::ConfigInvalid));
+    assert!(local
+        .iter()
+        .any(|finding| finding.message.contains("timezone")));
+    assert!(local
+        .iter()
+        .any(|finding| finding.message.contains("capacity")));
+    // A local preference is a diagnostic, not business-data damage.
+    assert_eq!(project.config().version.revision, 0);
+}
+
+#[test]
+fn an_absent_local_document_produces_no_findings_at_all() {
+    let (_dir, project) = project();
+    assert!(!project.user_config_path().exists());
+    let report = doctor::diagnose(&project).unwrap();
+    assert!(
+        report.findings.iter().all(|finding| {
+            !finding
+                .location
+                .as_ref()
+                .is_some_and(|location| matches!(location, Location::File { path, .. } if path.ends_with("user.toml")))
+        }),
+        "{:?}",
+        report.findings
+    );
+}

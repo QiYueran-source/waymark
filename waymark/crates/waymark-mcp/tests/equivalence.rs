@@ -720,3 +720,37 @@ async fn read_renderings_match_the_cli() {
 
     client.shutdown().await;
 }
+
+#[tokio::test]
+async fn config_read_matches_the_cli() {
+    let fixture = common::fixture(&["one"]);
+    let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    // A hand-edited local document is a supported path, and it exercises the
+    // whole local shape: an operator, a zone, and both cache fields.
+    let local = "operator = \"frank\"\ntimezone = \"Asia/Shanghai\"\n\n[cache]\nenabled = false\ncapacity = 64\n";
+    std::fs::write(fixture.root.join(".waymark/user.toml"), local).expect("the MCP side document");
+    std::fs::write(cli_root.join(".waymark/user.toml"), local).expect("the CLI side document");
+
+    let mcp = common::envelope(&client.call("waymark_config_read", common::no_args()).await);
+    let cli = common::cli_json(&cli_root, &["config", "show"]);
+    assert_eq!(
+        mcp["data"], cli["data"],
+        "the two adapters must report the same documents and the same effective values"
+    );
+    assert_eq!(
+        mcp["data"]["effective"]["operator"]["source"], "local_document",
+        "the source report is part of the contract, not a rendering detail"
+    );
+    assert_eq!(
+        mcp["data"]["effective"]["cache"]["capacity"]["source"],
+        "local_document"
+    );
+    assert_eq!(
+        mcp["_meta"]["warnings"], cli["_meta"]["warnings"],
+        "the same resolution produces the same warnings"
+    );
+
+    client.shutdown().await;
+}

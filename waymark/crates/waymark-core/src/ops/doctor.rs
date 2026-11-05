@@ -58,7 +58,7 @@ use crate::git::GitProbe;
 use crate::id::WorkItemId;
 use crate::location::Location;
 use crate::model::{FieldKey, Status, WorkItem, FORMAT_GENERATION};
-use crate::ops::config::validate_config;
+use crate::ops::config::validate_both;
 use crate::projection::Projection;
 use crate::store::{Fingerprint, Project};
 
@@ -371,10 +371,11 @@ fn run(
 ) -> Result<Report, WaymarkError> {
     let mut findings: Vec<Finding> = Vec::new();
 
-    // Configuration. `Project::open` already validated it, but a diagnostic run
-    // repeats the review because a hand edit can land between discovery and the
-    // scan.
-    findings.extend(validate_config(project));
+    // Configuration. `Project::open` already validated the shared document, but
+    // a diagnostic run repeats the review because a hand edit can land between
+    // discovery and the scan. The local document is reviewed here too, and a
+    // finding in it is located at the file that carries it.
+    findings.extend(validate_both(project));
 
     // The lock probe is deliberately non-blocking: `is_store_locked` opens the
     // lock file and tries the write lock once. It never waits and never learns

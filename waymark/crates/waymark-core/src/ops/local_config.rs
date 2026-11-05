@@ -64,8 +64,9 @@ pub fn effective_lenient(project: &Project) -> EffectiveConfig {
 /// Every complaint about the local document at `path`, as findings.
 ///
 /// An absent document produces no findings: absence is a normal state, not a
-/// missing requirement. Every finding is located at the key that carries it, so
-/// it names the same document `validate` and `doctor` already report about.
+/// missing requirement. Every finding is located at the document itself and its
+/// message names the offending key, so a person repairs the right file without
+/// confusing it with the shared configuration.
 pub fn validate_path(path: &Utf8Path) -> Vec<Finding> {
     use crate::error::Code;
     use crate::location::Location;
@@ -73,15 +74,12 @@ pub fn validate_path(path: &Utf8Path) -> Vec<Finding> {
     if !path.exists() {
         return Vec::new();
     }
+    let located = |message: String| {
+        Finding::new(Code::ConfigInvalid, message).with_location(Location::file(path.to_string()))
+    };
     match UserConfig::issues_in_file(path) {
-        Ok(issues) => issues
-            .iter()
-            .map(|issue| {
-                Finding::new(Code::ConfigInvalid, issue.render()).with_location(issue.location())
-            })
-            .collect(),
-        Err(error) => vec![Finding::new(Code::ConfigInvalid, error.message())
-            .with_location(Location::config_key(crate::user_config::USER_CONFIG_FILE))],
+        Ok(issues) => issues.iter().map(|issue| located(issue.render())).collect(),
+        Err(error) => vec![located(error.message().to_owned())],
     }
 }
 
@@ -171,6 +169,23 @@ pub fn set_scalar(
 
     lock::with_project_lock(project, options.lock_wait, || {
         let path = project.user_config_path();
+        // The fingerprint guards the exact bytes on disk, so a concurrent hand
+        // edit becomes a conflict instead of being silently rebased away. An
+        // absent document is "missing", the same shape a shared write reports.
+        if let Some(expected) = &options.expected_config_fingerprint {
+            let actual = match std::fs::read(&path) {
+                Ok(bytes) => Some(crate::store::Fingerprint::of(&bytes)),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(source) => return Err(WaymarkError::io(path.to_string(), "read", &source)),
+            };
+            if actual.as_ref() != Some(expected) {
+                return Err(local_conflict(
+                    &path,
+                    expected,
+                    actual.as_ref().map_or("missing", |actual| actual.as_str()),
+                ));
+            }
+        }
         let current = UserConfig::load_optional(&path)?;
         let mut next = current.clone().unwrap_or_else(UserConfig::empty);
 
@@ -225,6 +240,27 @@ pub fn set_scalar(
             changed_keys: vec![scalar.name().to_owned()],
         })
     })
+}
+
+/// A local write whose expected document bytes are no longer on disk.
+fn local_conflict(
+    path: &Utf8Path,
+    expected: &crate::store::Fingerprint,
+    actual: &str,
+) -> WaymarkError {
+    use crate::error::Code;
+    use crate::location::Location;
+
+    WaymarkError::new(
+        Code::WriteConflict,
+        format!("{path} changed on disk since it was read; reread and retry"),
+    )
+    .with_details(serde_json::json!({
+        "path": path.to_string(),
+        "expected_fingerprint": expected.as_str(),
+        "actual_fingerprint": actual,
+    }))
+    .with_location(Location::config_key(crate::user_config::USER_CONFIG_FILE))
 }
 
 fn remove_if_present(path: &Utf8Path) -> Result<(), WaymarkError> {

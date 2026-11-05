@@ -3,10 +3,11 @@ schema: 1
 id: wm-9nztkqbezy49
 title: Initialization creates and ignores the local document
 category: implement
-status: open
+status: closed
 owner: frank
 created_at: 2026-11-05T09:02:32Z
-updated_at: 2026-11-05T09:02:32Z
+updated_at: 2026-11-05T11:53:46Z
+closed_at: 2026-11-05T11:53:46Z
 ---
 ## Parent
 

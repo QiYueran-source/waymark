@@ -175,6 +175,23 @@ pub fn item_fields(item: &WorkItem) -> Value {
     })
 }
 
+/// The human display forms of one item's persisted timestamps, in `zone`.
+///
+/// Persisted timestamps stay UTC in every machine field; this is the trio a
+/// human-facing surface renders. Producing it here keeps the zone choice and the
+/// format in one place, so no adapter can render a different local context. The
+/// zone travels with the values, so a reader can say which context produced
+/// them.
+pub fn item_display_times_json(item: &WorkItem, zone: chrono_tz::Tz) -> Value {
+    let render = |value: crate::time::Timestamp| crate::time::format_local(value.get(), zone);
+    json!({
+        "timezone": zone.name(),
+        "created_at": render(item.created_at),
+        "updated_at": render(item.updated_at),
+        "closed_at": item.closed_at.map(render),
+    })
+}
+
 /// The persisted fields plus the document path, for a read that names one file.
 pub fn item_json(item: &WorkItem, path: &Utf8Path) -> Value {
     let mut value = item_fields(item);

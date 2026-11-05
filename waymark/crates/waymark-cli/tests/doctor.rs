@@ -368,3 +368,52 @@ fn a_web_build_reports_no_asset_mismatch_for_its_matching_manifest() {
 fn a_basic_build_reports_no_asset_mismatch() {
     assert_no_asset_mismatch();
 }
+
+#[test]
+fn validate_and_doctor_report_a_broken_local_document_at_its_file() {
+    let (_dir, root) = project();
+    std::fs::write(
+        root.join(".waymark/user.toml"),
+        "timezone = \"Mars/Olympus\"\n",
+    )
+    .unwrap();
+
+    for command in ["validate", "doctor"] {
+        let result = run(waymark()
+            .arg("--json")
+            .arg(command)
+            .arg("--strict")
+            .arg("--project")
+            .arg(&root));
+        assert_eq!(result.status(), 3, "{command}: {}", result.stderr());
+        let envelope = result.json();
+        assert_eq!(envelope["ok"], true, "{command}: {}", result.stdout());
+        let findings = envelope["data"]["findings"]
+            .as_array()
+            .expect("the report lists findings");
+        let local: Vec<&serde_json::Value> = findings
+            .iter()
+            .filter(|finding| {
+                finding["location"]["kind"] == "file"
+                    && finding["location"]["path"]
+                        .as_str()
+                        .is_some_and(|path| path.ends_with("user.toml"))
+            })
+            .collect();
+        assert_eq!(local.len(), 1, "{command}: {}", result.stdout());
+        assert_eq!(local[0]["code"], "CONFIG_INVALID");
+        assert_eq!(local[0]["severity"], "error");
+        assert_eq!(
+            local[0]["fixable"], false,
+            "a preference problem is repairable by hand, not by a command"
+        );
+        assert!(
+            local[0]["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("timezone"),
+            "{command}: {}",
+            result.stdout()
+        );
+    }
+}

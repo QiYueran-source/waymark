@@ -3,10 +3,11 @@ schema: 1
 id: wm-xk0vkkc45wbx
 title: MCP exposes the same values and sources
 category: implement
-status: open
+status: closed
 owner: frank
 created_at: 2026-11-05T09:02:56Z
-updated_at: 2026-11-05T09:02:56Z
+updated_at: 2026-11-05T11:53:46Z
+closed_at: 2026-11-05T11:53:46Z
 ---
 ## Parent
 
