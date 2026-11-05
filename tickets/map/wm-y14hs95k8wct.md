@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T02:09:09Z
+updated_at: 2026-11-05T02:15:49Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -474,6 +474,13 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - Do not describe an incomplete or failed file/directory synchronization as safely persisted to disk. Atomic visibility is distinct from power-loss durability. The later decision below specifies staged-file and post-replacement directory-sync failures; no durable-commit guarantee is implied.
 
 - Confirmed by the user on 2026-11-05: if synchronization of a staged temporary file fails before replacement begins, stop and report failure without replacing the original target. When replacement has succeeded but subsequent directory synchronization fails, report the successful replacement with a warning that directory synchronization was not confirmed; do not describe the write as safely durable after power loss or return an ordinary failure implying the target did not change. The warning must reach callers; its exact machine-readable representation and batch aggregation remain to be designed.
+
+
+### Cross-platform paths and Git: initial decisions
+
+- Confirmed by the user on 2026-11-05: persisted storage-root and category paths, and storage-migration targets, use a common cross-platform lexical validation policy on Linux, macOS, and Windows, rather than being accepted solely according to the host platform. They must safely represent paths relative to the project; Windows drive-relative forms such as `C:work` cannot be treated as ordinary Unix names and then acquire a different meaning on Windows. Exact component and separator rules and the treatment of existing incompatible configurations remain open. This rule applies to persisted project-relative paths, not to the actual absolute path where a project resides.
+- A working-tree diff for a specified existing, untracked work-item file returns a nonempty patch representing the whole new file on Linux, macOS, Windows MSVC, and Windows GNU when Git is available. It must not silently report an empty diff solely because of the platform. The implementation mechanism and edge cases remain open.
+- A working-tree diff scoped to the storage root without an item continues to cover tracked files only, rather than automatically including all untracked work items. Document that scope explicitly: an empty directory-scope patch does not establish that there are no untracked files. A user may request an individual untracked work-item diff by ID. This preserves existing scope instead of adding a new aggregation feature.
 
 ## Not yet specified
 
