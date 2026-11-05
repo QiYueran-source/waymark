@@ -12,7 +12,10 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+// Only the Unix opener test measures a deadline.
+#[cfg(unix)]
+use std::time::Instant;
 
 use camino::Utf8PathBuf;
 
