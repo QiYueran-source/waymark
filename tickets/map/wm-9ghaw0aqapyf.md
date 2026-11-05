@@ -6,7 +6,7 @@ category: map
 status: open
 owner: frank
 created_at: 2026-11-05T00:53:10Z
-updated_at: 2026-11-05T04:04:29Z
+updated_at: 2026-11-05T05:40:55Z
 parent: wm-4wbvzsv34g2p
 dependencies:
   - wm-0jfnex3j130v
@@ -14,6 +14,7 @@ dependencies:
   - wm-a3ewqxebssk1
   - wm-dq6f226w3g5k
   - wm-pkn47knm5t0n
+  - wm-r6bmw1xrk5mn
   - wm-rn893kzbg524
   - wm-w69renycvb2p
 ---
