@@ -3,11 +3,12 @@ schema: 1
 id: wm-t19sq5mv7fdy
 title: Make the test suite pass on Windows and promote the CI leg
 category: implement
-status: open
+status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-05T13:54:58Z
-updated_at: 2026-11-05T13:54:58Z
+updated_at: 2026-11-05T15:01:07Z
+closed_at: 2026-11-05T15:01:07Z
 parent: wm-vfbqmw1r7x0j
 ---
 ## Parent
