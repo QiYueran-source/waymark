@@ -43,8 +43,8 @@ Reach an implementable cross-platform adaptation design and a basis for revising
 
 ## Not yet specified
 
-- Further compatibility cases, limitations, or trade-offs uncovered by research and decisions that cannot yet be stated as precise questions.
-- Any additional handoff details exposed by resolving the known decisions; do not rewrite existing specs yet.
+- Nothing remains to decide before the destination is reached. Every branch of the design tree was visited: lock safety, replacement and migration guarantees, portable paths and Unicode comparison, Git scope and patch behaviour, warning and recovery responses, response interface details, temporary and recovery diagnostics, the platform module design, and the verification and release gates.
+- What remains is work, not a decision: synchronize the specification (rewrite the functional specification, absorb the Windows specification, update the release specification and the frozen registry with its snapshot), cut implementation tickets from the synchronized text in dependency order, and obtain native Windows evidence. Those are tracked below rather than as open questions here.
 
 ## Out of scope
 
