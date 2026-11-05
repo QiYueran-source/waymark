@@ -7,6 +7,18 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
+updated_at: 2026-11-05T07:10:12Z
+closed_at: 2026-11-03T23:52:21Z
+---
+---
+schema: 1
+id: wm-y14hs95k8wct
+title: 'Waymark: General-purpose tracker design map'
+category: map
+status: closed
+owner: frank
+creator: frank
+created_at: 2026-11-03T23:52:21Z
 updated_at: 2026-11-05T07:09:11Z
 closed_at: 2026-11-03T23:52:21Z
 ---
@@ -712,6 +724,10 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - If `user.toml` exists but is malformed or contains invalid values, report a configuration error rather than silently ignoring it. If it is already tracked, reads continue to use it, while `init` reports this and continues without modifying the Git index; a command that would write it refuses and tells the user to untrack it manually. Human `config show` presents effective values with their sources; JSON presents effective values plus source metadata. If a local override is cleared, the source changes to the corresponding local default.
 - `init` ensures `.waymark/.gitignore` ignores `user.toml`, without modifying repository-level `.gitignore` or `.git/info/exclude`. Details of ignore-rule repair and error reporting remain to be specified.
 - The initial `user.toml` writes the current cache defaults explicitly rather than omitting cache keys; this makes the newly created file a complete local-settings snapshot. Future program-default changes do not silently alter an existing user's explicit cache values.
+- The local file uses a dedicated TOML shape containing only `operator`, `timezone`, and the `cache` settings. Unknown keys and shared project keys such as storage root, categories, and fields are invalid; user configuration cannot override project structure.
+- Writes to `user.toml` use the shared core configuration path, project lock, validation, atomic replacement, and conflict checks. They do not increment the shared project configuration revision and do not touch work-item files.
+- If Git is unavailable, the project is outside a Git repository, or effective `user.name` cannot be read, the Git operator fallback is simply unavailable: an explicit local operator still works, while an absent operator remains unset and ordinary Waymark operations continue. Other local defaults are unaffected.
+- If the machine-local timezone cannot be identified, timezone falls back to UTC with an explicit informational warning; an explicit timezone in `user.toml` does not depend on system timezone detection.
 
 ## Not yet specified
 
