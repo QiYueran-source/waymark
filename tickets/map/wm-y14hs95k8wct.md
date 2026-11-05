@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T01:55:30Z
+updated_at: 2026-11-05T01:56:07Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -440,6 +440,11 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - Reject mediated writes if the project’s `.waymark` directory itself is a pre-existing directory link, including a Windows directory reparse point; explain that a regular metadata directory is required. This does not promise defense against malicious ancestor replacement during an operation. Whether the project root itself can be accessed through a link remains open.
 - If access, type identification, or verification of a required lock-safety condition fails, report an error and do not perform an unlocked write. Read-only operations remain lock-free and are not blocked merely because the write lock cannot be obtained.
 - When a process holding the lock crashes, rely on operating-system release and bounded retry; never infer a stale lock from file existence, age, or PID, and never forcibly reclaim it on that basis. A persistent lock file alone is not evidence of a live holder. Verify Windows release and retry behavior natively.
+
+- Confirmed by the user on 2026-11-05: a project may be accessed through a symbolic-link or equivalent alias to its root. Different aliases of the same actual project must use the same lock; native platform tests must verify this. This does not allow the `.waymark` directory itself to be a link.
+- Waymark never deletes or recreates a lock file merely to release the lock and should tell users not to manually clean it. External deletion or replacement of the lock path while a write is in progress is unsupported. If the OS prevents replacement or Waymark detects an anomaly, fail safely; do not promise detection of every external replacement.
+- Preserve the shared error taxonomy: lock contention that exceeds the configured bounded wait returns retryable `LOCK_TIMEOUT`; inability to safely open or verify the lock file returns `LOCK_FAILED` and the write is not automatically retried. CLI and MCP use the same classification; neither failure permits an unlocked write.
+- Native Windows verification must include MSVC and GNU processes contending on the same project lock, reacquisition after a holder exits or crashes, rejection of lock-file symbolic links and reparse points without writing through them, and the required error classifications. Concrete CI provisioning and handling of unavailable test capabilities remain for the verification and release decision.
 
 ## Not yet specified
 
