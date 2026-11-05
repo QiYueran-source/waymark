@@ -3380,4 +3380,5 @@ blocking unrelated changes on platform work that the separate Windows effort own
 
 **Flip condition:** when a full Windows run is green — no skipped test outside the documented allowlist
 — set `experimental: false` on that matrix entry. The GNU leg and the Windows release matrix stay out
-of this change for the same reason.
+of this change for the same reason. The remaining first-run failures, and the promotion itself, are
+tracked in [wm-t19sq5mv7fdy](../../tickets/implement/wm-t19sq5mv7fdy.md).
