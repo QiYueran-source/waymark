@@ -1,6 +1,5 @@
 version = "1.9"
 storage_root = "tickets"
-timezone = "Asia/Shanghai"
 
 [categories.implement]
 path = "tickets/implement"
@@ -13,7 +12,3 @@ name = "Map"
 [categories.spec]
 path = "tickets/spec"
 name = "Spec"
-
-[cache]
-enabled = true
-capacity = 512

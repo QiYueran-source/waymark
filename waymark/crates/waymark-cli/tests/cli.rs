@@ -91,7 +91,7 @@ fn init_creates_the_configuration_and_the_metadata_directory() {
     let metadata = root.join(".waymark");
     assert!(metadata.join("config.toml").is_file());
     assert!(metadata.join(".gitignore").is_file());
-    assert!(root.join("work/task").is_dir());
+    assert!(root.join("work").join("task").is_dir());
     assert!(
         result.stdout().is_empty(),
         "human mode writes to stderr only"
@@ -119,7 +119,7 @@ fn init_in_json_mode_puts_the_envelope_on_stdout() {
     assert_eq!(envelope["ok"], serde_json::json!(true));
     assert_eq!(
         envelope["data"]["config_path"],
-        serde_json::json!(root.join(".waymark/config.toml").to_string())
+        serde_json::json!(root.join(".waymark").join("config.toml").to_string())
     );
     assert_eq!(
         envelope["data"]["categories"][0]["key"],
@@ -163,12 +163,13 @@ fn create_writes_one_document_and_names_it_in_human_mode() {
         result.stderr()
     );
 
-    let entries: Vec<_> = std::fs::read_dir(root.join("work/task"))
+    let entries: Vec<_> = std::fs::read_dir(root.join("work").join("task"))
         .unwrap()
         .map(|entry| entry.unwrap().file_name().to_string_lossy().to_string())
         .collect();
     assert_eq!(entries.len(), 1, "{entries:?}");
-    let document = std::fs::read_to_string(root.join("work/task").join(&entries[0])).unwrap();
+    let document =
+        std::fs::read_to_string(root.join("work").join("task").join(&entries[0])).unwrap();
     assert!(document.starts_with("---\nschema: 1\nid: "), "{document}");
     assert!(document.contains("\ntitle: Fix the thing\n"), "{document}");
     assert!(document.contains("\ncategory: task\n"), "{document}");
@@ -311,7 +312,7 @@ fn a_missing_required_field_exits_three_and_writes_nothing() {
         .arg("frank"));
     assert_eq!(result.status(), 3, "stderr: {}", result.stderr());
     assert!(result.stderr().contains("title"), "{}", result.stderr());
-    assert!(std::fs::read_dir(root.join("work/task"))
+    assert!(std::fs::read_dir(root.join("work").join("task"))
         .unwrap()
         .next()
         .is_none());
@@ -464,7 +465,7 @@ fn help_is_a_successful_invocation() {
 fn a_command_works_from_inside_the_project_without_the_project_flag() {
     let (_dir, root) = tempdir();
     init(&root);
-    let nested = root.join("work/task");
+    let nested = root.join("work").join("task");
     let result = run(waymark()
         .arg("--json")
         .arg("create")
@@ -489,7 +490,9 @@ fn two_creates_produce_two_distinct_ids_and_two_documents() {
     let first = create_one(&root);
     let second = create_one(&root);
     assert_ne!(first, second);
-    let count = std::fs::read_dir(root.join("work/task")).unwrap().count();
+    let count = std::fs::read_dir(root.join("work").join("task"))
+        .unwrap()
+        .count();
     assert_eq!(count, 2);
 }
 
@@ -511,7 +514,7 @@ fn a_dry_run_reports_without_writing() {
         .arg("--dry-run"));
     assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
     assert_eq!(result.json()["data"]["written"], serde_json::json!(false));
-    assert!(std::fs::read_dir(root.join("work/task"))
+    assert!(std::fs::read_dir(root.join("work").join("task"))
         .unwrap()
         .next()
         .is_none());
@@ -533,13 +536,19 @@ fn init_accepts_a_custom_category_storage_root_and_operator() {
         .arg("--timezone")
         .arg("Asia/Shanghai"));
     assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
-    assert!(root.join("items/issue").is_dir());
+    assert!(root.join("items").join("issue").is_dir());
 
-    let config = std::fs::read_to_string(root.join(".waymark/config.toml")).unwrap();
+    let config = std::fs::read_to_string(root.join(".waymark").join("config.toml")).unwrap();
     assert!(config.contains("storage_root = \"items\""), "{config}");
-    assert!(config.contains("operator = \"frank\""), "{config}");
-    assert!(config.contains("timezone = \"Asia/Shanghai\""), "{config}");
     assert!(config.contains("[categories.issue]"), "{config}");
+    // The identity seeds are local, so they never appear in the shared document.
+    assert!(!config.contains("operator ="), "{config}");
+    assert!(!config.contains("timezone ="), "{config}");
+    assert!(!config.contains("[cache]"), "{config}");
+
+    let local = std::fs::read_to_string(root.join(".waymark").join("user.toml")).unwrap();
+    assert!(local.contains("operator = \"frank\""), "{local}");
+    assert!(local.contains("timezone = \"Asia/Shanghai\""), "{local}");
 
     let created = run(waymark()
         .arg("--json")
@@ -553,4 +562,142 @@ fn init_accepts_a_custom_category_storage_root_and_operator() {
         .arg("--owner")
         .arg("frank"));
     assert_eq!(created.status(), 0, "stderr: {}", created.stderr());
+}
+
+// ---------------------------------------------------------------------------
+// The local user document
+// ---------------------------------------------------------------------------
+
+/// Run `git` in `root` with a fixed identity, panicking on failure.
+fn git(root: &Utf8PathBuf, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .current_dir(root)
+        .args([
+            "-c",
+            "user.name=Waymark Test",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(args)
+        .output()
+        .expect("the git binary runs");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+#[test]
+fn init_creates_the_local_document_with_the_machine_defaults() {
+    let (_dir, root) = tempdir();
+    let result = init(&root);
+    assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
+
+    let local = std::fs::read_to_string(root.join(".waymark").join("user.toml"))
+        .expect("first init creates the local document");
+    assert!(local.contains("[cache]"), "{local}");
+    assert!(local.contains("enabled = true"), "{local}");
+    assert!(
+        local.contains("capacity = 512"),
+        "the cache snapshot is explicit: {local}"
+    );
+    assert!(
+        result.stderr().contains("local settings"),
+        "the human output names it: {}",
+        result.stderr()
+    );
+
+    let result = run(waymark()
+        .arg("--json")
+        .arg("init")
+        .arg("--project")
+        .arg(&root));
+    assert_eq!(result.status(), 0);
+    let envelope = result.json();
+    assert_eq!(
+        envelope["data"]["local_config_path"],
+        serde_json::json!(root.join(".waymark").join("user.toml").to_string())
+    );
+    assert_eq!(
+        envelope["data"]["local_config_tracked"],
+        serde_json::json!(false),
+        "an untracked document is not a mistake"
+    );
+}
+
+#[test]
+fn init_leaves_an_existing_local_document_alone() {
+    let (_dir, root) = tempdir();
+    assert_eq!(init(&root).status(), 0);
+    let path = root.join(".waymark").join("user.toml");
+
+    // A hand edit survives re-initialization, seeds or not.
+    std::fs::write(&path, "operator = \"manual\"\n").expect("a hand edit");
+    let result = run(waymark()
+        .arg("init")
+        .arg("--project")
+        .arg(&root)
+        .arg("--operator")
+        .arg("someone-else"));
+    assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("the document"),
+        "operator = \"manual\"\n"
+    );
+
+    // A missing one is not recreated.
+    std::fs::remove_file(&path).expect("the document is removable");
+    assert_eq!(init(&root).status(), 0);
+    assert!(!path.exists(), "a repeat creates nothing");
+}
+
+#[test]
+fn init_reports_a_tracked_local_document_without_touching_the_index() {
+    if waymark_core::git::find_executable().is_none() {
+        eprintln!("skipping: no `git` executable on PATH");
+        return;
+    }
+    let (_dir, root) = tempdir();
+    git(&root, &["init", "--quiet"]);
+    assert_eq!(init(&root).status(), 0);
+    let path = root.join(".waymark").join("user.toml");
+    assert!(path.is_file());
+    git(&root, &["add", "--force", ".waymark/user.toml"]);
+    let staged = git(&root, &["ls-files", "-s", ".waymark/user.toml"]);
+    let before = std::fs::read_to_string(&path).expect("the document");
+
+    let result = run(waymark()
+        .arg("--json")
+        .arg("init")
+        .arg("--project")
+        .arg(&root)
+        .arg("--operator")
+        .arg("someone-else"));
+    assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
+    assert_eq!(
+        result.json()["data"]["local_config_tracked"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("the document"),
+        before,
+        "a tracked document is not rewritten"
+    );
+    assert_eq!(
+        git(&root, &["ls-files", "-s", ".waymark/user.toml"]),
+        staged,
+        "the Git index is unmodified"
+    );
+
+    // The human stream says the same thing in words.
+    let result = init(&root);
+    assert!(
+        result.stderr().contains("tracked by Git"),
+        "the report names the problem: {}",
+        result.stderr()
+    );
 }

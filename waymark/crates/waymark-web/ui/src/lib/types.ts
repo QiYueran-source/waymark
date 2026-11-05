@@ -113,6 +113,15 @@ export interface ItemRelationships {
 	soft_links: string[];
 }
 
+/** Persisted instants in the viewer's effective zone. */
+export interface DisplayTimes {
+	/** IANA zone the values below were rendered in. */
+	timezone: string;
+	created_at: string;
+	updated_at: string;
+	closed_at: string | null;
+}
+
 /** `GET /api/item/:id` data. */
 export interface ItemDetail {
 	id: string;
@@ -131,6 +140,11 @@ export interface ItemDetail {
 	created_at: string | null;
 	updated_at: string | null;
 	closed_at: string | null;
+	/**
+	 * The same instants rendered in the machine's effective zone. The server
+	 * resolves the zone from the local user configuration; the UI never picks one.
+	 */
+	display_times: DisplayTimes;
 	archived: boolean;
 	custom_fields: Record<string, unknown>;
 	relationships: ItemRelationships;

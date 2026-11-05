@@ -121,7 +121,8 @@ fn a_storage_dry_run_performs_every_check_and_writes_nothing() {
     assert!(report.config_changed);
     assert_eq!(report.moves.len(), 1);
     assert_eq!(report.moves[0].outcome, "skipped");
-    assert!(report.moves[0].to.ends_with("items/task"));
+    let expected = project.root().join("items").join("task");
+    assert!(report.moves[0].to.ends_with(expected.as_str()));
     assert!(report
         .targets
         .iter()
@@ -182,15 +183,17 @@ fn a_pure_relocation_preserves_content_bytes_fingerprints_and_updated_at() {
     assert_eq!(report.moves.len(), 1);
     assert_eq!(report.moves[0].outcome, "applied");
 
-    let old_dir = project.root().join("work/task");
+    let old_dir = project.root().join("work").join("task");
     assert!(!old_dir.exists(), "the old directory is gone");
     let new_first = project
         .root()
-        .join("items/task")
+        .join("items")
+        .join("task")
         .join(first.file_name().expect("a file name"));
     let new_second = project
         .root()
-        .join("items/task")
+        .join("items")
+        .join("task")
         .join(second.file_name().expect("a file name"));
     assert_eq!(
         std::fs::read(&new_first).expect("the moved document"),
@@ -239,9 +242,9 @@ fn a_category_key_change_rewrites_every_persisted_value_including_archived_items
         .iter()
         .all(|rewritten| rewritten.from.as_str() == "task" && rewritten.to.as_str() == "chore"));
 
-    let old_dir = project.root().join("work/task");
+    let old_dir = project.root().join("work").join("task");
     assert!(!old_dir.exists());
-    let new_dir = project.root().join("work/chore");
+    let new_dir = project.root().join("work").join("chore");
     assert!(new_dir.is_dir(), "the directory follows the new key");
     let new_active = new_dir.join(active_path.file_name().expect("a file name"));
     let new_archived = new_dir.join(archived_path.file_name().expect("a file name"));
@@ -359,8 +362,13 @@ fn overlapping_existing_and_case_equivalent_targets_are_path_conflicts() {
     );
 
     // A non-empty target is never overwritten.
-    std::fs::create_dir_all(project.root().join("occupied/task")).expect("the target directory");
-    std::fs::write(project.root().join("occupied/task/keep.md"), b"data").expect("a file");
+    std::fs::create_dir_all(project.root().join("occupied").join("task"))
+        .expect("the target directory");
+    std::fs::write(
+        project.root().join("occupied").join("task").join("keep.md"),
+        b"data",
+    )
+    .expect("a file");
     let occupied = migrate::plan_storage(
         &project,
         &StorageAction::Root {
@@ -415,8 +423,10 @@ fn a_missing_source_reports_every_diagnostic_before_writing() {
         &options(),
     )
     .expect("the second category is added");
-    std::fs::remove_dir_all(project.root().join("work/task")).expect("the source is removed");
-    std::fs::remove_dir_all(project.root().join("work/bug")).expect("the source is removed");
+    std::fs::remove_dir_all(project.root().join("work").join("task"))
+        .expect("the source is removed");
+    std::fs::remove_dir_all(project.root().join("work").join("bug"))
+        .expect("the source is removed");
     let before = snapshot(project.root());
 
     let error = migrate::plan_storage(
@@ -440,7 +450,11 @@ fn a_missing_source_reports_every_diagnostic_before_writing() {
 fn an_incomplete_projection_blocks_a_storage_migration_before_any_write() {
     let (_dir, project) = project();
     create_one(&project, "First");
-    let broken = project.root().join("work/task/wm-ffffffffffff.md");
+    let broken = project
+        .root()
+        .join("work")
+        .join("task")
+        .join("wm-ffffffffffff.md");
     std::fs::write(&broken, "not a work item").expect("the broken file");
     let before = snapshot(project.root());
 
@@ -470,7 +484,7 @@ fn an_unreadable_source_file_is_a_precondition_failure() {
 
     let (_dir, project) = project();
     create_one(&project, "First");
-    let unreadable = project.root().join("work/task/notes.txt");
+    let unreadable = project.root().join("work").join("task").join("notes.txt");
     std::fs::write(&unreadable, b"notes").expect("the extra file");
     let original = std::fs::metadata(&unreadable)
         .expect("the file exists")
@@ -539,7 +553,8 @@ fn a_stale_storage_plan_is_rechecked_and_never_applied() {
     assert!(report.written);
     let moved = project
         .root()
-        .join("items/task")
+        .join("items")
+        .join("task")
         .join(path.file_name().expect("a file name"));
     assert_eq!(item_at(&moved).title, "Edited by hand");
 }

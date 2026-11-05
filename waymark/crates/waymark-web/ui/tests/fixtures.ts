@@ -423,6 +423,12 @@ export const detail: ItemDetail = {
 	created_at: '2026-01-01T00:00:00Z',
 	updated_at: null,
 	closed_at: null,
+	display_times: {
+		timezone: 'Europe/Berlin',
+		created_at: '2026-01-01T01:00:00+01:00',
+		updated_at: '2026-01-01T01:00:00+01:00',
+		closed_at: null
+	},
 	archived: false,
 	custom_fields: {
 		Severity: '<script>window.waymarkPwned = true;</script>',

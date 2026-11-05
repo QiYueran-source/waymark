@@ -44,6 +44,13 @@ pub const MAX_DISCOVERY_DEPTH: usize = 64;
 /// The `.gitignore` entry the write lock needs.
 pub const LOCK_IGNORE_ENTRY: &str = "write.lock";
 
+/// Every `.gitignore` entry the metadata directory needs, in the order they are
+/// written.
+pub const IGNORE_ENTRIES: &[&str] = &[
+    LOCK_IGNORE_ENTRY,
+    crate::user_config::USER_CONFIG_IGNORE_ENTRY,
+];
+
 /// How many ID candidates are tried before `ID_GENERATION_FAILED`.
 pub const MAX_ID_ATTEMPTS: u32 = 64;
 
@@ -158,8 +165,11 @@ pub struct InitOptions {
     pub force: bool,
     /// Configuration to write. Defaults to [`Config::fresh`].
     pub config: Option<Config>,
-    /// Operator identity to record.
-    pub operator: Option<String>,
+    /// Local user document to write when this initialization creates one.
+    ///
+    /// `None` seeds nothing beyond what the local fallbacks resolve, and an
+    /// already-initialized project never reaches the write at all.
+    pub local: Option<crate::user_config::UserConfig>,
 }
 
 /// A handle to one Waymark project.
@@ -185,11 +195,13 @@ impl std::fmt::Debug for Project {
 impl Project {
     /// Create a project rooted at `dir`.
     ///
-    /// Creates the metadata directory, the configuration document, the
-    /// `.waymark/.gitignore`, and every configured category directory. An
-    /// existing configuration is not overwritten unless [`InitOptions::force`]
-    /// is set: `init` is safe to re-run and succeeds when a project is already
-    /// there.
+    /// Creates the metadata directory, the configuration document,
+    /// `.waymark/.gitignore` (listing both the write lock and the local user
+    /// document), and every configured category directory. An existing
+    /// configuration is not overwritten unless [`InitOptions::force`] is set:
+    /// `init` is safe to re-run and succeeds when a project is already there.
+    /// An existing local user document is *never* overwritten, force or not, and
+    /// one is only seeded when this call creates it.
     pub fn init(dir: &Utf8Path, opts: InitOptions) -> Result<Project, WaymarkError> {
         let root = dir.to_path_buf();
         let metadata = root.join(METADATA_DIR);
@@ -202,17 +214,28 @@ impl Project {
         fs::create_dir_all(&metadata)
             .map_err(|source| WaymarkError::io(metadata.to_string(), "create", &source))?;
 
-        let mut config = opts.config.unwrap_or_else(Config::fresh);
-        if let Some(operator) = opts.operator {
-            config.operator = Some(operator);
-        }
+        let config = opts.config.unwrap_or_else(Config::fresh);
         config.validate()?;
 
+        // Both documents are validated, and the ignore entry that keeps the
+        // local document out of the shared baseline is repaired, before either
+        // file is written: a project never ends up with a local document that no
+        // ignore rule covers.
+        let local = opts.local.unwrap_or_default();
+        local.validate()?;
+        ensure_gitignore(&metadata, IGNORE_ENTRIES)?;
+
+        // The local document is created once and then left alone. It holds one
+        // collaborator's preferences, so neither a `--force` replacement of the
+        // shared configuration nor a later set of seeds may rewrite it.
+        let local_path = metadata.join(crate::user_config::USER_CONFIG_FILE);
+        if !local.is_empty() && !local_path.exists() {
+            crate::write::replace_unchecked(&local_path, local.to_toml_string().as_bytes())?;
+        }
         crate::write::replace_unchecked(&config_path, config.to_toml_string().as_bytes())?;
-        ensure_gitignore(&metadata, &[LOCK_IGNORE_ENTRY])?;
 
         for category in config.categories.values() {
-            let path = root.join(&category.path);
+            let path = crate::config::resolve_relative(&root, &category.path);
             fs::create_dir_all(&path)
                 .map_err(|source| WaymarkError::io(path.to_string(), "create", &source))?;
         }
@@ -270,6 +293,15 @@ impl Project {
         self.metadata_dir().join(CONFIG_FILE)
     }
 
+    /// The local user configuration document.
+    ///
+    /// Absent is normal: every setting it holds has a fallback, and no read
+    /// creates it.
+    pub fn user_config_path(&self) -> Utf8PathBuf {
+        self.metadata_dir()
+            .join(crate::user_config::USER_CONFIG_FILE)
+    }
+
     /// The store-wide write lock file.
     pub fn lock_path(&self) -> Utf8PathBuf {
         self.metadata_dir().join(crate::lock::LOCK_FILE)
@@ -317,7 +349,7 @@ impl Project {
     pub fn category_for_path(&self, path: &Utf8Path) -> Option<CategoryKey> {
         let mut best: Option<(usize, CategoryKey)> = None;
         for (key, category) in &self.config.categories {
-            let directory = self.root.join(&category.path);
+            let directory = crate::config::resolve_relative(&self.root, &category.path);
             if path.starts_with(&directory) {
                 let length = directory.as_str().len();
                 if best.as_ref().is_none_or(|(known, _)| length > *known) {
@@ -337,7 +369,7 @@ impl Project {
     pub fn inventory(&self) -> Result<Inventory, WaymarkError> {
         let mut inventory = Inventory::default();
         for (key, category) in &self.config.categories {
-            let directory = self.root.join(&category.path);
+            let directory = crate::config::resolve_relative(&self.root, &category.path);
             let entries = match fs::read_dir(&directory) {
                 Ok(entries) => entries,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -541,8 +573,13 @@ impl Project {
 }
 
 /// Ensure `.waymark/.gitignore` ignores every entry in `entries`, creating or
-/// appending as needed. A symlinked `.gitignore` is refused, not written
-/// through.
+/// appending as needed.
+///
+/// The ignore file is a safety mechanism for settings that must not enter the
+/// shared baseline, so it is treated defensively: a symlink is never written
+/// through, the file must be a regular file, and a read-only file is refused
+/// rather than replaced behind its permissions. An entry that is already present
+/// is never duplicated.
 pub fn ensure_gitignore(metadata_dir: &Utf8Path, entries: &[&str]) -> Result<(), WaymarkError> {
     let path = metadata_dir.join(".gitignore");
     if let Ok(metadata) = fs::symlink_metadata(&path) {
@@ -550,6 +587,12 @@ pub fn ensure_gitignore(metadata_dir: &Utf8Path, entries: &[&str]) -> Result<(),
             return Err(WaymarkError::lock_failed(
                 path.to_string(),
                 "the .gitignore is a symbolic link and will not be written through",
+            ));
+        }
+        if !metadata.is_file() {
+            return Err(WaymarkError::lock_failed(
+                path.to_string(),
+                "the .gitignore is not a regular file and will not be written",
             ));
         }
     }
@@ -571,6 +614,15 @@ pub fn ensure_gitignore(metadata_dir: &Utf8Path, entries: &[&str]) -> Result<(),
         changed = true;
     }
     if changed {
+        // Replacement happens by rename, which would silently work around a
+        // read-only file. Refuse instead: the caller asked for a guarantee this
+        // file's permissions say it cannot keep.
+        if fs::metadata(&path).is_ok_and(|metadata| metadata.permissions().readonly()) {
+            return Err(WaymarkError::lock_failed(
+                path.to_string(),
+                "the .gitignore is read-only and will not be overwritten",
+            ));
+        }
         crate::write::replace_unchecked(&path, contents.as_bytes())?;
     }
     Ok(())

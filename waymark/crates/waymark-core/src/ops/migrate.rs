@@ -1061,8 +1061,8 @@ pub fn plan_storage(
     // Absolute moves plus the source digest the plan is built from.
     let mut moves: Vec<PlannedMove> = Vec::new();
     for (from, to) in &relative_moves {
-        let from_path = root.join(from);
-        let to_path = root.join(to);
+        let from_path = crate::config::resolve_relative(root, from);
+        let to_path = crate::config::resolve_relative(root, to);
         match directory_digest(&from_path) {
             Ok(expected) => moves.push(PlannedMove {
                 from: from_path,
@@ -1094,7 +1094,7 @@ pub fn plan_storage(
         .categories
         .values()
         .filter(|category| !moved_sources.contains(category.path.as_str()))
-        .map(|category| root.join(&category.path))
+        .map(|category| crate::config::resolve_relative(root, &category.path))
         .collect();
     check_move_paths(root, &moves, &remaining, &mut diagnostics, &mut conflicts);
 
@@ -1236,9 +1236,13 @@ fn join_relative(root: &str, rest: &str) -> String {
 }
 
 /// A category key change renames the directory's final component to the key.
+///
+/// The result is a configuration value, not a filesystem path, so it is built
+/// from the string form: a `Utf8Path` join would use the platform separator and
+/// the configuration validator accepts `/` only.
 fn key_path(old_path: &str, new_key: &CategoryKey) -> String {
-    match Utf8Path::new(old_path).parent() {
-        Some(parent) if !parent.as_str().is_empty() => parent.join(new_key.as_str()).to_string(),
+    match old_path.rsplit_once('/') {
+        Some((parent, _)) if !parent.is_empty() => format!("{parent}/{}", new_key.as_str()),
         _ => new_key.to_string(),
     }
 }
@@ -1430,6 +1434,22 @@ fn check_target_parent(target: &Utf8Path, diagnostics: &mut Vec<Value>) {
     }
 }
 
+/// Whether a failed rename says "the target is on another filesystem".
+///
+/// Every platform has its own errno for it, and only Unix defines `EXDEV`, so
+/// the mapping is per-platform instead of reaching for a libc constant that
+/// does not exist everywhere.
+#[cfg(unix)]
+fn is_cross_device(error: &std::io::Error) -> bool {
+    error.raw_os_error() == Some(libc::EXDEV)
+}
+
+/// `ERROR_NOT_SAME_DEVICE` (17), Windows' cross-volume rename failure.
+#[cfg(windows)]
+fn is_cross_device(error: &std::io::Error) -> bool {
+    error.raw_os_error() == Some(17)
+}
+
 /// A pure relocation is `rename(2)`; a cross-filesystem target cannot be one.
 #[cfg(unix)]
 fn check_cross_device(moved: &PlannedMove, diagnostics: &mut Vec<Value>) {
@@ -1574,8 +1594,10 @@ fn recheck_storage(
     let remaining: Vec<Utf8PathBuf> = current
         .categories
         .values()
-        .filter(|category| !moved_sources.contains(root.join(&category.path).as_str()))
-        .map(|category| root.join(&category.path))
+        .filter(|category| {
+            !moved_sources.contains(crate::config::resolve_relative(root, &category.path).as_str())
+        })
+        .map(|category| crate::config::resolve_relative(root, &category.path))
         .collect();
     check_move_paths(
         root,
@@ -1673,7 +1695,7 @@ fn apply_move(
         created.push(directory);
     }
     std::fs::rename(moved.from.as_std_path(), moved.to.as_std_path()).map_err(|source| {
-        if source.raw_os_error() == Some(libc::EXDEV) {
+        if is_cross_device(&source) {
             WaymarkError::io(
                 moved.to.to_string(),
                 "rename onto another filesystem (a storage migration never copies)",

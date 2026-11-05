@@ -19,6 +19,7 @@ camino.workspace = true
 thiserror.workspace = true
 serde_norway.workspace = true
 getrandom.workspace = true
+iana-time-zone.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

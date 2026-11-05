@@ -476,6 +476,14 @@ async fn config_writes_match_the_cli() {
             json!({"name": "operator", "value": "frank"}),
         ),
         (
+            "waymark_config_set",
+            json!({"name": "timezone", "value": "Asia/Shanghai"}),
+        ),
+        (
+            "waymark_config_set",
+            json!({"name": "cache.capacity", "value": "64"}),
+        ),
+        (
             "waymark_config_add_category",
             json!({"key": "bug", "path": "work/bugs", "name": "Bugs"}),
         ),
@@ -502,6 +510,8 @@ async fn config_writes_match_the_cli() {
     }
 
     common::cli_json(&cli_root, &["config", "set", "operator", "frank"]);
+    common::cli_json(&cli_root, &["config", "set", "timezone", "Asia/Shanghai"]);
+    common::cli_json(&cli_root, &["config", "set", "cache.capacity", "64"]);
     common::cli_json(
         &cli_root,
         &[
@@ -554,7 +564,11 @@ async fn migrations_match_the_cli() {
     // Version migration.
     let fixture = common::fixture(&["one"]);
     let id = fixture.ids[0].clone();
-    let path = fixture.root.join("work/task").join(format!("{id}.md"));
+    let path = fixture
+        .root
+        .join("work")
+        .join("task")
+        .join(format!("{id}.md"));
     let document = common::read(&path);
     let downgraded = document.replacen(
         &format!("schema: {}\n", waymark_core::model::FORMAT_GENERATION),
@@ -562,7 +576,7 @@ async fn migrations_match_the_cli() {
         1,
     );
     std::fs::write(&path, downgraded).expect("the document is writable");
-    let config_path = fixture.root.join(".waymark/config.toml");
+    let config_path = fixture.root.join(".waymark").join("config.toml");
     let config_text = common::read(&config_path);
     let current = fixture.project().config().version.to_string();
     let replaced =
@@ -696,10 +710,13 @@ async fn read_renderings_match_the_cli() {
         let cli = common::cli_json(&cli_root, &cli_args);
         // The two projects live at different paths; nothing else may differ.
         let normalize = |value: &serde_json::Value, root: &camino::Utf8Path| {
+            // A serialized value escapes `\`, so the Windows root appears with
+            // doubled separators; both spellings have to be replaced.
+            let escaped = root.as_str().replace('\\', "\\\\");
             value
                 .to_string()
+                .replace(&escaped, "<root>")
                 .replace(root.as_str(), "<root>")
-                .replace(&format!("{}/", root), "<root>/")
         };
         assert_eq!(
             normalize(&mcp, &fixture.root),
@@ -707,6 +724,42 @@ async fn read_renderings_match_the_cli() {
             "{tool} differs from `waymark {cli_args:?}`"
         );
     }
+
+    client.shutdown().await;
+}
+
+#[tokio::test]
+async fn config_read_matches_the_cli() {
+    let fixture = common::fixture(&["one"]);
+    let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    // A hand-edited local document is a supported path, and it exercises the
+    // whole local shape: an operator, a zone, and both cache fields.
+    let local = "operator = \"frank\"\ntimezone = \"Asia/Shanghai\"\n\n[cache]\nenabled = false\ncapacity = 64\n";
+    std::fs::write(fixture.root.join(".waymark").join("user.toml"), local)
+        .expect("the MCP side document");
+    std::fs::write(cli_root.join(".waymark").join("user.toml"), local)
+        .expect("the CLI side document");
+
+    let mcp = common::envelope(&client.call("waymark_config_read", common::no_args()).await);
+    let cli = common::cli_json(&cli_root, &["config", "show"]);
+    assert_eq!(
+        mcp["data"], cli["data"],
+        "the two adapters must report the same documents and the same effective values"
+    );
+    assert_eq!(
+        mcp["data"]["sources"]["operator"], "local_document",
+        "the source report is part of the contract, not a rendering detail"
+    );
+    assert_eq!(
+        mcp["data"]["sources"]["cache"]["capacity"],
+        "local_document"
+    );
+    assert_eq!(
+        mcp["_meta"]["warnings"], cli["_meta"]["warnings"],
+        "the same resolution produces the same warnings"
+    );
 
     client.shutdown().await;
 }

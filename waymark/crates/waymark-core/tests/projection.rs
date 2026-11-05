@@ -355,13 +355,15 @@ fn a_cache_only_configuration_change_clears_the_cache_but_not_the_projection() {
 #[test]
 fn a_projection_loaded_with_a_configured_cache_uses_that_capacity() {
     let (_dir, project) = project();
-    let mut config = project.config().clone();
-    config.cache = CacheSettings {
-        enabled: true,
-        capacity: 1,
-    };
-    let mut project = project;
-    project.set_config(config);
+    // The cache size is a *local* setting now, so it is written to the local
+    // document rather than to the shared configuration.
+    waymark_core::ops::local_config::set_scalar(
+        &project,
+        waymark_core::ops::config::Scalar::CacheCapacity,
+        "1",
+        &options(),
+    )
+    .expect("the local cache capacity is written");
     make(&project, "one");
     let item = id(&make(&project, "two"));
 
@@ -382,6 +384,10 @@ fn a_projection_loaded_with_a_configured_cache_uses_that_capacity() {
     assert_eq!(LoadOptions::default().max_attempts, 3);
 }
 
+// Two stems that differ only in case are two files only on a
+// case-sensitive filesystem; Windows owns that difference with the platform
+// effort.
+#[cfg(not(windows))]
 #[test]
 fn a_case_variant_document_makes_the_projection_scoped_and_names_the_path() {
     let dir = tempfile::tempdir().unwrap();
@@ -452,6 +458,10 @@ fn a_case_variant_document_makes_the_projection_scoped_and_names_the_path() {
     assert_eq!(scoped.meta.completeness, Completeness::Scoped);
 }
 
+// Two stems that differ only in case are two files only on a
+// case-sensitive filesystem; Windows owns that difference with the platform
+// effort.
+#[cfg(not(windows))]
 #[test]
 fn an_uppercase_stem_without_a_live_document_is_scoped() {
     let (_dir, project) = project();
@@ -473,7 +483,7 @@ fn a_stray_readme_is_inventory_noise_not_an_incomplete_projection() {
     let (_dir, project) = project();
     make(&project, "one");
     std::fs::write(
-        project.root().join("work/task/README.md"),
+        project.root().join("work").join("task").join("README.md"),
         "project notes, not a work item\n",
     )
     .unwrap();

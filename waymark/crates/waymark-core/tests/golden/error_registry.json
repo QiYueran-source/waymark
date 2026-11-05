@@ -464,6 +464,14 @@
     "retryable": false
   },
   {
+    "code": "TIME_ZONE_UNDETECTED",
+    "details": [],
+    "exit": null,
+    "finding": "info",
+    "location_kinds": [],
+    "retryable": false
+  },
+  {
     "code": "UNSUPPORTED_VERSION",
     "details": [
       "found",

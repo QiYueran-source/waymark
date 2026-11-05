@@ -25,9 +25,10 @@ pub struct ConfigArgs {
 /// The `config` subcommands.
 #[derive(Debug, Subcommand)]
 pub enum ConfigCommand {
-    /// Print the effective configuration.
+    /// Print the shared configuration, the local document, and the effective
+    /// values with their sources.
     Show,
-    /// Report every problem in the configuration.
+    /// Report every problem in either configuration document.
     Validate,
     /// Set a scalar, or an attribute with a subcommand.
     Set(SetArgs),
@@ -44,11 +45,11 @@ pub struct SetArgs {
     #[command(subcommand)]
     pub command: Option<SetCommand>,
 
-    /// Scalar name: operator, timezone, cache.enabled, cache.capacity.
+    /// Local scalar name: operator, timezone, cache.enabled, cache.capacity.
     #[arg(value_name = "NAME", required = true)]
     pub name: Option<String>,
 
-    /// New value. An empty `operator` clears the key.
+    /// New value. An empty value removes the local override.
     #[arg(value_name = "VALUE", required = true)]
     pub value: Option<String>,
 
@@ -185,16 +186,17 @@ pub fn run(
     match args.command {
         ConfigCommand::Show => {
             let project = open_project(project)?;
-            render_config(&config::show(&project)?, json)
+            render_bundle(&waymark_core::ops::local_config::bundle(&project)?, json)
         }
         ConfigCommand::Validate => {
             // Validation must work even when the document cannot be opened as a
-            // project, so the file is located without parsing it.
+            // project, so the file is located without parsing it. Core decides
+            // which documents that path covers.
             let path = match project {
                 Some(dir) => config::locate_config_path(dir)?,
                 None => config::locate_config_path(&invocation_dir()?)?,
             };
-            render_findings(&config::validate_config_path(&path), json)
+            render_findings(&path, &config::validate_documents(&path), json)
         }
         ConfigCommand::Set(args) => match args.command {
             Some(SetCommand::Category(args)) => {
@@ -227,12 +229,11 @@ pub fn run(
                 let name = args.name.unwrap_or_default();
                 let value = args.value.unwrap_or_default();
                 let scalar = Scalar::parse(&name)?;
-                capture(project, options, args.dry_run, |project, options| {
-                    config::set_scalar(project, scalar, &value, options)
-                })
-                .and_then(|outcome| {
-                    render_outcome(&outcome, json, &format!("set {}", scalar.name()))
-                })
+                let options = with_dry_run(options, args.dry_run);
+                let outcome = waymark_core::ops::local_config::set_scalar(
+                    &project, scalar, &value, &options,
+                )?;
+                render_local_outcome(&outcome, json, &format!("set {}", scalar.name()))
             }
         },
         ConfigCommand::Add(args) => match args.command {
@@ -283,12 +284,17 @@ fn capture(
     dry_run: bool,
     body: impl FnOnce(&Project, &OpOptions) -> Result<ConfigOutcome, WaymarkError>,
 ) -> Result<ConfigOutcome, WaymarkError> {
-    let options = if dry_run {
+    let options = with_dry_run(options, dry_run);
+    body(&project, &options)
+}
+
+/// The operation options one configuration write runs with.
+fn with_dry_run(options: &OpOptions, dry_run: bool) -> OpOptions {
+    if dry_run {
         options.clone().dry_run()
     } else {
         options.clone()
-    };
-    body(&project, &options)
+    }
 }
 
 fn category_key(literal: &str) -> Result<CategoryKey, WaymarkError> {
@@ -307,20 +313,102 @@ fn argument(name: &str, reason: String) -> WaymarkError {
     WaymarkError::validation(name, vec![waymark_core::ValidationIssue::new(name, reason)])
 }
 
-fn render_config(config: &waymark_core::Config, json: bool) -> Result<(), WaymarkError> {
+fn render_bundle(
+    bundle: &waymark_core::ops::local_config::Bundle,
+    json: bool,
+) -> Result<(), WaymarkError> {
     if json {
         emit(&success_envelope(
-            serde_json::json!({"config": waymark_core::view::config_json(config)}),
+            waymark_core::view::config_bundle_json(bundle),
+            waymark_core::view::config_bundle_meta(bundle),
+        ))?;
+        return Ok(());
+    }
+    // The shared document verbatim on stdout, so `config show > config.toml`
+    // keeps working; everything local is prose on stderr, because it is not part
+    // of the shared baseline and must never be redirected into one.
+    print!("{}", bundle.project.to_toml_string());
+    render_local_human(bundle);
+    Ok(())
+}
+
+/// The local half of `config show`: what the document states, what is effective,
+/// and where each effective value came from.
+fn render_local_human(bundle: &waymark_core::ops::local_config::Bundle) {
+    let effective = &bundle.effective;
+    match &bundle.local {
+        Some(local) => {
+            err_line(&format!(
+                "local {}:",
+                waymark_core::user_config::USER_CONFIG_FILE
+            ));
+            let document = local.to_toml_string();
+            for line in document.lines() {
+                err_line(&format!("  {line}"));
+            }
+        }
+        None => err_line(&format!(
+            "local {}: absent",
+            waymark_core::user_config::USER_CONFIG_FILE
+        )),
+    }
+    err_line("effective:");
+    err_line(&format!(
+        "  operator    {} ({})",
+        effective.operator.as_deref().unwrap_or("- unset"),
+        effective.operator_source
+    ));
+    err_line(&format!(
+        "  timezone    {} ({})",
+        effective.timezone.name(),
+        effective.timezone_source
+    ));
+    err_line(&format!(
+        "  cache.enabled  {} ({})",
+        effective.cache.enabled, effective.cache_enabled_source
+    ));
+    err_line(&format!(
+        "  cache.capacity  {} ({})",
+        effective.cache.capacity, effective.cache_capacity_source
+    ));
+    for warning in &effective.warnings {
+        err_line(&format!("warning: {}: {}", warning.code, warning.message));
+    }
+}
+
+fn render_local_outcome(
+    outcome: &waymark_core::ops::local_config::LocalOutcome,
+    json: bool,
+    action: &str,
+) -> Result<(), WaymarkError> {
+    if json {
+        emit(&success_envelope(
+            waymark_core::view::local_outcome_json(outcome),
             Meta::direct_file_scoped(),
         ))?;
         return Ok(());
     }
-    // The document itself on stdout, so `config show > config.toml` works.
-    print!("{}", config.to_toml_string());
+    if outcome.changed {
+        err_line(&format!(
+            "{action}: {} (shared revision {} unchanged)",
+            outcome
+                .local
+                .to_toml_string()
+                .trim_end()
+                .replace('\n', "; "),
+            outcome.revision
+        ));
+    } else {
+        err_line(&format!("{action}: nothing to change"));
+    }
     Ok(())
 }
 
-fn render_findings(findings: &[Finding], json: bool) -> Result<(), WaymarkError> {
+fn render_findings(
+    config_path: &camino::Utf8Path,
+    findings: &[Finding],
+    json: bool,
+) -> Result<(), WaymarkError> {
     if findings.is_empty() {
         if json {
             emit(&success_envelope(
@@ -342,13 +430,17 @@ fn render_findings(findings: &[Finding], json: bool) -> Result<(), WaymarkError>
         err_line(&format!("{} configuration issue(s)", findings.len()));
         for finding in findings {
             err_line(&format!("  {}: {}", finding.code, finding.message));
-            if let Some(Location::ConfigKey { key }) = &finding.location {
-                err_line(&format!("    at {key}"));
+            match &finding.location {
+                Some(Location::ConfigKey { key }) => err_line(&format!("    at {key}")),
+                // A finding in the local document names that file, so the two
+                // documents are never confused.
+                Some(Location::File { path, .. }) => err_line(&format!("    at {path}")),
+                _ => {}
             }
         }
     }
     Err(WaymarkError::config_invalid(
-        "config.toml",
+        config_path.to_string(),
         findings
             .iter()
             .map(|finding| finding.message.clone())
@@ -359,13 +451,7 @@ fn render_findings(findings: &[Finding], json: bool) -> Result<(), WaymarkError>
 fn render_outcome(outcome: &ConfigOutcome, json: bool, action: &str) -> Result<(), WaymarkError> {
     if json {
         emit(&success_envelope(
-            serde_json::json!({
-                "config": waymark_core::view::config_json(&outcome.config),
-                "changed": outcome.changed,
-                "changed_keys": outcome.changed_keys,
-                "previous_revision": outcome.previous_revision,
-                "revision": outcome.revision,
-            }),
+            waymark_core::view::config_outcome_json(outcome),
             Meta::direct_file_scoped(),
         ))?;
         return Ok(());

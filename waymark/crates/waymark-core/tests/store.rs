@@ -7,6 +7,7 @@ use waymark_core::error::Code;
 use waymark_core::model::CategoryKey;
 use waymark_core::store::InitOptions;
 use waymark_core::testing::fixtures;
+use waymark_core::user_config::UserConfig;
 use waymark_core::{Config, Project};
 
 fn utf8(dir: &tempfile::TempDir) -> Utf8PathBuf {
@@ -21,8 +22,14 @@ fn init_creates_the_configuration_the_ignore_file_and_the_category_directory() {
 
     assert_eq!(project.root(), root);
     assert_eq!(project.metadata_dir(), root.join(".waymark"));
-    assert_eq!(project.config_path(), root.join(".waymark/config.toml"));
-    assert_eq!(project.lock_path(), root.join(".waymark/write.lock"));
+    assert_eq!(
+        project.config_path(),
+        root.join(".waymark").join("config.toml")
+    );
+    assert_eq!(
+        project.lock_path(),
+        root.join(".waymark").join("write.lock")
+    );
 
     let config_bytes = std::fs::read_to_string(root.join(".waymark").join(CONFIG_FILE)).unwrap();
     assert_eq!(config_bytes, Config::fresh().to_toml_string());
@@ -32,7 +39,7 @@ fn init_creates_the_configuration_the_ignore_file_and_the_category_directory() {
     assert!(ignore.lines().any(|line| line == "write.lock"), "{ignore}");
 
     assert!(
-        root.join("work/task").is_dir(),
+        root.join("work").join("task").is_dir(),
         "the category directory exists"
     );
 }
@@ -49,20 +56,33 @@ fn init_is_safe_to_re_run() {
 }
 
 #[test]
-fn init_records_the_named_operator() {
+fn init_writes_the_seeded_local_operator_and_never_the_shared_document() {
     let dir = tempfile::tempdir().unwrap();
     let root = utf8(&dir);
-    let project = Project::init(
+    let mut local = UserConfig::empty();
+    local.operator = Some("frank".to_owned());
+    Project::init(
         &root,
         InitOptions {
-            operator: Some("frank".to_owned()),
+            local: Some(local),
             ..InitOptions::default()
         },
     )
     .unwrap();
-    assert_eq!(project.config().operator.as_deref(), Some("frank"));
     let reopened = Project::open(&root).unwrap();
-    assert_eq!(reopened.config().operator.as_deref(), Some("frank"));
+    assert_eq!(
+        UserConfig::load(&reopened.user_config_path())
+            .unwrap()
+            .operator
+            .as_deref(),
+        Some("frank")
+    );
+    // The shared document is byte-identical to a fresh one: no local value
+    // leaks into the shared baseline.
+    assert_eq!(
+        std::fs::read_to_string(reopened.config_path()).unwrap(),
+        Config::fresh().to_toml_string()
+    );
 }
 
 #[test]
@@ -70,7 +90,7 @@ fn discover_walks_up_from_a_nested_directory() {
     let dir = tempfile::tempdir().unwrap();
     let root = utf8(&dir);
     Project::init(&root, InitOptions::default()).unwrap();
-    let nested = root.join("work/task/deeper");
+    let nested = root.join("work").join("task").join("deeper");
     std::fs::create_dir_all(&nested).unwrap();
 
     let found = Project::discover(&nested).expect("the project is found above the cwd");
@@ -81,9 +101,10 @@ fn discover_walks_up_from_a_nested_directory() {
 fn discover_reports_the_directory_it_searched_from() {
     let dir = tempfile::tempdir().unwrap();
     let root = utf8(&dir);
-    let error = Project::discover(&root.join("some/deeper/path")).unwrap_err();
+    let error = Project::discover(&root.join("some").join("deeper").join("path")).unwrap_err();
     assert_eq!(error.code(), Code::ProjectNotFound);
-    assert!(error.message().contains("some/deeper/path"), "{error}");
+    let searched = root.join("some").join("deeper").join("path").to_string();
+    assert!(error.message().contains(&searched), "{error}");
 }
 
 #[test]
@@ -97,20 +118,26 @@ fn opening_a_directory_without_a_project_is_project_not_found() {
 fn an_existing_project_is_loaded_rather_than_replaced() {
     let dir = tempfile::tempdir().unwrap();
     let root = utf8(&dir);
-    let mut config = Config::fresh();
-    config.operator = Some("someone".to_owned());
+    let mut local = UserConfig::empty();
+    local.operator = Some("someone".to_owned());
     Project::init(
         &root,
         InitOptions {
-            config: Some(config),
+            local: Some(local),
             ..InitOptions::default()
         },
     )
     .unwrap();
 
-    // A bare `init` must not clobber the operator that is already recorded.
+    // A bare `init` must not clobber the local document already written.
     let project = Project::init(&root, InitOptions::default()).unwrap();
-    assert_eq!(project.config().operator.as_deref(), Some("someone"));
+    assert_eq!(
+        UserConfig::load(&project.user_config_path())
+            .unwrap()
+            .operator
+            .as_deref(),
+        Some("someone")
+    );
 }
 
 #[test]
@@ -118,16 +145,24 @@ fn init_with_force_replaces_the_configuration() {
     let dir = tempfile::tempdir().unwrap();
     let root = utf8(&dir);
     Project::init(&root, InitOptions::default()).unwrap();
+    let mut local = UserConfig::empty();
+    local.operator = Some("someone".to_owned());
     let project = Project::init(
         &root,
         InitOptions {
             force: true,
-            operator: Some("someone".to_owned()),
+            local: Some(local),
             ..InitOptions::default()
         },
     )
     .unwrap();
-    assert_eq!(project.config().operator.as_deref(), Some("someone"));
+    assert_eq!(
+        UserConfig::load(&project.user_config_path())
+            .unwrap()
+            .operator
+            .as_deref(),
+        Some("someone")
+    );
 }
 
 #[test]
@@ -191,7 +226,7 @@ fn a_missing_category_directory_reads_as_empty() {
     let dir = tempfile::tempdir().unwrap();
     let root = utf8(&dir);
     let project = Project::init(&root, InitOptions::default()).unwrap();
-    std::fs::remove_dir_all(root.join("work/task")).unwrap();
+    std::fs::remove_dir_all(root.join("work").join("task")).unwrap();
     let inventory = project.inventory().unwrap();
     assert!(inventory.entries.is_empty());
 }
@@ -293,7 +328,7 @@ fn the_configured_storage_root_is_honoured() {
         },
     )
     .unwrap();
-    assert!(root.join("items/tasks").is_dir());
+    assert!(root.join("items").join("tasks").is_dir());
     let id = waymark_core::WorkItemId::parse("wm-3f7k9q2m4x8c").unwrap();
     assert!(project
         .path_for(&id, &CategoryKey::parse("task").unwrap())
@@ -343,6 +378,9 @@ fn a_constant_id_source_exhausts_its_budget_rather_than_looping_forever() {
     assert_eq!(error.code(), Code::IdGenerationFailed);
 }
 
+// A symlink is a Unix-only fixture: on Windows the equivalent
+// reparse-point behaviour needs the platform effort that owns it.
+#[cfg(unix)]
 #[test]
 fn a_symlinked_metadata_gitignore_is_not_written_through() {
     let dir = tempfile::tempdir().unwrap();
@@ -352,7 +390,7 @@ fn a_symlinked_metadata_gitignore_is_not_written_through() {
     std::fs::create_dir_all(root.join(".waymark")).unwrap();
     let outside = dir.path().join("outside-gitignore");
     std::fs::write(&outside, b"keep me\n").unwrap();
-    std::os::unix::fs::symlink(&outside, root.join(".waymark/.gitignore")).unwrap();
+    std::os::unix::fs::symlink(&outside, root.join(".waymark").join(".gitignore")).unwrap();
 
     let error = Project::init(&root, InitOptions::default()).unwrap_err();
     assert_eq!(error.code(), Code::LockFailed);
@@ -364,9 +402,13 @@ fn an_existing_gitignore_entry_is_not_duplicated() {
     let dir = tempfile::tempdir().unwrap();
     let root = utf8(&dir);
     std::fs::create_dir_all(root.join(".waymark")).unwrap();
-    std::fs::write(root.join(".waymark/.gitignore"), "cache\nwrite.lock\n").unwrap();
+    std::fs::write(
+        root.join(".waymark").join(".gitignore"),
+        "cache\nwrite.lock\n",
+    )
+    .unwrap();
     Project::init(&root, InitOptions::default()).unwrap();
-    let ignore = std::fs::read_to_string(root.join(".waymark/.gitignore")).unwrap();
+    let ignore = std::fs::read_to_string(root.join(".waymark").join(".gitignore")).unwrap();
     assert_eq!(ignore.matches("write.lock").count(), 1, "{ignore}");
     assert!(ignore.contains("cache"), "{ignore}");
 }

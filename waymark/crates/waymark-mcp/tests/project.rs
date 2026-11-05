@@ -28,11 +28,18 @@ async fn project_init_creates_a_project_and_info_describes_it() {
     assert_eq!(envelope["ok"], true);
     assert_eq!(envelope["v"], 1);
     assert_eq!(envelope["data"]["storage_root"], "work");
-    assert_eq!(envelope["data"]["operator"], "frank");
-    assert_eq!(envelope["data"]["timezone"], "Europe/Berlin");
+    // The identity seeds are local settings: the summary never reports them as
+    // part of the shared project.
+    assert!(envelope["data"].get("operator").is_none());
+    assert!(envelope["data"].get("timezone").is_none());
     assert_eq!(envelope["data"]["categories"]["task"]["path"], "work/task");
     assert_eq!(envelope["data"]["item_count"], 0);
     assert_eq!(envelope["_meta"]["source"], "direct_file");
+
+    let local = std::fs::read_to_string(root.join(".waymark").join("user.toml"))
+        .expect("init writes the local document");
+    assert!(local.contains("operator = \"frank\""), "{local}");
+    assert!(local.contains("timezone = \"Europe/Berlin\""), "{local}");
 
     let result = client.call("waymark_project_info", common::no_args()).await;
     let envelope = common::envelope(&result);
@@ -42,7 +49,7 @@ async fn project_init_creates_a_project_and_info_describes_it() {
     assert!(envelope["data"]["revision"].is_number());
     assert_eq!(
         envelope["data"]["config_path"],
-        format!("{root}/.waymark/config.toml")
+        root.join(".waymark").join("config.toml").to_string()
     );
     assert_eq!(envelope["_meta"]["completeness"], "scoped");
     assert_eq!(envelope["_meta"]["freshness"], "fresh");

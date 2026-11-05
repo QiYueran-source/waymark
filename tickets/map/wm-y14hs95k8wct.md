@@ -7,7 +7,103 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-04T12:35:23Z
+updated_at: 2026-11-05T07:12:29Z
+closed_at: 2026-11-03T23:52:21Z
+---
+---
+schema: 1
+id: wm-y14hs95k8wct
+title: 'Waymark: General-purpose tracker design map'
+category: map
+status: closed
+owner: frank
+creator: frank
+created_at: 2026-11-03T23:52:21Z
+updated_at: 2026-11-05T07:10:12Z
+closed_at: 2026-11-03T23:52:21Z
+---
+---
+schema: 1
+id: wm-y14hs95k8wct
+title: 'Waymark: General-purpose tracker design map'
+category: map
+status: closed
+owner: frank
+creator: frank
+created_at: 2026-11-03T23:52:21Z
+updated_at: 2026-11-05T07:09:11Z
+closed_at: 2026-11-03T23:52:21Z
+---
+---
+schema: 1
+id: wm-y14hs95k8wct
+title: 'Waymark: General-purpose tracker design map'
+category: map
+status: closed
+owner: frank
+creator: frank
+created_at: 2026-11-03T23:52:21Z
+updated_at: 2026-11-05T07:07:48Z
+closed_at: 2026-11-03T23:52:21Z
+---
+---
+schema: 1
+id: wm-y14hs95k8wct
+title: 'Waymark: General-purpose tracker design map'
+category: map
+status: closed
+owner: frank
+creator: frank
+created_at: 2026-11-03T23:52:21Z
+updated_at: 2026-11-05T07:05:17Z
+closed_at: 2026-11-03T23:52:21Z
+---
+---
+schema: 1
+id: wm-y14hs95k8wct
+title: 'Waymark: General-purpose tracker design map'
+category: map
+status: closed
+owner: frank
+creator: frank
+created_at: 2026-11-03T23:52:21Z
+updated_at: 2026-11-05T06:58:13Z
+closed_at: 2026-11-03T23:52:21Z
+---
+---
+schema: 1
+id: wm-y14hs95k8wct
+title: 'Waymark: General-purpose tracker design map'
+category: map
+status: closed
+owner: frank
+creator: frank
+created_at: 2026-11-03T23:52:21Z
+updated_at: 2026-11-05T06:52:31Z
+closed_at: 2026-11-03T23:52:21Z
+---
+---
+schema: 1
+id: wm-y14hs95k8wct
+title: 'Waymark: General-purpose tracker design map'
+category: map
+status: closed
+owner: frank
+creator: frank
+created_at: 2026-11-03T23:52:21Z
+updated_at: 2026-11-05T06:48:33Z
+closed_at: 2026-11-03T23:52:21Z
+---
+---
+schema: 1
+id: wm-y14hs95k8wct
+title: 'Waymark: General-purpose tracker design map'
+category: map
+status: closed
+owner: frank
+creator: frank
+created_at: 2026-11-03T23:52:21Z
+updated_at: 2026-11-05T06:41:55Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -417,7 +513,244 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - Both findings are info severity, non-fixable, and never change the exit code. `doctor` and `validate` report them so a user learns before running history; they do not install Git or initialize a repository.
 - This adds `GIT_UNAVAILABLE` to the frozen registry (37 → 38): the registry table, JSON-schema enum, golden snapshot, and documented table change in the same edit.
 
+### Cross-platform planning direction
+
+- Confirmed by the user on 2026-11-05: the separate cross-platform effort will find the way to an implementable adaptation design and a basis for specification revisions. Review the existing Windows specification, decide platform-module responsibilities and verification gates, and defer specification synchronization and implementation tickets until the design is ready or the user asks. Do not implement product code while charting the map.
+
+- Confirmed by the user on 2026-11-05: Windows MSVC and GNU toolchains are both to be built and tested in CI; initially publish only MSVC-built Windows artifacts. GNU users can build from source; no separate GNU release artifact is initially promised. The exact target matrix, test gates, and dependency and runtime compatibility still require investigation. This is a later planning direction, not a claim of current support, and supersedes the MSVC-only scope in the existing Windows platform specification once that specification is synchronized.
+
+- Confirmed by the user on 2026-11-05: retain the existing Linux and macOS target scope and add Windows x86_64 MSVC and x86_64 GNU. Windows ARM64, Cygwin, and WSL-specific behavior are not in this effort.
+- The adaptation design covers core filesystem operations, Git, CLI, MCP, Web, CI, and release verification for platform compatibility; it does not introduce new product features.
+- Support is limited to local filesystems. Concurrent access to the same project over NFS, SMB, or other network filesystems is not supported by this effort.
+
+- Confirmed by the user on 2026-11-05: the map covers lock safety and contention; replacement, rollback, permissions and migrations; paths and Git parity; the platform-module design and existing dependencies; verification, CI and release; and how the outcomes relate to the existing Windows specification. Concrete contracts and implementation choices remain open.
+- For this map, record decision-ticket types in bodies and use Waymark native parent and dependency relationships. Do not add project-wide fields for ticket types or claims. The required human owner is not an unclaimed marker. Confirmed by the user on 2026-11-05: one AI will work through decisions sequentially for now; do not change item status or project configuration solely to claim a decision ticket. Revisit a concurrent-claim convention only if parallel work becomes necessary.
+
+- Confirmed by the user on 2026-11-05: keep external research on local research branches, linked from the relevant decision tickets; do not push branches or open PRs automatically.
+
+- Confirmed by the user on 2026-11-05 for cross-platform lock safety: if a cloned project's `.waymark/write.lock` is already a symbolic link to another file, Waymark refuses to open it, reports an error, does not modify its target, and does not continue the project write. Equivalent protection covers Windows reparse points; the later decision below rejects all types for the final lock path item, while the mechanism remains to be established. The check/open race is in scope: a separate pre-open path check alone is insufficient.
+- A malicious process with permission to continuously replace the project directory, `.waymark` directory, or lock path during a write is outside this effort's security promise. This exclusion does not waive the pre-existing malicious-link rule or ordinary Waymark concurrency requirements; detectable anomalies should fail explicitly. The later decisions below specify the metadata directory, hard links, root aliases, and external lock-path replacement without implying complete adversarial-directory protection.
+- Windows MSVC and GNU builds must use the same project lock protocol: simultaneous mediated writes to the same local project serialize, or the contender waits and fails under the existing timeout policy. Verify this across actual native builds. The lock is cooperative; external editors do not take it and fingerprint conflict checks still apply.
+
+- Confirmed by the user on 2026-11-05: on Windows reject `.waymark/write.lock` when the final path item is any reparse point; do not maintain an allowlist of apparently harmless types. The safety guarantee cannot rely solely on a separate pre-open check; the mechanism requires native validation.
+- Reject mediated writes if the project’s `.waymark` directory itself is a pre-existing directory link, including a Windows directory reparse point; explain that a regular metadata directory is required. This does not promise defense against malicious ancestor replacement during an operation. A later decision below permits project-root aliases while requiring them to use the same lock.
+- If access, type identification, or verification of a required lock-safety condition fails, report an error and do not perform an unlocked write. Read-only operations remain lock-free and are not blocked merely because the write lock cannot be obtained.
+- When a process holding the lock crashes, rely on operating-system release and bounded retry; never infer a stale lock from file existence, age, or PID, and never forcibly reclaim it on that basis. A persistent lock file alone is not evidence of a live holder. Verify Windows release and retry behavior natively.
+
+- Confirmed by the user on 2026-11-05: a project may be accessed through a symbolic-link or equivalent alias to its root. Different aliases of the same actual project must use the same lock; native platform tests must verify this. This does not allow the `.waymark` directory itself to be a link.
+- Waymark never deletes or recreates a lock file merely to release the lock and should tell users not to manually clean it. External deletion or replacement of the lock path while a write is in progress is unsupported. If the OS prevents replacement or Waymark detects an anomaly, fail safely; do not promise detection of every external replacement.
+- Preserve the shared error taxonomy: lock contention that exceeds the configured bounded wait returns retryable `LOCK_TIMEOUT`; inability to safely open or verify the lock file returns `LOCK_FAILED` and the write is not automatically retried. CLI and MCP use the same classification; neither failure permits an unlocked write.
+- Native Windows verification must include MSVC and GNU processes contending on the same project lock, reacquisition after a holder exits or crashes, rejection of lock-file symbolic links and reparse points without writing through them, and the required error classifications. Concrete CI provisioning and handling of unavailable test capabilities remain for the verification and release decision.
+
+- Confirmed by the user on 2026-11-05: reject a lock file when the OS can establish that it has multiple hard links; if its hard-link count cannot be reliably checked, fail closed with `LOCK_FAILED`, without proceeding to an unlocked write. Native cross-platform feasibility and filesystem support must be validated; if a supported filesystem cannot meet the requirement, return to the user for a decision instead of silently weakening it.
+
+- Confirmed by the user on 2026-11-05: retain the single-file atomic replacement contract on supported platforms, including Windows. A reader of an existing document sees either the complete old content or the complete new content, not an intermediate partial document. Do not silently fall back to in-place overwrite; a filesystem or implementation unable to provide the guarantee is not accepted as supporting it. Native validation and the choice of mechanism remain open.
+- Do not promise automatic recovery of a multi-file operation after power loss, operating-system crash, or forced process termination; do not promise that every successful write is durable after power loss. For ordinary handled write errors, retain the existing application-level rollback requirement and explicit rollback-failure reporting. A per-file atomic replacement is not a multi-file filesystem transaction.
+- A storage migration across filesystem volumes is rejected. It must not silently substitute copying and deleting for the same-filesystem directory move. When volume identity is uncertain, the later decision below requires dry-run to report uncertainty and actual execution to refuse.
+- On Windows, replacing an existing file must not silently broaden its prior access permissions: e.g. a previously restricted work item must not become readable by additional users as a side effect of an edit. Windows ACLs are not Unix mode bits; subsequent decisions below specify owner, DACL and failure policy.
+
+- Confirmed by the user on 2026-11-05: when storage-migration preflight cannot determine whether source and target are on the same volume, dry-run explicitly reports the uncertainty and the actual migration refuses to execute. Actual execution repeats complete prevalidation; an earlier successful preview is not authorization. A successful precheck does not guarantee the eventual rename succeeds, so execution failures must still be handled and reported.
+- On a handled file-replacement error, do not assume the failing destination was unchanged: inspect and handle its actual state as well as restoring earlier completed targets. If restoration fails or the final state cannot be confirmed, explicitly report affected paths and recovery state instead of returning an ordinary failure that implies nothing changed.
+- On Windows, if Waymark cannot establish that replacement preserves the existing file's access restrictions without broadening them, refuse the replacement and report an error rather than inheriting potentially broader temporary-file or directory permissions. If a failure during replacement leaves final permissions uncertain, report affected paths and recovery state under the preceding failure rule. The ACL mechanism remains to be determined; later decisions below define the security metadata contract.
+- If an existing work-item file is marked read-only, editing fails and preserves the original file; Waymark does not automatically clear the read-only attribute in order to replace it. Windows read-only attributes and ACLs are distinct and both require validation and tests.
+
+- Confirmed by the user on 2026-11-05: when editing an existing Windows file, preserve its owner and discretionary access control list (DACL), including inheritance/protection state; refuse replacement if preservation cannot be established. A later decision below makes no general SACL-preservation promise. Native feasibility, required privileges and interaction with the no-broader-access requirement must be verified.
+- For an existing restricted target, protect temporary files throughout creation, staging, replacement and cleanup so they are not accessible more broadly than the target. If this cannot be ensured, refuse the write. This rule applies to the entire staging interval, not only the final file; its mechanism and native verification remain open.
+- A batch recovery error must distinguish paths confirmed restored from paths whose restoration failed or whose final state is unknown; identify the failing path and locations of any recovery material that actually exists. It must not claim success or imply that nothing changed. Exact machine-readable fields remain for later interface design.
+- Native Windows verification must cover replacement of a restricted-ACL file, refusal to edit a read-only file, temporary-file access restrictions, replacement failure and rollback reporting, and refusal of cross-volume migration. CI provisioning and the policy for unavailable test capabilities remain for the verification and release decision.
+
+- Confirmed by the user on 2026-11-05: any backup or recovery file containing old restricted content must be no more broadly accessible than its original throughout creation, use and retention. If recovery material cannot be safely protected, do not begin an operation that relies on it for recovery. This does not promise durable crash recovery or that recovery files always exist.
+- For a newly created work item with no existing target ACL, the final file may inherit its destination directory's default permissions; do not guess an unrelated work item as a permission template. Staging a new file must not grant broader access than the intended final directory policy. How to enforce this on each supported platform requires native verification.
+- No general preservation of additional Windows metadata such as SACLs, alternate data streams or timestamps is promised at this stage; this does not relax the agreed owner, DACL, read-only, access-control or data-safety guarantees. A concrete need or incompatibility can be brought back for a separate decision.
+- If abrupt termination leaves temporary files or recovery materials, later diagnostics should notify users to inspect those leftovers. Do not automatically treat them as authoritative, restore them, or overwrite existing work items. Identification and safe diagnostic behavior remain to be designed; no automatic crash recovery is promised.
+
+- Confirmed by the user on 2026-11-05: diagnostics must not infer that a temporary or recovery file is abandoned solely from its name or age. If activity cannot be ruled out, describe it only as a file requiring inspection and do not claim it is safe to delete; another Waymark process might be using it.
+- Diagnostics of potential temporary or recovery material report its path and the reason for inspection; they do not automatically delete, move, restore, or follow a link to read its contents. This does not make the material authoritative or promise automatic crash recovery.
+- A local filesystem is supported only if it meets the agreed locking, atomic replacement, permissions, and migration requirements; local status alone does not prove those guarantees. Do not silently weaken safety when capabilities cannot be established. The exact supported filesystem list and verification strategy remain for the verification and release decision.
+- Do not describe an incomplete or failed file/directory synchronization as safely persisted to disk. Atomic visibility is distinct from power-loss durability. The later decision below specifies staged-file and post-replacement directory-sync failures; no durable-commit guarantee is implied.
+
+- Confirmed by the user on 2026-11-05: if synchronization of a staged temporary file fails before replacement begins, stop and report failure without replacing the original target. When replacement has succeeded but subsequent directory synchronization fails, report the successful replacement with a warning that directory synchronization was not confirmed; do not describe the write as safely durable after power loss or return an ordinary failure implying the target did not change. The warning must reach callers; its exact machine-readable representation and batch aggregation remain to be designed.
+
+
+### Cross-platform paths and Git: initial decisions
+
+- Confirmed by the user on 2026-11-05: persisted storage-root and category paths, and storage-migration targets, use a common cross-platform lexical validation policy on Linux, macOS, and Windows, rather than being accepted solely according to the host platform. They must safely represent paths relative to the project; Windows drive-relative forms such as `C:work` cannot be treated as ordinary Unix names and then acquire a different meaning on Windows. The later decisions below specify component and separator rules and the initial policy for existing incompatible configurations; detailed remediation remains open. This rule applies to persisted project-relative paths, not to the actual absolute path where a project resides.
+- A working-tree diff for a specified existing, untracked work-item file returns a nonempty patch representing the whole new file on Linux, macOS, Windows MSVC, and Windows GNU when Git is available. It must not silently report an empty diff solely because of the platform. The implementation mechanism and edge cases remain open.
+- A working-tree diff scoped to the storage root without an item continues to cover tracked files only, rather than automatically including all untracked work items. Document that scope explicitly: an empty directory-scope patch does not establish that there are no untracked files. A user may request an individual untracked work-item diff by ID. This preserves existing scope instead of adding a new aggregation feature.
+
+
+- Confirmed by the user on 2026-11-05: persisted project-relative storage and category paths and storage-migration targets use `/` as their separator on every platform. Reject absolute paths, Windows drive-relative paths such as `C:work`, backslashes rather than silently converting them, empty path components, and `..` components. The later decisions below permit standalone `.` for the storage root, but not for a category path. The actual absolute project location is outside this path grammar.
+- Reject path components that are not portable to Windows on every platform: Windows reserved device names case-insensitively, including forms with extensions such as `con.txt`; Windows-forbidden characters and control characters; and components ending in a space or dot. The exhaustive rules and native verification still need investigation; the examples are not a complete specification.
+- Unicode names, including Chinese components such as `工作项/设计`, are allowed rather than limiting names to ASCII. They must still satisfy all other portability and safety checks. Later decisions below specify a conservative case/Unicode comparison; acceptance of Unicode is not a promise that all Unicode names are distinct on every filesystem.
+- Git work-item paths, storage-root paths, and `git history --path` denote literal project paths, not Git pathspec magic or wildcard patterns. Special characters must not accidentally expand the query scope; a directory path still denotes the directory's contents. Exact validation and native Git verification remain open.
+
+
+- Confirmed by the user on 2026-11-05: the existing no-symlink policy for configured category paths and storage migration targets also rejects all pre-existing Windows reparse points in those restricted paths, including junctions and mounted folders, rather than checking symbolic links alone. If a migration cannot verify that target components are safe, actual execution refuses and reports why. The separately approved project-root alias remains allowed; this does not promise defense against malicious ancestor replacement during an operation. Later decisions below specify work-item direct reads and scans; other path classes remain open.
+- A working-tree diff requested by ID for an existing work-item file that Git ignores still produces a whole-new-file patch. The explicit single-item request is not suppressed by ignore rules. Storage-root diff continues to exclude untracked and ignored files.
+- When a Git repository has no `HEAD`, working-tree diff uses an empty tree as its baseline. A specified untracked item still produces a whole-new-file patch; staged items and staged files in storage-root scope are compared with that empty baseline, including their current working-tree state. Storage-root scope still does not automatically include untracked files. Once `HEAD` exists, the working-tree comparison remains against `HEAD`.
+
+
+- Confirmed by the user on 2026-11-05: existing projects with configuration paths that violate the new portable rules must not be silently renamed or continue writing as if valid. Report the specific configuration key, path and incompatibility. Preserve read-only configuration diagnostics, explicitly scoped to configuration rather than claiming a full project check. Users should back up and stop writes before coordinating directory and configuration changes and then revalidate; changing configuration alone may hide existing work-item files. Do not claim the existing migration command can repair an invalid configuration. Detailed repair guidance and any dedicated tool remain undecided.
+- Configuration validation and storage-migration prechecks on all platforms reject category path conflicts and overlap that differ only by ASCII letter case, including equality and ancestor/descendant relationships. Report the conflicting paths rather than choosing or overwriting one. This is a minimum portable rule, not a claim that ASCII comparison catches Unicode or all filesystem aliases; further collision policy remains open.
+- Git history and diff must correctly locate the actual containing working tree when the project is inside a repository subdirectory, accessed through a permitted project-root alias, or inside a linked worktree. Queries are limited to the requested project scope; an incorrect prefix must not expand a query to the entire repository or another project. Preserve the existing informational empty-result behavior when Git is missing or the project is not in a repository. Discovery mechanism and inability to establish the scope remain open.
+
+
+- Confirmed by the user on 2026-11-05: configuration validation and storage-migration prechecks apply a fixed-version Unicode normalization and full case-folding policy as a conservative, platform-independent comparison of path components. Reject equal or ancestor/descendant paths under that comparison, retaining the original names without automatically renaming. The later decisions below select the algorithm and Unicode version; verification remains open. This may reject names that can coexist on some Linux filesystems; it does not prove that every filesystem alias or collision is covered.
+- If a directory must be inspected to establish migration safety but its entries cannot be read, interpreted, or checked, dry-run reports that safety cannot be confirmed and actual migration refuses with a reason. Do not treat a failed check as no conflict, and do not automatically block unrelated operations because an unrelated directory is unreadable. The exact required inspection scope and error representation remain open.
+- Storage migration targets must not already exist, including empty directories. This stricter decision supersedes the earlier rule that specifically rejected non-empty existing targets; an existing empty target is now a conflict too, not something Waymark deletes or replaces. Execution must prevent an externally created target from being overwritten after prevalidation; if it cannot provide that guarantee, it refuses migration. The project advisory lock does not exclude external processes; the mechanism and feasibility remain open.
+- If Git is found but the project's scope within its containing working tree cannot be established reliably, history and diff fail explicitly rather than querying a broader scope, guessing a prefix, or returning a normal empty result. Retain the informational empty-result behavior only when Git is absent or the project is confirmed not to be in a repository.
+
+
+- Confirmed by the user on 2026-11-05: passing the fixed Unicode string comparison does not establish filesystem safety. Configuration and migration involving actual paths must also inspect relevant existing objects; if an actual filesystem alias would cause category overlap, migration overwrite, or escape, report the conflict and refuse the relevant operation. If a migration safety check cannot be completed, dry-run reports uncertainty and execution refuses, as already decided. Mechanisms and the scope that can actually be verified remain open; do not claim string folding detects every alias.
+- Storage-migration rollback must not overwrite an object another process has created at an original location after the move. If a particular move cannot be safely restored, stop that restoration and explicitly report rollback failure, affected paths and the current location of any material that actually exists for user recovery. Do not delete or overwrite the external object to claim rollback success. This does not promise detection of every malicious ancestor replacement.
+- For a supported ordinary text work item requested by ID, an untracked-file diff is a new-file Git patch, with paths relative to the actual working tree, that Git can apply against an appropriate clean baseline. Human-mode CLI stdout contains the patch only; CLI JSON and MCP carry the same patch content in their structured responses. If a safe patch cannot be produced, report an error rather than inventing one. Cross-platform tests and effects of Git configuration remain open.
+
+
+- Confirmed by the user on 2026-11-05: creating a work item must not overwrite an already existing target or one created by an external process after prevalidation. Creation fails with a conflict and leaves that other object untouched; a precheck or cooperative lock alone is not sufficient. If the platform cannot provide the guarantee, refuse the create. Mechanism and validation remain open.
+- Reject writing an existing work-item target that is any Windows reparse point; never write through it or replace its target. If the target type cannot be established, refuse the write. Do not rely solely on a separate pre-write path check; the mechanism requires native validation. Permitted project-root aliases remain allowed, and later decisions below specify work-item read behavior.
+- A storage migration may create missing target parent directories. On failure, only attempt to remove parent directories actually created by that migration, and only if still empty at cleanup; never recursively delete them or external contents. Report paths whose cleanup failed or state is unknown rather than claiming complete restoration. A dry-run creates no directories. Details of safely identifying directories under races remain open.
+
+
+- Confirmed by the user on 2026-11-05: the conservative component comparison uses Unicode 16.0.0 canonical caseless matching, computing `NFD(full_default_case_fold(NFD(component)))` for each path component, then comparing component sequences for equality or ancestor/descendant overlap. Preserve original names. The Unicode data version and dependencies must be verified for consistency and compatibility with Rust 1.85; full conformance and native tests remain to be specified. Unicode upgrades may affect previously valid configurations and require explicit compatibility review, not a silent table update. This comparison is not a complete filesystem alias detector.
+- A storage-root configuration or corresponding migration input may be the standalone `.` meaning the Waymark project root, not the containing Git repository root. For a project nested within a repository, Git scope must stay within that project. A storage-root-scoped Git diff for `.` can include tracked project files beyond work items; document this rather than calling it a work-item-only patch.
+- A category path, including a category-path migration target, may not be the standalone `.`: the project root contains metadata and other project files and must not be treated as a movable category directory. Existing configurations using it follow the incompatibility diagnosis and manually coordinated remediation rules, with no automatic rename.
+- Except the standalone `.` permitted for storage root, reject `.` components in persisted storage/category paths and storage-migration targets, including `./task` and `work/./task`, rather than silently normalizing or rewriting them. Use `task` and `work/task` respectively. Diagnose existing incompatible configurations under the agreed transition policy.
+
+
+- Confirmed by the user on 2026-11-05: the no-existing-target rule for storage migration applies to each actual category directory being moved, not to an existing storage-root container or target parent. For example, migration from `work` to `.` can move `work/task` to an absent `task` beneath the existing project root. It does not move, delete, or replace the project root itself; if an actual category destination is the existing project root, reject that move. All actual category destinations remain subject to no-overwrite guarantees.
+- Retain support for category paths outside the configured storage root rather than imposing a new containment requirement. Default storage-root Git history/diff may omit those categories and must not claim complete work-item coverage; individual items can be queried by ID. If a storage-root migration cannot derive a destination for an out-of-root category, refuse and identify that category rather than guessing or moving it automatically.
+- Unicode data upgrades are explicit compatibility changes: before affected writes, a newer release validates existing configuration with its new comparison rules, reports concrete collisions, and preserves configuration diagnostics and an explicit manual-repair path. Do not silently rename or merge. Release notes must warn collaborators to coordinate versions, since old and new releases may judge a path pair differently. Precise release/version representation remains open.
+
+
+- Confirmed by the user on 2026-11-05: an untracked single-work-item patch represents the actual working-tree file content at the time requested, not a guess at Git's future staged representation. For supported ordinary text it should reproduce that content when applied to a compatible clean target worktree. No byte-identical promise is made after target-side line-ending conversions, filters or special `git apply` configuration. If a safe applicable patch cannot be produced, fail explicitly. Exact supported attributes and native verification remain open.
+- When producing an applicable untracked single-item patch, do not invoke external diff or textconv that could produce arbitrary or irreversible output. Preserve correct Git path quoting/escaping. If other Git attributes prevent a safe ordinary-text applicable patch, report an error, not a fake patch. The supported attribute combinations and Git/version/platform verification remain open.
+- Inventory and projection scans do not follow any Windows reparse point as a work-item document, including forms that are not ordinary symbolic links. Report the path as a diagnostic and do not represent an uncertain scan as a complete projection. Valid work items may still be read independently under the existing scoped-read rules. Allowed project-root aliases and the stated limit on adversarial ancestor replacement remain unchanged. Direct-read behavior is specified below; native verification remains open.
+
+
+- Confirmed by the user on 2026-11-05: direct reads by work-item ID refuse final targets that are symbolic links or any Windows reparse point and do not follow them. Inability to reliably establish the target's type is an error; a separate pre-read path check alone is not sufficient. Existing scoped reads of other valid items remain available; permitted project-root aliases are unaffected. Native mechanism and tests remain open, and the existing limitation for malicious ancestor replacement still applies.
+- `git history --path` is a literal project-internal query path on every platform: reject absolute, Windows drive-relative and project-escaping paths, and do not treat wildcard characters as patterns. Do not automatically apply every Windows-portability restriction for persisted configuration paths to this temporary query input. Exact representation of special names and scope verification require testing.
+- Cleanup of parent directories created by a failed storage migration attempts removal only when the directory can still be confirmed as the same one this run created and is empty. If replaced or identity cannot be established, leave it in place and report incomplete cleanup; a matching pathname alone is insufficient. Mechanism and native feasibility remain open.
+
+
+- Confirmed by the user on 2026-11-05: category paths may not be the project-root `.waymark` metadata directory or lie inside it, on any platform. Apply the agreed conservative case/Unicode path comparison, including variants, and diagnose existing incompatible configuration without moving files automatically. The storage root may still be standalone `.`.
+- `git history --path` uses `/` separators on every platform, rejects backslashes and any `..` component, and allows standalone `.` for the Waymark project root. Wildcard characters are literal. A history filter need not exist in the current working tree, since it may refer to a deleted path; query scope remains inside the project.
+- Do not silently replace invalid or non-UTF-8 path data and then operate on the altered path. If a required project or work-item path cannot be represented losslessly as UTF-8, the affected operation fails or reports a diagnostic; do not claim a complete projection. Valid work items may still be read independently under scoped-read rules. A lossless diagnostic representation is an open interface question.
+
+
+- Confirmed by the user on 2026-11-05: validate persisted project-relative path inputs as provided; do not silently trim or change them. Reject a trailing space under the existing portability rule; a leading ordinary space in a component is part of its name if otherwise permitted. Diagnose the actual input and reason. Do not silently rewrite existing configuration.
+- When initializing a project with storage root `.`, generate default category paths like `task`, not `./task`. This is the correct spelling for newly generated paths, not permission to normalize old `./task` configurations silently; diagnose those under the existing transition policy.
+- Do not claim a single universal cross-platform path-length limit. Platform and filesystem length failures are reported explicitly; never truncate or automatically rename a path. Test long paths and failure handling; supported environments and exact length guarantees are deferred to verification and release planning.
+
+
+- Confirmed by the user on 2026-11-05: on every platform reject persisted storage/category path components and migration-target components whose device stem, case-insensitively for ASCII letters, is `CON`, `PRN`, `AUX`, `NUL`, `CONIN$`, `CONOUT$`, `COM1`–`COM9`, `LPT1`–`LPT9`, or `COM`/`LPT` followed by superscript `¹`, `²`, or `³`. These names remain rejected with extensions, including multiple extensions such as `NUL.tar.gz`; `COM10` is not reserved by this rule. `CONIN$` and `CONOUT$` are a conservative Waymark portability rule.
+- Also reject `COM0`, `LPT0`, and device stems ending in ordinary ASCII space before an extension, such as `CON .txt`, as a conservative Waymark policy rather than claiming the main Microsoft naming page explicitly bans these variants. Ordinary internal spaces in names such as `my file` remain allowed. Validate platform behavior natively.
+- Reject all Unicode general-category `Cc` control characters in persisted project-relative path components and migration targets on every platform, including NUL, U+0001–U+001F, DEL U+007F and U+0080–U+009F. The latter ranges are a conservative Waymark policy, not a claim that Microsoft's naming page explicitly forbids all of them.
+
+
+- Confirmed by the user on 2026-11-05: persisted project-relative storage/category path components and storage-migration target components reject `<`, `>`, `:`, `"`, `\`, `|`, `?`, `*` and the previously specified controls on all platforms. `/` separates components and cannot be component content. This rejects drive-relative forms and alternate-data-stream syntax; other Unicode remains eligible but actual filesystem acceptance is not guaranteed.
+- Category paths cannot equal or lie inside project-root `.git`, including variants equivalent under the agreed conservative path comparison. `.git` can be a directory or a linked-worktree file; do not treat it as a movable category. The storage root may still be `.`. This does not assume the Git metadata of every nested project is located inside its project root.
+- Untracked single-item patch generation must not treat Git `diff --no-index` exit status `1` alone as proof of a valid diff: it can also occur on some failure paths. Establish that output is a valid new-file patch for the specified file; explicitly report Git, read, encoding or verification errors rather than returning a normal empty result. Neither an exit-code check nor stderr check is assumed sufficient without evidence and tests; implementation remains open.
+- Configuration validation and storage migration prechecks must share the Unicode 16.0.0 comparison semantics and fixed-data-version tests, including canonical equivalence, full case folding and component-based ancestry. Native Linux, macOS, Windows MSVC and GNU testing must also cover actual collisions and links; string-only tests do not establish filesystem behavior. CI provisioning and release gates remain in verification and release planning.
+
+
+- Confirmed by the user on 2026-11-05: the configured storage root cannot be project-root `.waymark` or `.git`, or a descendant of either, including variants equivalent under the conservative comparison. Standalone `.` remains permitted. Diagnose existing incompatible configuration under the established transition policy; do not automatically modify it.
+- CLI documentation and MCP results must explicitly identify default Git history/diff scope as the configured storage root, not all work items. Root `.` may include other tracked project files, and categories outside the root may be omitted. An item query by ID addresses its concrete file. Exact presentation remains for interface design.
+- An existing Git executable that fails to run or whose command fails, including permission or corrupt-worktree errors, produces an explicit Git error rather than a missing-Git finding or successful empty result. Informational empty results apply only when Git is confirmed unavailable or the project is confirmed outside a repository, according to the existing availability contract.
+
+
+- Confirmed by the user on 2026-11-05: an untracked valid work item containing NUL may be classified as binary by Git; support a Git binary patch that can actually be applied rather than presenting only a `Binary files differ` notice as an applicable patch. If the Git version, attributes or environment prevent confirming a safe usable patch, fail explicitly. Native and Git-version validation remains open.
+- Git diff may inspect a damaged or empty work-item file if it can be safely located by ID; this does not make it a valid work item, and parse diagnostics remain distinct from the diff result. For an untracked file, return a patch only if a safe applicable new-file patch can be generated and verified; otherwise report an error. Never use lossy UTF-8 conversion to invent patch content.
+- If a patch cannot be represented losslessly in the text carried by CLI JSON and MCP, return an explicit error rather than replacing invalid bytes with U+FFFD and claiming applicability. A separate binary transport format is not added as part of this platform adaptation; whether one is needed remains an independent future design question. This does not forbid a Git binary patch that is itself losslessly representable as text.
+
+
+- Confirmed by the user on 2026-11-05: native verification on Linux, macOS and Windows MSVC/GNU must cover portable path validation, case and Unicode collisions, symlinks and reparse points, project-root aliases, linked worktrees, unborn repositories, ignored and untracked work items. Apply generated patches in isolated clean worktrees and check results. Fault-inject unreadable paths, uncertain Git scope and migration-target races. Exact CI provisioning, capability exceptions and mandatory release gates remain for the verification and release decision.
+- Do not silently weaken agreed safety or patch behavior to pass tests if a platform cannot provide no-overwrite moves, reliable reparse identification, or verifiable patches. Fail explicitly, carry platform feasibility and alternative mechanisms to module/verification design, and return to the user if the agreed behavior proves infeasible. This is a design requirement, not a claim that any native platform has been validated.
+- Leave undecided response formats and operational limits explicit: lossless diagnostics for non-UTF-8 paths, the exact field names of the warning and recovery responses decided below, and supported Git attribute combinations require follow-up design. The agreed warning aggregation and recovery outcome rules are recorded under Cross-platform warning and recovery responses; the existing warning/recovery response ticket tracks their remaining interface details. Platform module and verification work must address mechanisms, attribute support, and native evidence. Do not infer fields beyond those decisions, sync specifications or create implementation tickets from these open questions.
+
+
+### Cross-platform temporary and recovery diagnostics
+
+- Confirmed by the user: diagnostic checks for possible temporary or recovery material are bounded to known, safely accessible locations; they do not recursively scan the entire project or system to guarantee discovery. Report the checked scope and coverage that cannot be confirmed. A migration interruption may leave material in a former location no longer known from the current configuration, so no findings do not prove that no leftovers exist.
+
+- Confirmed by the user on 2026-11-05: candidate locations are derived entirely from the current configuration — the configured storage root, each configured category directory, and the project metadata directory — rather than from hard-coded platform paths or the system temporary directory. This follows the agreed rule that staging happens in the destination directory, so temporary and recovery material can only be produced there. The rule is identical on every platform and only the achieved coverage differs. A location no longer derivable from the configuration, such as a former category directory after an interrupted migration, is reported as uncovered instead of being silently assumed clean.
+- Confirmed by the user on 2026-11-05: an inspection that cannot reach a definite answer is recorded as unconfirmed and never as absent. This covers a file another process holds exclusively open on Windows, a directory that cannot be enumerated for permission reasons, and the equivalent permission-denied or path-disappeared races on Linux and macOS. One unreachable location yields a single coverage-gap record without failing the whole diagnostic, which continues with the locations it can reach.
+- Confirmed by the user on 2026-11-05: results reuse the existing diagnostic output and finding structure instead of adding a command or entry point. Two read-only codes are added: one for material that may require human inspection and one for a scope that cannot be confirmed. Both carry a path and a reason, use info or warning severity, and never change the exit code; the existing `--strict` behaviour that maps remaining error-severity findings to a non-zero exit is unaffected because neither code is error severity. Diagnostics still do not delete, move, restore or read through a link, and still do not infer that material is abandoned from its name or age.
+
+### Cross-platform response interface details
+
+- Confirmed by the user on 2026-11-05: the directory-synchronization warning uses a new registry code `DIRECTORY_SYNC_UNCONFIRMED` with no exit class and warning severity, carried by extending the shared `Warning` type with an optional `details` field. Warning details follow the same discipline as error details: a JSON value whose permitted keys are registered per code and pinned by the same golden snapshot, so no second mechanism appears. The warning stays in the success `_meta.warnings` collection and never changes success status or exit code.
+- `ROLLBACK_FAILED` details replace the ambiguous `applied`, `failed` and `rollback_failed` lists with explicit three-state reporting: `restored`, `failed` and `unknown`, plus `recovery_material` entries carrying a path and the reason it requires inspection. Each affected path appears in exactly one state. The old lists are removed rather than kept in parallel, because Waymark is an unreleased local tool with no external consumer and two shapes would let "unknown" be misread again; the specification is rewritten when it is synchronized.
+- A path in a machine response is a tagged union: a valid UTF-8 path remains a plain string exactly as today, and a path that cannot be represented losslessly becomes an object carrying base64 bytes. Human-readable output escapes those bytes instead of substituting replacement characters. Base64 for all paths was rejected because it makes ordinary output unreadable; percent-escaping raw bytes was rejected because every consumer would need a decoder easily confused with a real filename.
+- These are fixed shapes, not an implemented state: no warning currently carries details, recovery details still use the old lists, and path fields are still plain strings.
+- Confirmed by the user on 2026-11-05: `DIRECTORY_SYNC_UNCONFIRMED` details are `{directory, paths[]}` in the shared path representation, and the warning leaves `location` unset because one warning covers several paths and a single location would mislead. The tagged path representation applies uniformly to every machine path field, including path members inside structured locations, so consumers never decide field by field whether a destination can be an object. Human-readable output renders undecodable bytes as `\xNN` with the rest readable, no ellipsis, no guessing and no U+FFFD substitution.
+- Waymark's own created paths are always valid UTF-8; a non-UTF-8 path can only be an existing external file or directory that is referenced. The specification states this explicitly, so lossless representation remains a boundary case and the store keeps its UTF-8 path types rather than migrating to byte paths. Implementation and native verification remain separate work, and the reachability question for a non-UTF-8 on-disk path, given that the store uses UTF-8 paths throughout, belongs to the platform module and verification work.
+
+### Cross-platform warning and recovery responses
+
+- Confirmed by the user on 2026-11-05: a successful replacement whose directory synchronization failed produces one warning per failed synchronization event, not one per affected file and not a single aggregate count. A synchronization event may cover several files, so its warning must identify the directory and the affected paths in addition to the existing human-readable message. In JSON and MCP responses these warnings appear in the success `_meta.warnings` collection; they never change the success status or the CLI exit code. Because one event covers several paths, the warning shape gains a per-code optional details field alongside the existing `{code, message, location}` entry rather than duplicating an identical warning per path. The warning code is a registry entry with no exit class, warning severity, and never appears as a failure; its exact name and details schema are fixed during interface design.
+- A warning never substitutes for a documented durability guarantee: reporting the unconfirmed directory synchronization must not be worded as, or upgraded to, a claim that the write is durable after power loss. Paths inside these warnings follow the pending lossless non-UTF-8 representation rather than a new lossy encoding invented here.
+
+- Confirmed by the user on 2026-11-05: inability to attempt directory synchronization is not the same condition as a failed synchronization attempt, and only a failed attempt produces the per-write warning above. When a supported platform does not provide a directory-entry durability mechanism, that is a documented limitation of the platform, stated once in documentation and verification evidence, not a warning repeated on every successful write; the operation must still never be described as durably persisted. Each supported platform must declare explicitly whether it attempts directory synchronization, and native tests must show that a successful attempt on a supporting platform produces no fabricated warning and that a failing attempt produces one. Silently treating an unavailable mechanism as successful is forbidden.
+
+- Confirmed by the user on 2026-11-05: every affected path in a failed multi-file recovery is classified into exactly one of three states: confirmed restored, not restored with a known final state, or final state unknown. "Unknown" may not be folded into either of the other two, because that would imply a confirmation the operation does not have. The response also identifies the location of any recovery material that actually exists and why it requires inspection. The existing exit class 7, `ROLLBACK_FAILED`, and non-retryable classification are unchanged.
+- Human-mode CLI output must list those paths and their states, not merely the counts currently rendered in the message; a caller deciding how to repair the project needs the identities, not a summary. JSON and MCP carry the same content structurally. Exact field names, grouping and the position of these entries relative to existing `applied`, `failed` and `rollback_failed` details remain for interface design.
+
+### Cross-platform platform module design
+
+- Confirmed by the user on 2026-11-05: each supported platform target (Linux, macOS, Windows MSVC, Windows GNU) declares its platform capabilities at compile time instead of probing them per operation. Runtime code reports only a declared capability that failed in practice. A capability declared absent fails closed for the operations requiring it; silent degradation is forbidden. Capabilities that depend on the actual filesystem rather than the platform, at minimum volume identity and reparse-point identification, remain per-operation checks, and a single inconclusive judgement is treated as unknown so the operation refuses.
+- A maintained official Windows binding may be added as a `cfg(windows)` target-only dependency with a minimal feature set, because owner/DACL preservation, reparse-tag inspection, handle-based volume identity and no-replace moves cannot be expressed with the standard library alone; refusing them would make editing permission-restricted files impossible on Windows. It must not raise `rust-version = "1.85"` or change the licence position, and the exact crate, version and API list are fixed in the change that adds it.
+- The platform layer is an internal `waymark-core` module organised by capability, not a new crate and not a new public trait. `waymark-core`'s public API is unchanged; the module absorbs the scattered `cfg` branches and raw `libc` constants. Separating a crate is deferred until a second consumer exists. The browser opener moves out of the CLI adapter into this module so no platform behaviour remains in an adapter, while adapters keep their existing rendering role.
+- Fault injection is limited to optional hooks on the platform primitives, following the existing `Options`-closure style; no general mock filesystem is introduced. Injected failures verify that rollback and reporting paths execute, while real atomicity, permission and reparse semantics are verified natively on each platform. A test double is never evidence that a platform behaves correctly.
+- The confined Windows compilation work is a prerequisite for any Windows evidence, not a design preference: the unconditional `libc::ELOOP` and `libc::EXDEV` uses must become capability-based error classification that names no POSIX constant outside `cfg(unix)`, and every test that calls `std::os::unix` must be gated or moved into a platform-specific test module. A Windows run that skips a case reports the skip and its reason; silently absent coverage is not acceptable.
+- Consolidation targets are fixed by the current duplication rather than invented: one relative-path grammar serving configuration validation and migration prechecks, one path-inspection implementation serving the existing separate metadata checks, and one safe-open primitive shared by lock opening and replacement, with the `.gitignore` write that precedes lock acquisition kept out of it. The two relocation implementations stay distinct, because an item move carries fingerprint semantics that a raw rename cannot express.
+- Response-shape questions remain a separate decision: the warning code and details schema, the mapping of the three recovery states onto existing detail lists, and the lossless non-UTF-8 path representation are tracked by the platform response interface details item rather than settled here.
+- The first native Windows verification is a manual pilot run by the user, covering both Windows targets with formatting, linting and tests, and recording which cases ran, were skipped and why. Its outcome is evidence to record; a Linux pass says nothing about Windows, and an agreed behaviour that proves infeasible returns to the user instead of being quietly weakened.
+
+### Cross-platform verification and release gates
+
+- Confirmed by the user on 2026-11-05: both Windows targets run natively on `windows-latest`, one MSVC leg and one GNU leg, each running `fmt --check`, `clippy -D warnings` and `cargo test --workspace`. Cross-compilation never substitutes for either leg, because what is under test is rename atomicity, locking, ACL handling and reparse handling. The MSVC leg blocks merges immediately; the GNU leg may start observational while the pilot validates the toolchain, must be promoted to blocking once the pilot passes, and that promotion closes this work. Each run records the toolchain versions used, since the image's MinGW runtime differs from the one rustc documents.
+- A skipped test must be explicit and allowed: a stable identifier and reason registered in a version-controlled allowlist. A listed skip is a recorded coverage gap; an unlisted skip fails the leg. At least one environment must actually run the capability-dependent cases; on GitHub-hosted Windows the enabled Developer Mode and administrator runner are expected to satisfy this for symlink handling, so a skip there is a defect, not a normal outcome. A capability that no environment can exercise is stated in the release notes rather than left implicit.
+- The first Windows release publishes MSVC artifacts only: `x86_64-pc-windows-msvc` zip archives with checksums, passing the same version, licence and MSRV gates as the existing legs. The GNU leg builds and tests but publishes nothing; publishing GNU later requires the full gate set rather than an exemption.
+- The supported-platform statement stays narrow: Windows is supported on NTFS local volumes only, while network shares, FAT and exFAT are unsupported and fail closed instead of degrading. Linux and macOS support is not expanded by this work. Git's minimum supported version is the lowest version that actually passes in CI and is recorded with that version in the release notes; only verified attribute combinations are promised, and an unverified combination produces an explicit error instead of a guessed result.
+- A failing gate is never converted into a pass by retrying it. Where recorded Windows sharing-violation behaviour makes a test nondeterministic, the fix is to make the test deterministic, not to add retries; any quarantined test carries a tracking reference and a deadline, and quarantine may never cover lock safety, replacement and rollback, migration or path validation. A flaky safety test means the platform is not yet verified.
+- Nothing recorded here has run: CI has no Windows leg yet, the GNU leg exists only as a plan, and no MSVC artifact has been produced. These are evidence obligations, not evidence.
+
+### Cross-platform specification reconciliation
+
+- Confirmed by the user on 2026-11-05: one normative document survives. The functional specification becomes platform-neutral in its body with explicit per-platform statements where behaviour actually differs, and the Windows platform specification is absorbed into it and closed, its old text remaining only in Git history. Two documents would be two sources of truth, and the conflicts found during this work were exactly of that kind: locking and replacement stated differently in two normative places. A permanent platform-delta appendix was rejected because it leaves every reader asking which document wins.
+- The specification is synchronized before implementation tickets are cut. Every platform decision currently lives only in the design maps while the existing specification contradicts several of them — Unix-only scope, MSVC-only Windows support, a check-then-open symlink race treated as acceptable, no Windows binding, and GNU out of scope. Cutting tickets first would write them against superseded text.
+- Superseded passages are rewritten in place, with no errata layer and no override section; the replaced text lives in Git history, and a reader must not need to know how many earlier versions of a rule existed.
+- The frozen error registry is inside the reconciliation scope: `ROLLBACK_FAILED` reporting `restored`, `failed` and `unknown` instead of the ambiguous lists, the new `DIRECTORY_SYNC_UNCONFIRMED` warning code, and the two read-only diagnostic codes require the registry table, golden snapshot, JSON schema and compile-time match to change in the same commit. The release specification is updated in the same effort to add the two Windows CI legs and the MSVC-only artifact.
+- Synchronization updates normative text only; it does not implement the platform module, change the CI matrix or add release jobs. The Windows-only behaviour that appears as explicit per-platform statements rather than platform-neutral prose is: capability declarations, owner and DACL preservation, read-only refusal, reparse-point refusal, NTFS-only support, and the MSVC-only artifact with a GNU build-and-test leg. Any statement that Windows is supported, that a capability is verified, or that an artifact exists stays out of the specification until evidence exists; the specification states required behaviour and required evidence, not achieved results.
+- Linux and macOS behaviour already specified is preserved unless a platform decision explicitly changed it; synchronization is not an occasion to restate or re-derive settled non-platform rules.
+- The reconciliation approach is decided; the reconciliation itself has not been performed. No specification text has changed, no implementation ticket has been cut, and the Windows specification still contains the superseded statements.
+
+### Local user configuration
+
+- Confirmed by the user on 2026-11-05: move machine-specific cache settings, the acting `operator` identity, and time zone from shared `.waymark/config.toml` to local `.waymark/user.toml`. Project storage and data-model configuration remain shared. The time zone is a per-user preference for display and interpretation of offset-less local time, not a shared project time baseline; this supersedes the earlier decision that project timezone is shared and uniform.
+- First-time `init` creates `.waymark/user.toml` with the effective Git `user.name` when configured, the current machine-local time zone, and the existing cache defaults. If Git `user.name` is absent, operator is omitted. If the project is already initialized, `init` remains a no-op even when `--operator` or `--timezone` is supplied: it does not create a missing user file or overwrite an existing one. Runtime defaults remain available whether or not the file exists.
+- At runtime, explicit values in `user.toml` override local defaults; when a local value is absent, operator uses Git's effective `user.name` (Git's normal configuration precedence, including repository-local and global settings), timezone uses the current machine-local time zone, and cache settings use built-in defaults. An absent `user.toml` does not cause ordinary reads to create it. Clearing an explicit value removes the local override and restores its fallback; an empty operator is not a special opt-out of Git identity fallback.
+- Operator remains advisory only and does not authenticate or authorize users. Owner mismatch warnings compare against the effective operator; omitted `creator` defaults to that same identity when available, preserving existing semantics. Operation-level explicit operator overrides retain highest precedence.
+- The old `operator`, cache, and timezone settings are removed from shared `config.toml`; they are not migration fallbacks. This is a pre-release change, so backward compatibility and automatic migration of old settings are not required.
+- Users may edit `user.toml` manually. Existing interfaces for setting operator, timezone, and cache are retained but write only to `user.toml`; `init` operator/timezone options seed the new file when it is created. Shared project configuration commands continue to update only shared project settings. CLI and MCP use shared core configuration logic. `config show` presents effective settings and clearly identifies their source (user file or local default).
+- If `user.toml` exists but is malformed or contains invalid values, report a configuration error rather than silently ignoring it. If it is already tracked, reads continue to use it, while `init` reports this and continues without modifying the Git index; a command that would write it refuses and tells the user to untrack it manually. Human `config show` presents effective values with their sources; JSON presents effective values plus source metadata. If a local override is cleared, the source changes to the corresponding local default.
+- `init` ensures `.waymark/.gitignore` ignores `user.toml`, without modifying repository-level `.gitignore` or `.git/info/exclude`. Details of ignore-rule repair and error reporting remain to be specified.
+- The initial `user.toml` writes the current cache defaults explicitly rather than omitting cache keys; this makes the newly created file a complete local-settings snapshot. Future program-default changes do not silently alter an existing user's explicit cache values.
+- The local file uses a dedicated TOML shape containing only `operator`, `timezone`, and the `cache` settings. Unknown keys and shared project keys such as storage root, categories, and fields are invalid; user configuration cannot override project structure.
+- Writes to `user.toml` use the shared core configuration path, project lock, validation, atomic replacement, and conflict checks. They do not increment the shared project configuration revision and do not touch work-item files.
+- If Git is unavailable, the project is outside a Git repository, or effective `user.name` cannot be read, the Git operator fallback is simply unavailable: an explicit local operator still works, while an absent operator remains unset and ordinary Waymark operations continue. Other local defaults are unaffected.
+- If the machine-local timezone cannot be identified, timezone falls back to UTC with an explicit informational warning; an explicit timezone in `user.toml` does not depend on system timezone detection.
+- Explicit cache values written to `user.toml` remain stable when a later Waymark release changes built-in defaults; only a missing local cache field uses the current built-in default.
+- `validate` and `doctor` inspect `user.toml` as well as shared project configuration. Invalid local settings produce configuration findings located at `user.toml`; they do not change the shared configuration revision or affect other clones.
+- When creating or writing local settings, Waymark repairs a missing `user.toml` entry in `.waymark/.gitignore`. If the ignore file is invalid, non-writable, a symbolic link, or cannot be updated, the operation fails rather than creating or writing a local settings file that may be committed accidentally.
+- Configuration views distinguish shared and local concerns. Human output has project-configuration and local-user-configuration sections. Machine output separates `project_config`, `user_config`, effective values, and per-field source metadata identifying `user.toml`, Git, system timezone, or built-in defaults.
+
 ## Not yet specified
+
+### Cross-platform planning
+
+- The remaining platform adaptation contracts, safety guarantees, test and release gates, and specification reconciliation are tracked in [Waymark cross-platform adaptation](wm-4wbvzsv34g2p).
+
 
 ### Distribution
 

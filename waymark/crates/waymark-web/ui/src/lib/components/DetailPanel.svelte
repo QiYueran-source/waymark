@@ -135,6 +135,15 @@
 				<dd data-testid="detail-owner">{detail.owner ?? 'None'}</dd>
 				<dt>Creator</dt>
 				<dd>{detail.creator ?? 'None'}</dd>
+				<dt>Created</dt>
+				<dd data-testid="detail-created">
+					{detail.display_times.created_at}
+					<span class="muted">({detail.display_times.timezone})</span>
+				</dd>
+				{#if detail.display_times.closed_at}
+					<dt>Closed</dt>
+					<dd data-testid="detail-closed">{detail.display_times.closed_at}</dd>
+				{/if}
 				{#if detail.archived}
 					<dt>Archived</dt>
 					<dd>Yes</dd>

@@ -91,9 +91,12 @@ impl Repository {
     /// `path` as a repository-relative pathspec, when it is inside the
     /// repository.
     pub fn relative(&self, path: &Utf8Path) -> Option<String> {
-        path.strip_prefix(&self.root)
-            .ok()
-            .map(|relative| relative.as_str().to_owned())
+        path.strip_prefix(&self.root).ok().map(|relative| {
+            // A pathspec is a Git path, not a filesystem path: Git reads and
+            // reports `/` on every platform, so a Windows `\` would name
+            // nothing.
+            relative.as_str().replace('\\', "/")
+        })
     }
 }
 
@@ -122,6 +125,17 @@ impl GitProbe {
         Self {
             repository: find_repository(project),
             executable,
+        }
+    }
+
+    /// Probe a plain directory that may not be a project yet.
+    ///
+    /// Configuration resolution runs before or beside a project being opened,
+    /// so it needs the same environment a `Project` would report.
+    pub fn detect_at(root: &Utf8Path) -> Self {
+        Self {
+            repository: find_repository_at(root),
+            executable: find_executable(),
         }
     }
 
@@ -182,16 +196,24 @@ impl GitProbe {
 /// A `.git` **file** is accepted: that is how a linked worktree points at its
 /// private git directory.
 pub fn find_repository(project: &Project) -> Option<Repository> {
-    let start = absolute(project.root());
+    find_repository_at(project.root())
+}
+
+/// Find the repository root containing `root`, a plain directory.
+///
+/// The path form exists because local configuration resolution needs the
+/// repository for one identity lookup, not for a project: it runs before or
+/// alongside a project being opened.
+pub fn find_repository_at(root: &Utf8Path) -> Option<Repository> {
+    let start = absolute(root);
     let mut current: Option<&Utf8Path> = Some(start.as_path());
     for _ in 0..MAX_REPOSITORY_DEPTH {
         let directory = current?;
         let dot_git = directory.join(".git");
         if dot_git.is_dir() || dot_git.is_file() {
-            let project_prefix = project
-                .root()
+            let project_prefix = root
                 .strip_prefix(directory)
-                .map(|relative| relative.as_str().to_owned())
+                .map(|relative| relative.as_str().replace('\\', "/"))
                 .unwrap_or_default();
             return Some(Repository {
                 root: directory.to_path_buf(),
@@ -202,6 +224,47 @@ pub fn find_repository(project: &Project) -> Option<Repository> {
         current = directory.parent();
     }
     None
+}
+
+/// The operator identity Git would attribute a commit to, when it is readable.
+///
+/// `None` covers every way the lookup can fail — no repository, no executable,
+/// an unset `user.name`, an unreadable value — because the operator is advisory:
+/// an unavailable identity degrades the fallback and never blocks a write.
+pub fn user_name(probe: &GitProbe) -> Option<String> {
+    let (executable, repository) = (probe.executable()?, probe.repository()?);
+    let output = Command::new(executable)
+        .current_dir(repository.root())
+        .args(["config", "--get", "user.name"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let name = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    (!name.is_empty()).then_some(name)
+}
+
+/// Whether Git's index tracks `path`.
+///
+/// `false` covers every way the answer can be unavailable — no repository, no
+/// executable, a path outside the repository, or a Git failure — because
+/// tracking is a repository fact Waymark reports, never a precondition for an
+/// ordinary read or write.
+pub fn tracks(probe: &GitProbe, path: &Utf8Path) -> bool {
+    let (Some(executable), Some(repository)) = (probe.executable(), probe.repository()) else {
+        return false;
+    };
+    let path = absolute(path);
+    let Some(relative) = repository.relative(&path) else {
+        return false;
+    };
+    let output = Command::new(executable)
+        .current_dir(repository.root())
+        .args(["ls-files", "--error-unmatch", "--"])
+        .arg(relative)
+        .output();
+    matches!(output, Ok(output) if output.status.success())
 }
 
 /// Find `git` on `PATH`.
@@ -732,8 +795,9 @@ fn repo_paths(probe: &GitProbe, project_paths: &[String]) -> Vec<String> {
     project_paths
         .iter()
         .map(|path| {
+            let path = path.replace('\\', "/");
             if prefix.is_empty() {
-                path.clone()
+                path
             } else if path.is_empty() {
                 prefix.to_owned()
             } else {
@@ -870,10 +934,12 @@ impl Git {
                 &[1],
             )?;
             if !tracked.status.success() {
-                if cfg!(windows) {
-                    return Ok(String::new());
-                }
-                let output = self.run(
+                // `/dev/null` is what Git itself uses for the absent side. Git
+                // for Windows resolves it through its MSYS layer, so the same
+                // command is attempted everywhere; a platform that cannot
+                // resolve it degrades to the empty patch rather than failing the
+                // read.
+                let attempt = self.run(
                     &[
                         "diff".to_owned(),
                         "--no-index".to_owned(),
@@ -883,8 +949,12 @@ impl Git {
                         path.clone(),
                     ],
                     &[1],
-                )?;
-                return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
+                );
+                return match attempt {
+                    Ok(output) => Ok(String::from_utf8_lossy(&output.stdout).into_owned()),
+                    Err(_) if cfg!(windows) => Ok(String::new()),
+                    Err(error) => Err(error),
+                };
             }
         }
         let mut args: Vec<String> = vec![

@@ -122,7 +122,7 @@ fn history_reports_the_commits_that_touched_one_item() {
     );
     assert_eq!(
         report.paths,
-        vec![relative.as_str().to_owned()],
+        vec![relative.as_str().replace('\\', "/")],
         "the pathspec is project-relative and the repository root is the project"
     );
     assert_eq!(report.commits.len(), 1);
@@ -284,7 +284,7 @@ fn diff_of_a_commit_shows_what_that_commit_changed_for_the_item() {
         "the patch is scoped to the item file:\n{}",
         report.patch
     );
-    assert_eq!(report.paths, vec![relative.as_str().to_owned()]);
+    assert_eq!(report.paths, vec![relative.as_str().replace('\\', "/")]);
 }
 
 #[test]
@@ -453,20 +453,15 @@ fn probing_finds_a_repository_above_the_project_and_resolves_a_worktree_gitdir_f
     assert_eq!(found.git_dir(), project.root().join(".git"));
 
     // A linked worktree has a `.git` *file* containing `gitdir: <path>`, not a
-    // directory. Reproduce that shape over a directory project.
+    // directory. Reproduce that shape over a directory project with an absolute
+    // path, so the fixture means the same thing on every platform.
     let other = tempfile::tempdir().expect("a second temporary directory");
     let other_root = utf8(&other);
-    std::fs::write(
-        other_root.join(".git"),
-        "gitdir: /tmp/waymark-linked-worktree\n",
-    )
-    .unwrap();
+    let gitdir = other_root.join("waymark-linked-worktree");
+    std::fs::write(other_root.join(".git"), format!("gitdir: {gitdir}\n")).unwrap();
     let linked = Project::init(&other_root, InitOptions::default()).expect("init succeeds");
     let found = git::find_repository(&linked).expect("a gitdir file still marks a repository");
-    assert_eq!(
-        found.git_dir(),
-        Utf8PathBuf::from("/tmp/waymark-linked-worktree")
-    );
+    assert_eq!(found.git_dir(), gitdir);
     drop(dir);
 }
 
@@ -546,7 +541,7 @@ fn the_repository_is_discovered_even_when_the_project_is_not_its_root() {
     let dir = tempfile::tempdir().expect("a temporary directory");
     let root = utf8(&dir);
     git(&root, &["init", "--quiet"]);
-    let nested = root.join("nested/project");
+    let nested = root.join("nested").join("project");
     std::fs::create_dir_all(&nested).unwrap();
     let project = Project::init(&nested, InitOptions::default()).expect("init succeeds");
     create::create(

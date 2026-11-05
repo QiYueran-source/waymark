@@ -45,6 +45,7 @@ pub mod stats;
 pub mod store;
 pub mod testing;
 pub mod time;
+pub mod user_config;
 pub mod view;
 pub mod write;
 

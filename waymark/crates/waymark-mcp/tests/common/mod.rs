@@ -251,8 +251,12 @@ pub fn waymark_binary() -> Utf8PathBuf {
         .parent()
         .and_then(std::path::Path::parent)
         .expect("the test executable sits under the target directory");
-    let candidate =
-        Utf8PathBuf::from_path_buf(target_dir.join("waymark")).expect("a UTF-8 binary path");
+    let name = if cfg!(windows) {
+        "waymark.exe"
+    } else {
+        "waymark"
+    };
+    let candidate = Utf8PathBuf::from_path_buf(target_dir.join(name)).expect("a UTF-8 binary path");
     assert!(
         candidate.is_file(),
         "the `waymark` binary is missing at {candidate}; run `cargo build -p waymark-cli` \

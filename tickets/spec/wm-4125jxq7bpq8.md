@@ -18,13 +18,13 @@ Waymark today only runs from a source checkout. The Web view is served by the de
 
 Ship two separately named, prebuilt variants from one tag-triggered GitHub Actions pipeline.
 
-The **basic** package contains the `waymark` CLI and `waymark-mcp`; the **Web** package contains the same two binaries built with the off-by-default `web` feature, which compiles in the read-only Web server and embeds the frontend. Both are produced for linux x86_64 and macOS arm64/x86_64 (Windows is [a separate specification](wm-vfbqmw1r7x0j)), published as draft GitHub Release assets with SHA-256 checksums, a licence inventory, and a source tarball that carries the prebuilt frontend.
+The **basic** package contains the `waymark` CLI and `waymark-mcp`; the **Web** package contains the same two binaries built with the off-by-default `web` feature, which compiles in the read-only Web server and embeds the frontend. Both are produced for linux x86_64, macOS arm64/x86_64, and Windows x86_64 with the MSVC toolchain (the GNU toolchain is built and tested but publishes nothing), published as draft GitHub Release assets with SHA-256 checksums, a licence inventory, and a source tarball that carries the prebuilt frontend.
 
 A tag `v<version>` drives the pipeline: it refuses to run unless the tag equals the workspace version, builds the frontend once, embeds that exact tree in every Web artifact, runs the release gates, and attaches everything to a draft Release. A human runs the release checks and publishes the draft; nothing is published automatically and nothing goes to crates.io.
 
 ## User Stories
 
-1. As a Linux user, I download `waymark-v<version>-linux-x86_64.tar.gz`, verify its `.sha256`, extract it, and run `waymark version`, `waymark init`, `waymark new`, and `waymark list` without installing Rust.
+1. As a Linux user, I download `waymark-v<version>-linux-x86_64.tar.gz`, verify its `.sha256`, extract it, and run `waymark version`, `waymark init`, `waymark create`, and `waymark list` without installing Rust.
 2. As a macOS user on either architecture, I do the same with the matching `macos-aarch64` or `macos-x86_64` archive.
 3. As a user who wants the Web view, I download the `waymark-web-…` archive, run `waymark serve`, and get the read-only view in a browser at a loopback URL.
 4. As a basic-package user, running `waymark serve` tells me Web is not included and how to get a Web package, without downloading or installing anything.
@@ -54,9 +54,9 @@ A tag `v<version>` drives the pipeline: it refuses to run unless the tag equals 
 
 ### `waymark serve`
 
-- Surface: `waymark serve [--project DIR] [--port PORT] [--open]` plus the global `--json`, `--color`, `--project`, and `--lock-timeout-ms` flags.
+- Surface: `waymark serve [--project DIR] [--port PORT] [--open]` plus the global `--json`, `--color`, and `--project` flags. `--lock-timeout-ms` is accepted as a global flag but has no effect, because `serve` takes no write lock.
 - Project discovery matches the rest of the CLI: the current directory by default, walking up to the nearest `.waymark/config.toml`; `--project` sets the start directory. A missing or invalid project fails before the listener binds and never creates or modifies anything.
-- Binds `127.0.0.1` only. The default port is `waymark_web::DEFAULT_PORT` (7331); `--port 0` selects a free port.
+- Binds `127.0.0.1` only. The default port is `waymark_core::DEFAULT_PORT` (7331), re-exported by `waymark-web`; `--port 0` selects a free port.
 - A busy port is a `PORT_IN_USE` failure that names the port and suggests `--port 0`. Waymark does not silently fall back to another port.
 - No browser is opened unless `--open` is given; on Linux and macOS it runs `xdg-open` or `open`, and a launch failure is a warning, not a serve failure.
 - Readiness prints `serving http://127.0.0.1:<port>` on stderr in human mode; with `--json`, it prints `{"url": "http://127.0.0.1:<port>"}` as the envelope's data and then blocks serving requests.
@@ -82,8 +82,8 @@ A tag `v<version>` drives the pipeline: it refuses to run unless the tag equals 
 - `.github/workflows/release.yml` triggers on `v*` tags with `contents: write`.
 - `version-gate`: read `[workspace.package] version` and fail unless it equals `${GITHUB_REF_NAME#v}`.
 - `web-dist`: `actions/setup-node` with the frontend lockfile, `npm ci`, `npm run build`, manifest generation; uploads the built tree as an artifact and packs `waymark-web-dist-v<version>.tar.gz` + `.sha256` for the source tarball.
-- `build` matrix: `ubuntu-latest`/`x86_64-unknown-linux-gnu`, `macos-latest`/`aarch64-apple-darwin`, `macos-15-intel`/`x86_64-apple-darwin`; downloads the built tree and builds both variants with `WAYMARK_SKIP_UI_BUILD=1` (Web) and without the feature (basic).
-- Packaging: `waymark-v<version>-<os>-<arch>.tar.gz` and `waymark-web-v<version>-<os>-<arch>.tar.gz`, each holding `waymark`, `waymark-mcp`, `README.md`, `LICENSE-MIT`, `LICENSE-APACHE`, and `THIRD_PARTY_LICENSES.txt` from `cargo-about`; a `.sha256` sibling per archive. The base name is stable across the two variants only in its suffix; the variant prefix is part of the name.
+- `build` matrix: `ubuntu-latest`/`x86_64-unknown-linux-gnu`, `macos-latest`/`aarch64-apple-darwin`, `macos-15-intel`/`x86_64-apple-darwin`, `windows-latest`/`x86_64-pc-windows-msvc`; downloads the built tree and builds both variants with `WAYMARK_SKIP_UI_BUILD=1` (Web) and without the feature (basic).
+- Packaging: `waymark-v<version>-<os>-<arch>.tar.gz` and `waymark-web-v<version>-<os>-<arch>.tar.gz` for Unix, and `waymark-v<version>-windows-x86_64.zip` and `waymark-web-v<version>-windows-x86_64.zip` for Windows, each holding `waymark`/`waymark.exe`, `waymark-mcp`/`waymark-mcp.exe`, `README.md`, `LICENSE-MIT`, `LICENSE-APACHE`, and `THIRD_PARTY_LICENSES.txt` from `cargo-about`; a `.sha256` sibling per archive. The base name is stable across the two variants only in its suffix; the variant prefix is part of the name.
 - `source`: `git archive` of the tag plus the built frontend tree, packed as `waymark-src-v<version>.tar.gz` + `.sha256`.
 - `release`: downloads every artifact, creates the Release as a **draft** with `generate_release_notes: true`, and attaches all archives, checksums, and the source tarball. Publishing is a manual step.
 - The `build` job runs the Web artifact's provenance check on the runner before uploading, so a mismatch never reaches the draft.
@@ -91,7 +91,9 @@ A tag `v<version>` drives the pipeline: it refuses to run unless the tag equals 
 
 ### Release gates
 
-- `.github/workflows/ci.yml` runs on pull requests: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features` on `ubuntu-latest` and `macos-latest`, the frontend's `npm ci && npm run check && npm run build`, and a build with a real Rust 1.85 toolchain.
+- `.github/workflows/ci.yml` runs on pull requests: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features` on `ubuntu-latest`, `macos-latest`, `windows-latest` with `x86_64-pc-windows-msvc`, and `windows-latest` with `x86_64-pc-windows-gnu`; the frontend's `npm ci && npm run check && npm run build`; and a build with a real Rust 1.85 toolchain.
+- The MSVC leg is required from the start. The GNU leg may run as an observational job while the toolchain is validated, must be promoted to blocking once that validation passes, and every run records the toolchain versions actually used. Cross-compiling on Linux never substitutes for either Windows leg, because the behaviour under test is the platform's own locking, replacement, permission and reparse handling.
+- A skipped Windows test requires a stable identifier and reason registered in a version-controlled allowlist; an unlisted skip fails that leg. A failing gate is never converted into a pass by retrying it, and quarantine never covers lock safety, replacement and rollback, migration, or path validation.
 - The release workflow repeats the same gates on the tagged commit before packaging; a red gate stops the release.
 - `cargo metadata --locked` is part of the 1.85 job so a dependency raising its MSRV fails there rather than in a user's build.
 
@@ -108,6 +110,8 @@ A tag `v<version>` drives the pipeline: it refuses to run unless the tag equals 
 - Assert the variant split: the basic build's dependency graph excludes `waymark-web`; the Web build's `waymark version` reports `web`; the basic build's `serve` returns `WEB_NOT_INCLUDED` with the documented exit class.
 - Test `serve` over real HTTP with `--port 0`: `GET /` returns `index.html`, `_app/` assets resolve, non-GET returns 405, the Host/Origin guard rejects a foreign host, and the served `index.html` hash equals the embedded manifest entry.
 - Test the readiness contract: human mode prints the URL to stderr, `--json` emits the envelope before serving, and a busy port fails with `PORT_IN_USE` naming the suggestion.
+- Smoke the packaged Windows archives from the draft Release: `waymark.exe version`, `init`, `create`, `list`, `show --json`, and `serve --port 0` followed by a `GET /` hash comparison against the embedded manifest, plus the same archive-content and checksum assertions used for the Unix archives.
+- Assert that the Windows job was green for the tagged commit before the draft is published, and that the release matrix contains exactly one Windows entry using the MSVC toolchain.
 - Test `version` and `version --json` shapes, including the basic build's absent `assets` field and the Web build's manifest contents.
 - Test the manifest generator as a pure function: stable file list, sorted paths, per-file SHA-256, and a failing exit when `index.html` is missing.
 - Run `scripts/release/check-artifacts.sh` locally against downloaded draft artifacts; it verifies checksums, archive contents, binaries' reported version, and the Web provenance check, and CI runs the same script on `ubuntu-latest`.
@@ -115,7 +119,7 @@ A tag `v<version>` drives the pipeline: it refuses to run unless the tag equals 
 
 ## Out of Scope
 
-- Windows, which is [Waymark Windows platform support](wm-vfbqmw1r7x0j).
+- Publishing a Windows GNU artifact; the GNU toolchain is built and tested but not shipped.
 - Publishing crates to crates.io.
 - Binary signing, Apple notarization, and SBOM generation.
 - An install script, a Homebrew or other package-manager tap, and auto-update.

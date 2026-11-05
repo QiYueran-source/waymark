@@ -360,7 +360,7 @@ impl Projection {
     }
 
     fn assemble(project: &Project, scan: Scan, stats: ProjectionStats) -> Self {
-        let cache_settings = project.config().cache;
+        let cache_settings = crate::ops::local_config::effective_lenient(project).cache;
         Self {
             completeness: completeness_of(&scan.failures, &scan.problems),
             entries: scan.entries,
@@ -399,7 +399,7 @@ impl Projection {
         self.freshness = Freshness::Fresh;
         self.stats.merge(&stats);
 
-        let settings = project.config().cache;
+        let settings = crate::ops::local_config::effective_lenient(project).cache;
         if settings == self.cache_settings {
             self.prune_cache();
         } else {

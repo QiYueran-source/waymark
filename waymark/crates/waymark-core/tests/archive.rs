@@ -541,6 +541,9 @@ fn a_broken_sibling_document_stops_the_archive_before_anything_is_written() {
     assert!(!parse(&project, &target).is_archived());
 }
 
+// A symlink is a Unix-only fixture: on Windows the equivalent
+// reparse-point behaviour needs the platform effort that owns it.
+#[cfg(unix)]
 #[test]
 fn a_document_the_inventory_cannot_read_is_never_archived_through_a_link() {
     let (_dir, project) = project();

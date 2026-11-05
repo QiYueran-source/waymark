@@ -81,9 +81,8 @@ required = false
 [fields.tags]
 type = \"list:string\"
 required = false
-
-[cache]";
-    std::fs::write(&config_path, config.replace("[cache]", declarations))
+";
+    std::fs::write(&config_path, format!("{config}\n{declarations}"))
         .expect("the configuration is writable");
     (dir, root)
 }
@@ -422,13 +421,11 @@ fn edits_report_an_owner_mismatch_as_a_warning_on_stderr_and_in_meta() {
     let (_dir, root) = project();
     let id = create(&root);
 
-    // `--operator` is not a global flag, so the mismatch comes from the project
-    // configuration's operator differing from the owner.
-    let config_path = root.join(".waymark").join("config.toml");
-    let config = std::fs::read_to_string(&config_path).unwrap();
+    // `--operator` is not a global flag, so the mismatch comes from the local
+    // document's operator differing from the owner.
     std::fs::write(
-        &config_path,
-        config.replace("timezone = ", "operator = \"alice\"\ntimezone = "),
+        root.join(".waymark").join("user.toml"),
+        "operator = \"alice\"\n",
     )
     .unwrap();
 

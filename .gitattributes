@@ -1,0 +1,7 @@
+# Golden fixtures and persisted documents are compared byte for byte, so the
+# checkout must never rewrite their line endings. Serializers always emit LF.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.webp binary
+*.woff2 binary

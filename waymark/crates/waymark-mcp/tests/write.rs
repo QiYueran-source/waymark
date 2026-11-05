@@ -67,8 +67,13 @@ async fn create_accepts_the_complete_initial_state() {
     );
 
     let id = envelope["data"]["id"].as_str().expect("the new id");
-    let linked_document =
-        common::read(&fixture.root.join("work/task").join(format!("{linked}.md")));
+    let linked_document = common::read(
+        &fixture
+            .root
+            .join("work")
+            .join("task")
+            .join(format!("{linked}.md")),
+    );
     assert!(
         linked_document.contains(&format!("  - {id}")),
         "the partner document records the new ID symmetrically: {linked_document}"
@@ -85,10 +90,10 @@ fn declare_required_field(fixture: &common::Fixture, key: &str, ty: FieldType) {
     let path = fixture.root.join(".waymark").join("config.toml");
     let document = std::fs::read_to_string(&path).expect("the configuration reads");
     let declaration = format!(
-        "[fields.{key}]\ntype = \"{}\"\nrequired = true\n\n[cache]",
+        "\n[fields.{key}]\ntype = \"{}\"\nrequired = true\n",
         ty.as_str()
     );
-    std::fs::write(&path, document.replace("[cache]", &declaration))
+    std::fs::write(&path, format!("{document}{declaration}"))
         .expect("the configuration is writable");
 }
 
@@ -217,7 +222,11 @@ async fn create_dry_run_reports_the_item_without_writing() {
 async fn set_title_replaces_the_title_and_a_repeat_is_a_no_op() {
     let fixture = common::fixture(&["one"]);
     let id = fixture.ids[0].clone();
-    let path = fixture.root.join("work/task").join(format!("{id}.md"));
+    let path = fixture
+        .root
+        .join("work")
+        .join("task")
+        .join(format!("{id}.md"));
     let client = common::Client::connect(fixture.root.clone()).await;
 
     let result = client
@@ -421,7 +430,7 @@ async fn transfer_owner_replaces_the_owner_and_reports_the_mismatch_warning() {
     let fixture = common::fixture(&["one"]);
     let id = fixture.ids[0].clone();
     // The configured operator is the identity every mediated write warns about.
-    waymark_core::ops::config::set_scalar(
+    waymark_core::ops::local_config::set_scalar(
         &fixture.project(),
         waymark_core::ops::config::Scalar::Operator,
         "alice",
@@ -494,18 +503,25 @@ async fn move_work_item_relocates_the_document() {
     assert_eq!(envelope["data"]["category"], "bug");
     assert_eq!(envelope["data"]["changed"], true);
     assert_eq!(envelope["data"]["written"], true);
+    let expected = fixture
+        .root
+        .join("work")
+        .join("bugs")
+        .join(format!("{id}.md"));
     assert!(envelope["data"]["path"]
         .as_str()
         .unwrap()
-        .ends_with(&format!("work/bugs/{id}.md")));
+        .ends_with(expected.as_str()));
     assert!(!fixture
         .root
-        .join("work/task")
+        .join("work")
+        .join("task")
         .join(format!("{id}.md"))
         .exists());
     assert!(fixture
         .root
-        .join("work/bugs")
+        .join("work")
+        .join("bugs")
         .join(format!("{id}.md"))
         .is_file());
 
@@ -528,7 +544,11 @@ async fn set_and_clear_parent_manage_the_single_hierarchy_edge() {
     let fixture = common::fixture(&["one", "two"]);
     let child = fixture.ids[1].clone();
     let parent = fixture.ids[0].clone();
-    let child_path = fixture.root.join("work/task").join(format!("{child}.md"));
+    let child_path = fixture
+        .root
+        .join("work")
+        .join("task")
+        .join(format!("{child}.md"));
     let client = common::Client::connect(fixture.root.clone()).await;
 
     let result = client
@@ -643,8 +663,16 @@ async fn soft_links_are_written_on_both_sides_as_one_batch() {
     let fixture = common::fixture(&["one", "two"]);
     let left = fixture.ids[0].clone();
     let right = fixture.ids[1].clone();
-    let left_path = fixture.root.join("work/task").join(format!("{left}.md"));
-    let right_path = fixture.root.join("work/task").join(format!("{right}.md"));
+    let left_path = fixture
+        .root
+        .join("work")
+        .join("task")
+        .join(format!("{left}.md"));
+    let right_path = fixture
+        .root
+        .join("work")
+        .join("task")
+        .join(format!("{right}.md"));
     let client = common::Client::connect(fixture.root.clone()).await;
 
     let result = client
@@ -684,10 +712,15 @@ async fn archive_writes_a_tombstone_and_cleans_inbound_edges() {
     let target = fixture.ids[0].clone();
     let dependent = fixture.ids[1].clone();
     common::depend(&fixture.project(), &dependent, &target);
-    let target_path = fixture.root.join("work/task").join(format!("{target}.md"));
+    let target_path = fixture
+        .root
+        .join("work")
+        .join("task")
+        .join(format!("{target}.md"));
     let dependent_path = fixture
         .root
-        .join("work/task")
+        .join("work")
+        .join("task")
         .join(format!("{dependent}.md"));
     let client = common::Client::connect(fixture.root.clone()).await;
 
@@ -807,7 +840,8 @@ async fn write_conflict_and_stale_generation_reuse_the_shared_errors() {
     std::fs::create_dir(
         fixture
             .root
-            .join("work/bugs")
+            .join("work")
+            .join("bugs")
             .join(format!("{occupied}.md")),
     )
     .expect("the occupied destination is creatable");
@@ -821,7 +855,12 @@ async fn write_conflict_and_stale_generation_reuse_the_shared_errors() {
     assert_eq!(error["code"], "WRITE_CONFLICT");
     assert_eq!(
         error["details"]["path"],
-        format!("{}/work/bugs/{occupied}.md", fixture.root)
+        fixture
+            .root
+            .join("work")
+            .join("bugs")
+            .join(format!("{occupied}.md"))
+            .to_string()
     );
     assert_eq!(error["details"]["expected_fingerprint"], "absent");
     assert_eq!(error["details"]["actual_fingerprint"], "present");
@@ -829,7 +868,11 @@ async fn write_conflict_and_stale_generation_reuse_the_shared_errors() {
 
     // An older generated document rejects ordinary writes until the version
     // migration runs.
-    let path = fixture.root.join("work/task").join(format!("{id}.md"));
+    let path = fixture
+        .root
+        .join("work")
+        .join("task")
+        .join(format!("{id}.md"));
     let text = common::read(&path);
     let downgraded = text.replacen(
         &format!("schema: {}\n", waymark_core::model::FORMAT_GENERATION),

@@ -13,13 +13,11 @@
 use std::collections::BTreeMap;
 
 use camino::{Utf8Path, Utf8PathBuf};
-use chrono_tz::Tz;
 use serde::Deserialize;
 
 use crate::error::WaymarkError;
 use crate::location::Location;
 use crate::model::{CategoryKey, FieldKey, FieldValue, FORMAT_GENERATION};
-use crate::time::parse_timezone;
 
 /// The metadata directory that holds the configuration and the write lock.
 pub const METADATA_DIR: &str = ".waymark";
@@ -237,14 +235,8 @@ pub struct Config {
     pub storage_root: String,
     /// Categories keyed by their stable key.
     pub categories: BTreeMap<CategoryKey, Category>,
-    /// Advisory operator identity.
-    pub operator: Option<String>,
-    /// Zone used for display and for offset-less local input.
-    pub timezone: Tz,
     /// Declared custom fields keyed by their stable key.
     pub fields: BTreeMap<FieldKey, FieldDecl>,
-    /// Projection cache settings.
-    pub cache: CacheSettings,
 }
 
 impl Default for Config {
@@ -253,10 +245,7 @@ impl Default for Config {
             version: Version::current(),
             storage_root: DEFAULT_STORAGE_ROOT.to_owned(),
             categories: BTreeMap::new(),
-            operator: None,
-            timezone: chrono_tz::UTC,
             fields: BTreeMap::new(),
-            cache: CacheSettings::default(),
         }
     }
 }
@@ -280,7 +269,7 @@ impl Config {
     pub fn category_dir(&self, root: &Utf8Path, category: &CategoryKey) -> Option<Utf8PathBuf> {
         self.categories
             .get(category)
-            .map(|entry| root.join(&entry.path))
+            .map(|entry| resolve_relative(root, &entry.path))
     }
 
     /// Parse and validate a configuration document without filesystem checks.
@@ -347,17 +336,27 @@ impl Config {
             .ok_or_else(|| malformed("the document must be a TOML table".to_owned()))?;
 
         let mut issues: Vec<ConfigIssue> = Vec::new();
-        for key in table.keys() {
-            if !KNOWN_TOP_LEVEL.contains(&key.as_str()) {
+        let mut allowed: toml::map::Map<String, toml::Value> = toml::map::Map::new();
+        for (key, entry) in table {
+            if LOCAL_ONLY_KEYS.contains(&key.as_str()) {
                 issues.push(ConfigIssue::key(
                     key,
-                    "unknown configuration key (expected version, storage_root, operator, timezone, categories, fields, cache)",
+                    format!(
+                        "`{key}` belongs to the local user configuration and cannot be set in the shared project configuration"
+                    ),
                 ));
+            } else if !KNOWN_TOP_LEVEL.contains(&key.as_str()) {
+                issues.push(ConfigIssue::key(
+                    key,
+                    "unknown configuration key (expected version, storage_root, categories, fields)",
+                ));
+            } else {
+                allowed.insert(key.clone(), entry.clone());
             }
         }
-        report_nested_unknowns(table, &mut issues);
+        report_nested_unknowns(&allowed, &mut issues);
 
-        let raw: RawConfig = value
+        let raw: RawConfig = toml::Value::Table(allowed)
             .try_into()
             .map_err(|error: toml::de::Error| malformed(error.message().to_owned()))?;
 
@@ -376,29 +375,6 @@ impl Config {
                 issues.push(ConfigIssue::key("version", reason));
                 Version::current()
             }
-        };
-
-        let timezone = match parse_timezone(raw.timezone.0.trim()) {
-            Ok(zone) => zone,
-            Err(_) => {
-                issues.push(ConfigIssue::key(
-                    "timezone",
-                    format!("{:?} is not a known IANA time zone", raw.timezone.0),
-                ));
-                chrono_tz::UTC
-            }
-        };
-
-        let operator = match raw.operator {
-            Some(operator) if operator.0.trim().is_empty() => {
-                issues.push(ConfigIssue::key(
-                    "operator",
-                    "the operator must not be empty",
-                ));
-                None
-            }
-            Some(operator) => Some(operator.0.trim().to_owned()),
-            None => None,
         };
 
         issues.extend(validate_relative_path("storage_root", &raw.storage_root.0));
@@ -486,28 +462,12 @@ impl Config {
             }
         }
 
-        let cache = raw.cache.map_or_else(CacheSettings::default, |cache| {
-            if cache.capacity == 0 {
-                issues.push(ConfigIssue::key(
-                    "cache.capacity",
-                    "the cache capacity must be greater than zero",
-                ));
-            }
-            CacheSettings {
-                enabled: cache.enabled,
-                capacity: cache.capacity,
-            }
-        });
-
         Ok((
             Self {
                 version,
                 storage_root: raw.storage_root.0.trim().to_owned(),
                 categories,
-                operator,
-                timezone,
                 fields,
-                cache,
             },
             issues,
         ))
@@ -550,10 +510,6 @@ impl Config {
         let mut out = String::new();
         out.push_str(&format!("version = {}\n", quote(&self.version.to_string())));
         out.push_str(&format!("storage_root = {}\n", quote(&self.storage_root)));
-        if let Some(operator) = &self.operator {
-            out.push_str(&format!("operator = {}\n", quote(operator)));
-        }
-        out.push_str(&format!("timezone = {}\n", quote(self.timezone.name())));
 
         for (key, category) in &self.categories {
             out.push_str(&format!("\n[categories.{key}]\n"));
@@ -570,9 +526,6 @@ impl Config {
             }
         }
 
-        out.push_str("\n[cache]\n");
-        out.push_str(&format!("enabled = {}\n", self.cache.enabled));
-        out.push_str(&format!("capacity = {}\n", self.cache.capacity));
         out
     }
 }
@@ -592,19 +545,19 @@ pub fn default_category_name(key: &CategoryKey) -> String {
     }
 }
 
-const KNOWN_TOP_LEVEL: &[&str] = &[
-    "version",
-    "storage_root",
-    "operator",
-    "timezone",
-    "categories",
-    "fields",
-    "cache",
-];
+/// The keys the shared document may carry.
+///
+/// `operator`, `timezone`, and `cache` are deliberately absent: they belong to
+/// the local user configuration, and a shared document that still states one is
+/// reported as invalid rather than read or silently ignored, so a project never
+/// carries a stale shared copy of a collaborator's preferences.
+const KNOWN_TOP_LEVEL: &[&str] = &["version", "storage_root", "categories", "fields"];
+
+/// The keys that moved to the local document, reported with their destination.
+const LOCAL_ONLY_KEYS: &[&str] = &["operator", "timezone", "cache"];
 
 const KNOWN_CATEGORY_KEYS: &[&str] = &["path", "name"];
 const KNOWN_FIELD_KEYS: &[&str] = &["type", "required", "default"];
-const KNOWN_CACHE_KEYS: &[&str] = &["enabled", "capacity"];
 
 fn report_nested_unknowns(
     table: &toml::map::Map<String, toml::Value>,
@@ -638,16 +591,6 @@ fn report_nested_unknowns(
             }
         }
     }
-    if let Some(cache) = table.get("cache").and_then(toml::Value::as_table) {
-        for key in cache.keys() {
-            if !KNOWN_CACHE_KEYS.contains(&key.as_str()) {
-                issues.push(ConfigIssue::key(
-                    format!("cache.{key}"),
-                    "unknown cache key (expected enabled, capacity)",
-                ));
-            }
-        }
-    }
 }
 
 /// One configuration complaint, addressed by the key it is about.
@@ -665,7 +608,7 @@ pub struct ConfigIssue {
 }
 
 impl ConfigIssue {
-    fn key(key: impl Into<String>, reason: impl Into<String>) -> Self {
+    pub(crate) fn key(key: impl Into<String>, reason: impl Into<String>) -> Self {
         Self {
             key: key.into(),
             reason: reason.into(),
@@ -812,7 +755,7 @@ fn is_path_prefix(candidate: &str, other: &str) -> bool {
 }
 
 /// Render a TOML basic string with the escapes the format requires.
-fn quote(value: &str) -> String {
+pub(crate) fn quote(value: &str) -> String {
     let mut out = String::with_capacity(value.len() + 2);
     out.push('"');
     for character in value.chars() {
@@ -858,14 +801,9 @@ struct RawConfig {
     version: Raw<String>,
     storage_root: Raw<String>,
     #[serde(default)]
-    operator: Option<Raw<String>>,
-    timezone: Raw<String>,
-    #[serde(default)]
     categories: BTreeMap<String, RawCategory>,
     #[serde(default)]
     fields: BTreeMap<String, RawField>,
-    #[serde(default)]
-    cache: Option<RawCache>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -884,23 +822,6 @@ struct RawField {
     required: bool,
     #[serde(default)]
     default: Option<RawDefault>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RawCache {
-    #[serde(default = "default_cache_enabled")]
-    enabled: bool,
-    #[serde(default = "default_cache_capacity")]
-    capacity: usize,
-}
-
-fn default_cache_enabled() -> bool {
-    true
-}
-
-fn default_cache_capacity() -> usize {
-    512
 }
 
 /// A leaf whose wrong TOML type reports its own key.
@@ -945,4 +866,16 @@ impl IntoFieldValue for toml::Value {
             other => FieldValue::String(other.to_string()),
         }
     }
+}
+
+/// Resolve a configuration-relative path against `root`.
+pub fn resolve_relative(root: &Utf8Path, relative: &str) -> Utf8PathBuf {
+    let mut path = root.to_path_buf();
+    for component in relative.split('/') {
+        match component {
+            "" | "." => {}
+            other => path.push(other),
+        }
+    }
+    path
 }

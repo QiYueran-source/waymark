@@ -95,8 +95,11 @@ pub fn assets() -> TempDir {
     )
     .expect("the fixture index is writable");
     std::fs::create_dir_all(dir.path().join("_app")).expect("the asset directory exists");
-    std::fs::write(dir.path().join("_app/app.js"), "console.log('waymark');")
-        .expect("the fixture asset is writable");
+    std::fs::write(
+        dir.path().join("_app").join("app.js"),
+        "console.log('waymark');",
+    )
+    .expect("the fixture asset is writable");
     dir
 }
 
