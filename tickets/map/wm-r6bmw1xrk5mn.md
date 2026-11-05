@@ -6,8 +6,8 @@ category: map
 status: closed
 owner: frank
 created_at: 2026-11-05T05:38:01Z
-updated_at: 2026-11-05T05:40:43Z
-closed_at: 2026-11-05T05:40:43Z
+updated_at: 2026-11-05T06:44:32Z
+closed_at: 2026-11-05T06:44:32Z
 parent: wm-4wbvzsv34g2p
 dependencies:
   - wm-rn893kzbg524
@@ -33,3 +33,11 @@ Fix the response shapes left open by the platform contracts: the registry code a
 - Whether the path tagged union applies to every machine path field or only to fields that can genuinely receive a non-UTF-8 value, and how the tagged form interacts with fields that are already structured locations rather than bare paths.
 - Whether the human-mode escape format for non-UTF-8 bytes is a single documented form across CLI messages, diffs and diagnostics.
 - How existing on-disk paths that are not UTF-8 are even reached, given that `camino::Utf8Path` is used throughout the store; that reachability question belongs to the platform module and verification work.
+
+## Final interface decisions (reopened to close the TBDs)
+
+- Confirmed by the user on 2026-11-05: `DIRECTORY_SYNC_UNCONFIRMED` details carry `{directory, paths[]}`, where both use the shared path representation; the warning leaves `location` unset, because one warning covers several paths and a single location would mislead the caller.
+- The tagged path representation applies uniformly to every machine path field, including path members inside structured locations, rather than only to fields that might plausibly be non-UTF-8. Consumers must not have to decide field by field whether a destination can be an object; a UTF-8 path is still a plain string, and only a non-representable path becomes the base64 object.
+- Human-readable output renders bytes that cannot be decoded as `\xNN`, leaving the rest of the path readable, with no ellipsis, no guessing and no `�` substitution.
+- Waymark's own created paths are always valid UTF-8; a non-UTF-8 path can only be an existing external file or directory that is referenced. The specification says this explicitly, so lossless representation is a boundary case rather than a claim that the store handles arbitrary byte paths, and the store keeps using UTF-8 path types instead of migrating to byte paths.
+- These close the remaining interface TBDs; the earlier remaining-open list is superseded where it overlapped.
