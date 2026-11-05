@@ -269,11 +269,15 @@ fn malformed_frontmatter_duplicate_ids_and_mismatched_ids_are_reported() {
 
 #[test]
 fn a_case_variant_filename_is_a_duplicate_id_not_a_silent_skip() {
-    let (_dir, project) = project();
+    let (_dir, project) = two_category_project();
     let id = create_item(&project, "case");
-    let upper = task_path(&project, id.as_str())
-        .with_file_name(format!("{}.md", id.as_str().to_uppercase()));
-    std::fs::copy(task_path(&project, id.as_str()), &upper).unwrap();
+    let original = task_path(&project, id.as_str());
+    // Separate categories keep the paths distinct even on case-insensitive filesystems.
+    let upper = bug_path(&project, &id.as_str().to_uppercase());
+    let original_bytes = std::fs::read(&original).unwrap();
+    std::fs::copy(&original, &upper).unwrap();
+    assert_eq!(std::fs::read(&original).unwrap(), original_bytes);
+    assert_eq!(std::fs::read(&upper).unwrap(), original_bytes);
 
     let report = doctor::diagnose(&project).unwrap();
     let duplicate = report

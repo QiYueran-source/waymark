@@ -163,7 +163,8 @@ fn the_inventory_lists_documents_and_reports_the_files_it_skips() {
     .unwrap();
     std::fs::write(directory.join("notes.txt"), b"not an item").unwrap();
     std::fs::write(directory.join("wm-short.md"), b"not an id").unwrap();
-    std::fs::write(directory.join("WM-3F7K9Q2M4X8C.md"), b"uppercase stem").unwrap();
+    // A different ID avoids overwriting the valid file on case-insensitive filesystems.
+    std::fs::write(directory.join("WM-3F7K9Q2M4X8D.md"), b"uppercase stem").unwrap();
 
     let inventory = project.inventory().unwrap();
     assert_eq!(inventory.entries.len(), 1);
@@ -175,7 +176,7 @@ fn the_inventory_lists_documents_and_reports_the_files_it_skips() {
         .map(|problem| problem.path.file_name().unwrap().to_owned())
         .collect();
     assert!(
-        skipped.contains(&"WM-3F7K9Q2M4X8C.md".to_owned()),
+        skipped.contains(&"WM-3F7K9Q2M4X8D.md".to_owned()),
         "{skipped:?}"
     );
     assert!(skipped.contains(&"wm-short.md".to_owned()), "{skipped:?}");
