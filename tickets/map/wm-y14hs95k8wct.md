@@ -7,6 +7,18 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
+updated_at: 2026-11-05T07:07:48Z
+closed_at: 2026-11-03T23:52:21Z
+---
+---
+schema: 1
+id: wm-y14hs95k8wct
+title: 'Waymark: General-purpose tracker design map'
+category: map
+status: closed
+owner: frank
+creator: frank
+created_at: 2026-11-03T23:52:21Z
 updated_at: 2026-11-05T07:05:17Z
 closed_at: 2026-11-03T23:52:21Z
 ---
@@ -680,7 +692,8 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 ### Local user configuration
 
 - Confirmed by the user on 2026-11-05: move machine-specific cache settings, the acting `operator` identity, and time zone from shared `.waymark/config.toml` to local `.waymark/user.toml`. Project storage and data-model configuration remain shared. The time zone is a per-user preference for display and interpretation of offset-less local time, not a shared project time baseline; this supersedes the earlier decision that project timezone is shared and uniform.
-- `init` creates `.waymark/user.toml` with the current Git `user.name` as operator when configured, the current machine-local time zone, and the existing cache defaults. If Git `user.name` is absent, operator is omitted. If `user.toml` already exists, `init` leaves it untouched; it only creates the file when missing. At runtime, explicit values in `user.toml` override defaults; when a local value is absent, operator falls back to the current Git `user.name`, timezone falls back to the current machine-local time zone, and cache settings use built-in defaults. An absent `user.toml` does not cause ordinary reads to create it.
+- First-time `init` creates `.waymark/user.toml` with the effective Git `user.name` when configured, the current machine-local time zone, and the existing cache defaults. If Git `user.name` is absent, operator is omitted. If the project is already initialized, `init` remains a no-op and does not create a missing user file; an existing `user.toml` is never overwritten. Runtime defaults remain available whether or not the file exists.
+- At runtime, explicit values in `user.toml` override local defaults; when a local value is absent, operator uses Git's effective `user.name` (Git's normal configuration precedence, including repository-local and global settings), timezone uses the current machine-local time zone, and cache settings use built-in defaults. An absent `user.toml` does not cause ordinary reads to create it. Clearing an explicit value removes the local override and restores its fallback; an empty operator is not a special opt-out of Git identity fallback.
 - Operator remains advisory only and does not authenticate or authorize users. Owner mismatch warnings compare against the effective operator; omitted `creator` defaults to that same identity when available, preserving existing semantics. Operation-level explicit operator overrides retain highest precedence.
 - The old `operator`, cache, and timezone settings are removed from shared `config.toml`; they are not migration fallbacks. This is a pre-release change, so backward compatibility and automatic migration of old settings are not required.
 - Users may edit `user.toml` manually. Existing interfaces for setting operator, timezone, and cache are retained but write only to `user.toml`; `init` operator/timezone options seed the new file when it is created. Shared project configuration commands continue to update only shared project settings. CLI and MCP use shared core configuration logic. `config show` presents effective settings and clearly identifies their source (user file or local default).
