@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T00:51:56Z
+updated_at: 2026-11-05T00:52:29Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -429,6 +429,8 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 
 - Confirmed by the user on 2026-11-05: the map covers lock safety and contention; replacement, rollback, permissions and migrations; paths and Git parity; the platform-module design and existing dependencies; verification, CI and release; and how the outcomes relate to the existing Windows specification. Concrete contracts and implementation choices remain open.
 - For this map, record decision-ticket types in bodies and use Waymark native parent and dependency relationships. Do not add project-wide fields for ticket types or claims. The required human owner is not an unclaimed marker. Confirmed by the user on 2026-11-05: one AI will work through decisions sequentially for now; do not change item status or project configuration solely to claim a decision ticket. Revisit a concurrent-claim convention only if parallel work becomes necessary.
+
+- Confirmed by the user on 2026-11-05: keep external research on local research branches, linked from the relevant decision tickets; do not push branches or open PRs automatically.
 
 ## Not yet specified
 
