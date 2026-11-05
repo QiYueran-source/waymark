@@ -6,7 +6,7 @@ category: map
 status: open
 owner: frank
 created_at: 2026-11-05T00:53:09Z
-updated_at: 2026-11-05T00:58:04Z
+updated_at: 2026-11-05T00:58:31Z
 ---
 ## Destination
 
@@ -23,6 +23,7 @@ Reach an implementable cross-platform adaptation design and a basis for revising
 ## Decisions so far
 
 - [Research Windows filesystem safety primitives](wm-78d0sa7jaxpb.md): Evidence on lock safety, replacement, Windows metadata and cross-volume preflight; native Windows behavior remains untested.
+- [Research Windows targets and release tooling](wm-31nx004kv0xy.md): Evidence on MSVC/GNU tooling, CI, runtime dependencies, packaging and browser launch; no Windows builds were run.
 
 ## Not yet specified
 
