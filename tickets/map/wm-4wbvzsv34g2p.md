@@ -6,7 +6,7 @@ category: map
 status: open
 owner: frank
 created_at: 2026-11-05T00:53:09Z
-updated_at: 2026-11-05T00:53:36Z
+updated_at: 2026-11-05T00:58:04Z
 ---
 ## Destination
 
@@ -21,6 +21,8 @@ Reach an implementable cross-platform adaptation design and a basis for revising
 - Consult grilling and domain-modeling for human decisions and codebase-design for module design. Research uses the research skill, local research branches only, no automatic push or PR. Results are linked from tickets.
 
 ## Decisions so far
+
+- [Research Windows filesystem safety primitives](wm-78d0sa7jaxpb.md): Evidence on lock safety, replacement, Windows metadata and cross-volume preflight; native Windows behavior remains untested.
 
 ## Not yet specified
 
