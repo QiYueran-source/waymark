@@ -125,6 +125,17 @@ impl GitProbe {
         }
     }
 
+    /// Probe a plain directory that may not be a project yet.
+    ///
+    /// Configuration resolution runs before or beside a project being opened,
+    /// so it needs the same environment a `Project` would report.
+    pub fn detect_at(root: &Utf8Path) -> Self {
+        Self {
+            repository: find_repository_at(root),
+            executable: find_executable(),
+        }
+    }
+
     /// An environment with neither a repository nor an executable.
     pub fn unavailable() -> Self {
         Self {

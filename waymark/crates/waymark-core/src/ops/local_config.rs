@@ -81,10 +81,7 @@ pub fn validate_path(path: &Utf8Path) -> Vec<Finding> {
 /// Git cannot answer, because an unknown answer must not block an ordinary
 /// write.
 pub fn tracked(project: &Project) -> bool {
-    let probe = crate::git::GitProbe::from_parts(
-        crate::git::find_repository_at(project.root()),
-        crate::git::find_executable(),
-    );
+    let probe = crate::git::GitProbe::detect_at(project.root());
     crate::git::tracks(&probe, &project.user_config_path())
 }
 
@@ -327,7 +324,11 @@ fn parse_scalar(scalar: Scalar, value: &str) -> Result<LocalScalar, WaymarkError
 /// further setup. A missing Git name leaves the operator unset rather than
 /// inventing one, and a seed overrides the detected value only because
 /// initialization is the one moment the document is created.
-pub fn seeded(root: &Utf8Path, seeds: &InitSeeds) -> Result<UserConfig, WaymarkError> {
+pub fn seeded(
+    root: &Utf8Path,
+    operator: Option<&str>,
+    timezone: Option<&str>,
+) -> Result<UserConfig, WaymarkError> {
     let environment = LocalEnvironment::detect_for(root, None);
     let defaults = crate::config::CacheSettings::default();
     let mut local = UserConfig {
@@ -341,24 +342,15 @@ pub fn seeded(root: &Utf8Path, seeds: &InitSeeds) -> Result<UserConfig, WaymarkE
             capacity: Some(defaults.capacity),
         },
     };
-    if let Some(operator) = &seeds.operator {
+    if let Some(operator) = operator {
         let trimmed = operator.trim();
         local.operator = (!trimmed.is_empty()).then(|| trimmed.to_owned());
     }
-    if let Some(timezone) = &seeds.timezone {
+    if let Some(timezone) = timezone {
         local.timezone = Some(parse_timezone(timezone.trim()).map_err(|error| {
             WaymarkError::config_invalid("init", vec![format!("timezone: {error}")])
         })?);
     }
     local.validate()?;
     Ok(local)
-}
-
-/// The values `init` may seed into a local document it is creating.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct InitSeeds {
-    /// An operator identity supplied on the command line.
-    pub operator: Option<String>,
-    /// A time zone supplied on the command line.
-    pub timezone: Option<String>,
 }

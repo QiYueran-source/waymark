@@ -135,13 +135,7 @@ impl InitRequest {
     /// The local document this request seeds, for an initialization that is
     /// actually creating one.
     pub fn local(&self, root: &Utf8Path) -> Result<crate::user_config::UserConfig, WaymarkError> {
-        crate::ops::local_config::seeded(
-            root,
-            &crate::ops::local_config::InitSeeds {
-                operator: self.operator.clone(),
-                timezone: self.timezone.clone(),
-            },
-        )
+        crate::ops::local_config::seeded(root, self.operator.as_deref(), self.timezone.as_deref())
     }
 }
 

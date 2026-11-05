@@ -313,10 +313,7 @@ impl LocalEnvironment {
         let timezone_stated = user.is_some_and(|user| user.timezone.is_some());
         let mut environment = Self::default();
         if !operator_stated {
-            let probe = crate::git::GitProbe::from_parts(
-                crate::git::find_repository_at(root),
-                crate::git::find_executable(),
-            );
+            let probe = crate::git::GitProbe::detect_at(root);
             environment.operator = crate::git::user_name(&probe);
         }
         if !timezone_stated {
