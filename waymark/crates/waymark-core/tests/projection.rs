@@ -384,11 +384,34 @@ fn a_projection_loaded_with_a_configured_cache_uses_that_capacity() {
 
 #[test]
 fn a_case_variant_document_makes_the_projection_scoped_and_names_the_path() {
-    let (_dir, project) = project();
+    let dir = tempfile::tempdir().unwrap();
+    let root = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+    let mut config = waymark_core::config::Config::fresh();
+    config.categories.insert(
+        waymark_core::model::CategoryKey::parse("bug").unwrap(),
+        waymark_core::config::Category {
+            path: "work/bugs".to_owned(),
+            name: "Bugs".to_owned(),
+        },
+    );
+    let project = Project::init(
+        &root,
+        waymark_core::store::InitOptions {
+            config: Some(config),
+            ..Default::default()
+        },
+    )
+    .unwrap()
+    .with_clock(fixtures::shared_clock())
+    .with_id_source(Box::new(waymark_core::testing::SequentialIds::new()));
     let item = make(&project, "case");
     let lowercase = task_path(&project, &item);
-    let uppercase = lowercase.with_file_name(format!("{}.md", item.to_uppercase()));
+    // Separate categories avoid aliasing on case-insensitive filesystems.
+    let uppercase = root.join(format!("work/bugs/{}.md", item.to_uppercase()));
+    let original_bytes = std::fs::read(&lowercase).unwrap();
     std::fs::copy(&lowercase, &uppercase).unwrap();
+    assert_eq!(std::fs::read(&lowercase).unwrap(), original_bytes);
+    assert_eq!(std::fs::read(&uppercase).unwrap(), original_bytes);
 
     // The inventory cannot classify the case variant as a document, but it names
     // an ID the projection also holds. That is an ambiguity, not noise.
