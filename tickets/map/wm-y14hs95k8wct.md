@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T02:33:13Z
+updated_at: 2026-11-05T02:34:47Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -519,6 +519,11 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - A storage-root configuration or corresponding migration input may be the standalone `.` meaning the Waymark project root, not the containing Git repository root. For a project nested within a repository, Git scope must stay within that project. A storage-root-scoped Git diff for `.` can include tracked project files beyond work items; document this rather than calling it a work-item-only patch.
 - A category path, including a category-path migration target, may not be the standalone `.`: the project root contains metadata and other project files and must not be treated as a movable category directory. Existing configurations using it follow the incompatibility diagnosis and manually coordinated remediation rules, with no automatic rename.
 - Except the standalone `.` permitted for storage root, reject `.` components in persisted storage/category paths and storage-migration targets, including `./task` and `work/./task`, rather than silently normalizing or rewriting them. Use `task` and `work/task` respectively. Diagnose existing incompatible configurations under the agreed transition policy.
+
+
+- Confirmed by the user on 2026-11-05: the no-existing-target rule for storage migration applies to each actual category directory being moved, not to an existing storage-root container or target parent. For example, migration from `work` to `.` can move `work/task` to an absent `task` beneath the existing project root. It does not move, delete, or replace the project root itself; if an actual category destination is the existing project root, reject that move. All actual category destinations remain subject to no-overwrite guarantees.
+- Retain support for category paths outside the configured storage root rather than imposing a new containment requirement. Default storage-root Git history/diff may omit those categories and must not claim complete work-item coverage; individual items can be queried by ID. If a storage-root migration cannot derive a destination for an out-of-root category, refuse and identify that category rather than guessing or moving it automatically.
+- Unicode data upgrades are explicit compatibility changes: before affected writes, a newer release validates existing configuration with its new comparison rules, reports concrete collisions, and preserves configuration diagnostics and an explicit manual-repair path. Do not silently rename or merge. Release notes must warn collaborators to coordinate versions, since old and new releases may judge a path pair differently. Precise release/version representation remains open.
 
 ## Not yet specified
 

@@ -6,7 +6,7 @@ category: map
 status: open
 owner: frank
 created_at: 2026-11-05T00:53:10Z
-updated_at: 2026-11-05T02:33:13Z
+updated_at: 2026-11-05T02:34:47Z
 parent: wm-4wbvzsv34g2p
 dependencies:
   - wm-78d0sa7jaxpb
@@ -62,6 +62,11 @@ How should project-relative paths and work-item files remain safe and portable a
 - Standalone `.` is permitted for storage-root configuration and corresponding migration input and denotes the Waymark project root, not the Git repository root. With `.` the tracked-file storage-root diff can include other project files, and is documented accordingly; nested project scope remains bounded.
 - Standalone `.` is forbidden for category paths and category migration targets. Existing configurations are diagnosed and remediated under the earlier transition policy; no automatic renaming.
 - Apart from standalone storage-root `.`, reject `.` path components such as `./task` and `work/./task` rather than silently normalize. This applies to persisted storage/category paths and migration targets; diagnose existing incompatible configurations.
+
+
+- The migration no-existing-target rule applies to actual category move destinations, not to an already existing storage-root container or target parent. Migration to `.` may move `work/task` to absent `task` without moving the project root; reject if an actual category destination is the existing project root.
+- Category paths may be outside the storage root. Default Git history/diff scoped to the root may omit them; individual IDs remain queryable. A root migration that cannot derive an out-of-root category destination refuses and names it rather than guessing.
+- Unicode data upgrades must explicitly review compatibility: before affected writes validate under the newer comparison, report collisions, retain configuration diagnosis and manual repair, and never silently merge or rename. Release notes tell collaborators to coordinate versions; exact version representation remains open.
 
 ## Still to resolve
 
