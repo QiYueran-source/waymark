@@ -22,8 +22,14 @@ fn init_creates_the_configuration_the_ignore_file_and_the_category_directory() {
 
     assert_eq!(project.root(), root);
     assert_eq!(project.metadata_dir(), root.join(".waymark"));
-    assert_eq!(project.config_path(), root.join(".waymark/config.toml"));
-    assert_eq!(project.lock_path(), root.join(".waymark/write.lock"));
+    assert_eq!(
+        project.config_path(),
+        root.join(".waymark").join("config.toml")
+    );
+    assert_eq!(
+        project.lock_path(),
+        root.join(".waymark").join("write.lock")
+    );
 
     let config_bytes = std::fs::read_to_string(root.join(".waymark").join(CONFIG_FILE)).unwrap();
     assert_eq!(config_bytes, Config::fresh().to_toml_string());
@@ -33,7 +39,7 @@ fn init_creates_the_configuration_the_ignore_file_and_the_category_directory() {
     assert!(ignore.lines().any(|line| line == "write.lock"), "{ignore}");
 
     assert!(
-        root.join("work/task").is_dir(),
+        root.join("work").join("task").is_dir(),
         "the category directory exists"
     );
 }
@@ -84,7 +90,7 @@ fn discover_walks_up_from_a_nested_directory() {
     let dir = tempfile::tempdir().unwrap();
     let root = utf8(&dir);
     Project::init(&root, InitOptions::default()).unwrap();
-    let nested = root.join("work/task/deeper");
+    let nested = root.join("work").join("task").join("deeper");
     std::fs::create_dir_all(&nested).unwrap();
 
     let found = Project::discover(&nested).expect("the project is found above the cwd");
@@ -95,7 +101,7 @@ fn discover_walks_up_from_a_nested_directory() {
 fn discover_reports_the_directory_it_searched_from() {
     let dir = tempfile::tempdir().unwrap();
     let root = utf8(&dir);
-    let error = Project::discover(&root.join("some/deeper/path")).unwrap_err();
+    let error = Project::discover(&root.join("some").join("deeper").join("path")).unwrap_err();
     assert_eq!(error.code(), Code::ProjectNotFound);
     assert!(error.message().contains("some/deeper/path"), "{error}");
 }
@@ -219,7 +225,7 @@ fn a_missing_category_directory_reads_as_empty() {
     let dir = tempfile::tempdir().unwrap();
     let root = utf8(&dir);
     let project = Project::init(&root, InitOptions::default()).unwrap();
-    std::fs::remove_dir_all(root.join("work/task")).unwrap();
+    std::fs::remove_dir_all(root.join("work").join("task")).unwrap();
     let inventory = project.inventory().unwrap();
     assert!(inventory.entries.is_empty());
 }
@@ -321,7 +327,7 @@ fn the_configured_storage_root_is_honoured() {
         },
     )
     .unwrap();
-    assert!(root.join("items/tasks").is_dir());
+    assert!(root.join("items").join("tasks").is_dir());
     let id = waymark_core::WorkItemId::parse("wm-3f7k9q2m4x8c").unwrap();
     assert!(project
         .path_for(&id, &CategoryKey::parse("task").unwrap())
@@ -383,7 +389,7 @@ fn a_symlinked_metadata_gitignore_is_not_written_through() {
     std::fs::create_dir_all(root.join(".waymark")).unwrap();
     let outside = dir.path().join("outside-gitignore");
     std::fs::write(&outside, b"keep me\n").unwrap();
-    std::os::unix::fs::symlink(&outside, root.join(".waymark/.gitignore")).unwrap();
+    std::os::unix::fs::symlink(&outside, root.join(".waymark").join(".gitignore")).unwrap();
 
     let error = Project::init(&root, InitOptions::default()).unwrap_err();
     assert_eq!(error.code(), Code::LockFailed);
@@ -395,9 +401,13 @@ fn an_existing_gitignore_entry_is_not_duplicated() {
     let dir = tempfile::tempdir().unwrap();
     let root = utf8(&dir);
     std::fs::create_dir_all(root.join(".waymark")).unwrap();
-    std::fs::write(root.join(".waymark/.gitignore"), "cache\nwrite.lock\n").unwrap();
+    std::fs::write(
+        root.join(".waymark").join(".gitignore"),
+        "cache\nwrite.lock\n",
+    )
+    .unwrap();
     Project::init(&root, InitOptions::default()).unwrap();
-    let ignore = std::fs::read_to_string(root.join(".waymark/.gitignore")).unwrap();
+    let ignore = std::fs::read_to_string(root.join(".waymark").join(".gitignore")).unwrap();
     assert_eq!(ignore.matches("write.lock").count(), 1, "{ignore}");
     assert!(ignore.contains("cache"), "{ignore}");
 }

@@ -200,7 +200,7 @@ fn two_creates_get_two_ids() {
 #[test]
 fn create_repairs_a_missing_write_lock_ignore_entry() {
     let (dir, project) = fixtures::deterministic_project();
-    let gitignore = utf8(&dir).join(".waymark/.gitignore");
+    let gitignore = utf8(&dir).join(".waymark").join(".gitignore");
     std::fs::write(&gitignore, "").unwrap();
     create::create(&project, CreateRequest::new("t", "task", "f"), &options()).unwrap();
     let ignore = std::fs::read_to_string(&gitignore).unwrap();
@@ -278,7 +278,7 @@ fn create_reads_the_project_lock_for_the_whole_write() {
     let (_dir, project) = fixtures::deterministic_project();
     // A second handle at the same lock path is enough to see contention: the
     // lock is per file, not per handle.
-    let lock_path = utf8(&_dir).join(".waymark/write.lock");
+    let lock_path = utf8(&_dir).join(".waymark").join("write.lock");
     waymark_core::lock::with_project_lock(
         &project,
         waymark_core::lock::LockWait::default_policy(),

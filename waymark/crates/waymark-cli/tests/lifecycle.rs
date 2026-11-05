@@ -345,7 +345,7 @@ fn a_dangling_dependency_blocks_and_is_reported_in_meta() {
 
     // A hand edit is the only way to create a dangling pointer; the operation
     // refuses it, so write the document directly.
-    let document = root.join("work/task").join(format!("{id}.md"));
+    let document = root.join("work").join("task").join(format!("{id}.md"));
     let text = std::fs::read_to_string(&document).unwrap();
     assert!(text.starts_with("---\n"), "{text}");
     let edited = text.replacen("---\n", "---\ndependencies:\n  - wm-00000000zzzz\n", 1);
@@ -535,7 +535,7 @@ fn show_still_reads_one_document_when_a_sibling_cannot_be_parsed() {
     // An external edit that no operation would make: the frontmatter no longer
     // closes. The document is unreadable, but it is not the one being shown.
     std::fs::write(
-        root.join("work/task").join(format!("{broken}.md")),
+        root.join("work").join("task").join(format!("{broken}.md")),
         "---\nid: not even close\n",
     )
     .unwrap();
@@ -572,7 +572,7 @@ fn a_global_graph_read_fails_explicitly_rather_than_returning_a_partial_page() {
     create(&root, "readable");
     let broken = create(&root, "broken");
     std::fs::write(
-        root.join("work/task").join(format!("{broken}.md")),
+        root.join("work").join("task").join(format!("{broken}.md")),
         "---\nid: not even close\n",
     )
     .unwrap();

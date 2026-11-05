@@ -313,9 +313,11 @@ fn a_storage_migration_previews_then_moves_the_root() {
         .ends_with("items/task"));
     assert_eq!(envelope["data"]["rewritten"], serde_json::json!([]));
     assert!(old.exists(), "the dry run moved nothing");
-    assert!(std::fs::read_to_string(root.join(".waymark/config.toml"))
-        .expect("the configuration")
-        .contains("storage_root = \"work\""));
+    assert!(
+        std::fs::read_to_string(root.join(".waymark").join("config.toml"))
+            .expect("the configuration")
+            .contains("storage_root = \"work\"")
+    );
 
     let real = migrate(&root, &["storage", "--root", "items", "--json"]);
     assert_eq!(real.status(), 0, "stderr: {}", real.stderr());
@@ -326,9 +328,13 @@ fn a_storage_migration_previews_then_moves_the_root() {
         serde_json::json!("applied")
     );
     assert!(!old.exists());
-    assert!(root.join("items/task").join(format!("{id}.md")).exists());
-    let config =
-        std::fs::read_to_string(root.join(".waymark/config.toml")).expect("the configuration");
+    assert!(root
+        .join("items")
+        .join("task")
+        .join(format!("{id}.md"))
+        .exists());
+    let config = std::fs::read_to_string(root.join(".waymark").join("config.toml"))
+        .expect("the configuration");
     assert!(config.contains("storage_root = \"items\""), "{config}");
     assert!(config.contains("version = \"1.1\""), "{config}");
 }
@@ -354,8 +360,8 @@ fn a_storage_key_migration_rewrites_the_category_value() {
         envelope["data"]["rewritten"][0]["to"],
         serde_json::json!("chore")
     );
-    assert!(!root.join("work/task").exists());
-    let moved = root.join("work/chore").join(format!("{id}.md"));
+    assert!(!root.join("work").join("task").exists());
+    let moved = root.join("work").join("chore").join(format!("{id}.md"));
     let document = std::fs::read_to_string(&moved).expect("the moved document");
     assert!(document.contains("category: chore"), "{document}");
 }

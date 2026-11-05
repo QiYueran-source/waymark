@@ -104,7 +104,7 @@ fn json_err(root: &Utf8PathBuf, arguments: &[&str]) -> (i32, serde_json::Value) 
 }
 
 fn document(root: &Utf8PathBuf, id: &str) -> String {
-    std::fs::read_to_string(root.join("work/task").join(format!("{id}.md")))
+    std::fs::read_to_string(root.join("work").join("task").join(format!("{id}.md")))
         .expect("the document is readable")
 }
 
@@ -168,7 +168,7 @@ fn archive_cleans_inbound_edges_and_reports_each_removal() {
         envelope["data"]["affected"],
         serde_json::json!([{
             "id": dependent,
-            "path": root.join("work/task").join(format!("{dependent}.md")).to_string(),
+            "path": root.join("work").join("task").join(format!("{dependent}.md")).to_string(),
         }])
     );
     assert!(!document(&root, &dependent).contains(&target));

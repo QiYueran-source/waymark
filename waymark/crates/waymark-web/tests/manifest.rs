@@ -13,8 +13,11 @@ fn tree() -> TempDir {
     fs::write(dir.path().join("index.html"), "<!doctype html>\n")
         .expect("the fixture index is writable");
     fs::create_dir_all(dir.path().join("_app")).expect("the fixture directory exists");
-    fs::write(dir.path().join("_app/app.js"), "console.log('waymark');\n")
-        .expect("the fixture asset is writable");
+    fs::write(
+        dir.path().join("_app").join("app.js"),
+        "console.log('waymark');\n",
+    )
+    .expect("the fixture asset is writable");
     fs::write(dir.path().join("build-id.txt"), "build-42\n").expect("the build id is writable");
     dir
 }
@@ -179,8 +182,11 @@ fn the_manifest_is_written_beside_the_tree_by_default() {
     let build = assets.path().join("build");
     fs::create_dir_all(build.join("_app")).expect("the build directory exists");
     fs::write(build.join("index.html"), "<!doctype html>\n").expect("the index is writable");
-    fs::write(build.join("_app/app.js"), "console.log('waymark');\n")
-        .expect("the asset is writable");
+    fs::write(
+        build.join("_app").join("app.js"),
+        "console.log('waymark');\n",
+    )
+    .expect("the asset is writable");
     fs::write(build.join("build-id.txt"), "build-42\n").expect("the build id is writable");
 
     let output = generator()

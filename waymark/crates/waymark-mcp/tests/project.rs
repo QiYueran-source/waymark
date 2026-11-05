@@ -49,7 +49,7 @@ async fn project_init_creates_a_project_and_info_describes_it() {
     assert!(envelope["data"]["revision"].is_number());
     assert_eq!(
         envelope["data"]["config_path"],
-        format!("{root}/.waymark/config.toml")
+        root.join(".waymark").join("config.toml").to_string()
     );
     assert_eq!(envelope["_meta"]["completeness"], "scoped");
     assert_eq!(envelope["_meta"]["freshness"], "fresh");

@@ -475,7 +475,7 @@ fn a_stray_readme_is_inventory_noise_not_an_incomplete_projection() {
     let (_dir, project) = project();
     make(&project, "one");
     std::fs::write(
-        project.root().join("work/task/README.md"),
+        project.root().join("work").join("task").join("README.md"),
         "project notes, not a work item\n",
     )
     .unwrap();

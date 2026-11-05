@@ -546,7 +546,7 @@ fn the_repository_is_discovered_even_when_the_project_is_not_its_root() {
     let dir = tempfile::tempdir().expect("a temporary directory");
     let root = utf8(&dir);
     git(&root, &["init", "--quiet"]);
-    let nested = root.join("nested/project");
+    let nested = root.join("nested").join("project");
     std::fs::create_dir_all(&nested).unwrap();
     let project = Project::init(&nested, InitOptions::default()).expect("init succeeds");
     create::create(

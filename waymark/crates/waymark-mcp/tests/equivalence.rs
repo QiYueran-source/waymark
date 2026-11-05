@@ -564,7 +564,11 @@ async fn migrations_match_the_cli() {
     // Version migration.
     let fixture = common::fixture(&["one"]);
     let id = fixture.ids[0].clone();
-    let path = fixture.root.join("work/task").join(format!("{id}.md"));
+    let path = fixture
+        .root
+        .join("work")
+        .join("task")
+        .join(format!("{id}.md"));
     let document = common::read(&path);
     let downgraded = document.replacen(
         &format!("schema: {}\n", waymark_core::model::FORMAT_GENERATION),
@@ -572,7 +576,7 @@ async fn migrations_match_the_cli() {
         1,
     );
     std::fs::write(&path, downgraded).expect("the document is writable");
-    let config_path = fixture.root.join(".waymark/config.toml");
+    let config_path = fixture.root.join(".waymark").join("config.toml");
     let config_text = common::read(&config_path);
     let current = fixture.project().config().version.to_string();
     let replaced =
@@ -730,8 +734,10 @@ async fn config_read_matches_the_cli() {
     // A hand-edited local document is a supported path, and it exercises the
     // whole local shape: an operator, a zone, and both cache fields.
     let local = "operator = \"frank\"\ntimezone = \"Asia/Shanghai\"\n\n[cache]\nenabled = false\ncapacity = 64\n";
-    std::fs::write(fixture.root.join(".waymark/user.toml"), local).expect("the MCP side document");
-    std::fs::write(cli_root.join(".waymark/user.toml"), local).expect("the CLI side document");
+    std::fs::write(fixture.root.join(".waymark").join("user.toml"), local)
+        .expect("the MCP side document");
+    std::fs::write(cli_root.join(".waymark").join("user.toml"), local)
+        .expect("the CLI side document");
 
     let mcp = common::envelope(&client.call("waymark_config_read", common::no_args()).await);
     let cli = common::cli_json(&cli_root, &["config", "show"]);

@@ -124,7 +124,7 @@ fn a_category_can_be_added_renamed_and_removed() {
     assert_eq!(added.config.categories[&key("bug")].path, "work/bugs");
     assert_eq!(added.revision, 1);
     assert!(
-        project.root().join("work/bugs").is_dir(),
+        project.root().join("work").join("bugs").is_dir(),
         "adding a category also creates its directory"
     );
 
@@ -165,7 +165,7 @@ fn a_failed_configuration_write_rolls_back_the_category_directory() {
 
     assert_eq!(error.code(), Code::IoError);
     assert!(
-        !project.root().join("work/bugs").exists(),
+        !project.root().join("work").join("bugs").exists(),
         "the directory created before the failed replacement is rolled back"
     );
     assert_eq!(
@@ -692,7 +692,7 @@ fn init_builds_the_requested_configuration_in_core() {
     let bug = config.categories.get(&key("bug")).expect("bug is declared");
     assert_eq!(bug.path, "docs/work/bug");
     assert_eq!(bug.name, "Bug");
-    assert!(root.join("docs/work/bug").is_dir());
+    assert!(root.join("docs").join("work").join("bug").is_dir());
 
     // An empty request uses the domain defaults, not an adapter's copy.
     let default_root = root.join("default");
@@ -706,5 +706,5 @@ fn init_builds_the_requested_configuration_in_core() {
         .get(&key("task"))
         .expect("task is declared");
     assert_eq!(task.path, "work/task");
-    assert!(default_root.join("work/task").is_dir());
+    assert!(default_root.join("work").join("task").is_dir());
 }

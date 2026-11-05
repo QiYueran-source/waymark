@@ -14,7 +14,9 @@ use std::path::PathBuf;
 use support::{fixture, get, start};
 
 fn build_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ui/build")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("ui")
+        .join("build")
 }
 
 /// Every root-relative `/_app/...` URL an attribute in the shell points at.

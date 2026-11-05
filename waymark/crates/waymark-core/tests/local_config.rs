@@ -734,7 +734,8 @@ fn initialization_adds_the_local_entry_to_the_ignore_file_without_duplicating() 
     let dir = tempfile::tempdir().expect("a temporary directory");
     let root = utf8(&dir);
     std::fs::create_dir_all(root.join(".waymark")).expect("the metadata directory exists");
-    std::fs::write(root.join(".waymark/.gitignore"), "write.lock\n").expect("a pre-existing file");
+    std::fs::write(root.join(".waymark").join(".gitignore"), "write.lock\n")
+        .expect("a pre-existing file");
 
     let project = initialize(&root);
     let ignore = std::fs::read_to_string(project.metadata_dir().join(".gitignore"))
@@ -755,7 +756,7 @@ fn initialization_never_touches_the_repository_level_ignore_files() {
         return;
     };
     let root_ignore = root.join(".gitignore");
-    let exclude = root.join(".git/info/exclude");
+    let exclude = root.join(".git").join("info").join("exclude");
     std::fs::write(&root_ignore, "target/\n").expect("the repository ignore file");
     std::fs::write(&exclude, "# keep this\nnode_modules\n").expect("the exclude file");
 

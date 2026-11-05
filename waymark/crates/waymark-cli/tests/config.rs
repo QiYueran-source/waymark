@@ -612,7 +612,8 @@ fn setting_a_tracked_local_document_fails_with_untracking_guidance() {
     let (_dir, root) = project();
     git(&root, &["init", "--quiet"]);
     git(&root, &["add", "--force", ".waymark/user.toml"]);
-    let before = std::fs::read_to_string(root.join(".waymark/user.toml")).expect("the document");
+    let before =
+        std::fs::read_to_string(root.join(".waymark").join("user.toml")).expect("the document");
 
     let result = config(&root, &["set", "operator", "someone"]);
     assert_eq!(result.status(), 3, "stderr: {}", result.stderr());
@@ -622,7 +623,7 @@ fn setting_a_tracked_local_document_fails_with_untracking_guidance() {
         result.stderr()
     );
     assert_eq!(
-        std::fs::read_to_string(root.join(".waymark/user.toml")).expect("the document"),
+        std::fs::read_to_string(root.join(".waymark").join("user.toml")).expect("the document"),
         before
     );
 }
@@ -630,7 +631,7 @@ fn setting_a_tracked_local_document_fails_with_untracking_guidance() {
 #[test]
 fn a_malformed_local_document_fails_the_write_rather_than_being_overwritten() {
     let (_dir, root) = project();
-    let path = root.join(".waymark/user.toml");
+    let path = root.join(".waymark").join("user.toml");
     std::fs::write(&path, "operator = \n").unwrap();
 
     let result = config(&root, &["set", "operator", "frank"]);
