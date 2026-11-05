@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T00:45:59Z
+updated_at: 2026-11-05T00:48:12Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -417,7 +417,9 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - Both findings are info severity, non-fixable, and never change the exit code. `doctor` and `validate` report them so a user learns before running history; they do not install Git or initialize a repository.
 - This adds `GIT_UNAVAILABLE` to the frozen registry (37 → 38): the registry table, JSON-schema enum, golden snapshot, and documented table change in the same edit.
 
-### Cross-platform toolchain direction
+### Cross-platform planning direction
+
+- Confirmed by the user on 2026-11-05: the separate cross-platform effort will find the way to an implementable adaptation design and a basis for specification revisions. Review the existing Windows specification, decide platform-module responsibilities and verification gates, and defer specification synchronization and implementation tickets until the design is ready or the user asks. Do not implement product code while charting the map.
 
 - Confirmed by the user on 2026-11-05: Windows MSVC and GNU toolchains are both to be built and tested in CI; initially publish only MSVC-built Windows artifacts. GNU users can build from source; no separate GNU release artifact is initially promised. The exact target matrix, test gates, and dependency and runtime compatibility still require investigation. This is a later planning direction, not a claim of current support, and supersedes the MSVC-only scope in the existing Windows platform specification once that specification is synchronized.
 
@@ -425,7 +427,7 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 
 ### Cross-platform planning
 
-- Confirm the destination and scope of the proposed cross-platform map, including its relationship to the existing Windows specification and implementation planning.
+- Clarify the detailed scope of the proposed cross-platform map and how it relates to the existing Windows specification.
 - Clarify supported OS, architecture, filesystems, environments, and concrete test and release gates beyond the confirmed Windows toolchain direction.
 
 
