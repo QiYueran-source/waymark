@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T00:49:27Z
+updated_at: 2026-11-05T00:50:19Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -426,6 +426,9 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - Confirmed by the user on 2026-11-05: retain the existing Linux and macOS target scope and add Windows x86_64 MSVC and x86_64 GNU. Windows ARM64, Cygwin, and WSL-specific behavior are not in this effort.
 - The adaptation design covers core filesystem operations, Git, CLI, MCP, Web, CI, and release verification for platform compatibility; it does not introduce new product features.
 - Support is limited to local filesystems. Concurrent access to the same project over NFS, SMB, or other network filesystems is not supported by this effort.
+
+- Confirmed by the user on 2026-11-05: the map covers lock safety and contention; replacement, rollback, permissions and migrations; paths and Git parity; the platform-module design and existing dependencies; verification, CI and release; and how the outcomes relate to the existing Windows specification. Concrete contracts and implementation choices remain open.
+- For this map, record decision-ticket types in bodies and use Waymark native parent and dependency relationships. Do not add project-wide fields for ticket types or claims. The required human owner is not an unclaimed marker; a practical concurrent-claim convention remains to be determined.
 
 ## Not yet specified
 
