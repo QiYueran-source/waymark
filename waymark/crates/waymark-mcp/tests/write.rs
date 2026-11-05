@@ -503,10 +503,15 @@ async fn move_work_item_relocates_the_document() {
     assert_eq!(envelope["data"]["category"], "bug");
     assert_eq!(envelope["data"]["changed"], true);
     assert_eq!(envelope["data"]["written"], true);
+    let expected = fixture
+        .root
+        .join("work")
+        .join("bugs")
+        .join(format!("{id}.md"));
     assert!(envelope["data"]["path"]
         .as_str()
         .unwrap()
-        .ends_with(&format!("work/bugs/{id}.md")));
+        .ends_with(expected.as_str()));
     assert!(!fixture
         .root
         .join("work")

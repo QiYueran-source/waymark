@@ -122,7 +122,7 @@ fn history_reports_the_commits_that_touched_one_item() {
     );
     assert_eq!(
         report.paths,
-        vec![relative.as_str().to_owned()],
+        vec![relative.as_str().replace('\\', "/")],
         "the pathspec is project-relative and the repository root is the project"
     );
     assert_eq!(report.commits.len(), 1);
@@ -284,7 +284,7 @@ fn diff_of_a_commit_shows_what_that_commit_changed_for_the_item() {
         "the patch is scoped to the item file:\n{}",
         report.patch
     );
-    assert_eq!(report.paths, vec![relative.as_str().to_owned()]);
+    assert_eq!(report.paths, vec![relative.as_str().replace('\\', "/")]);
 }
 
 #[test]

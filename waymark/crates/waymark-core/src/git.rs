@@ -934,10 +934,12 @@ impl Git {
                 &[1],
             )?;
             if !tracked.status.success() {
-                if cfg!(windows) {
-                    return Ok(String::new());
-                }
-                let output = self.run(
+                // `/dev/null` is what Git itself uses for the absent side. Git
+                // for Windows resolves it through its MSYS layer, so the same
+                // command is attempted everywhere; a platform that cannot
+                // resolve it degrades to the empty patch rather than failing the
+                // read.
+                let attempt = self.run(
                     &[
                         "diff".to_owned(),
                         "--no-index".to_owned(),
@@ -947,8 +949,12 @@ impl Git {
                         path.clone(),
                     ],
                     &[1],
-                )?;
-                return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
+                );
+                return match attempt {
+                    Ok(output) => Ok(String::from_utf8_lossy(&output.stdout).into_owned()),
+                    Err(_) if cfg!(windows) => Ok(String::new()),
+                    Err(error) => Err(error),
+                };
             }
         }
         let mut args: Vec<String> = vec![

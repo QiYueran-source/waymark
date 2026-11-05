@@ -1061,8 +1061,8 @@ pub fn plan_storage(
     // Absolute moves plus the source digest the plan is built from.
     let mut moves: Vec<PlannedMove> = Vec::new();
     for (from, to) in &relative_moves {
-        let from_path = root.join(from);
-        let to_path = root.join(to);
+        let from_path = crate::config::resolve_relative(root, from);
+        let to_path = crate::config::resolve_relative(root, to);
         match directory_digest(&from_path) {
             Ok(expected) => moves.push(PlannedMove {
                 from: from_path,
