@@ -33,6 +33,8 @@ Reach an implementable cross-platform adaptation design and a basis for revising
 
 - [Define filesystem warning and recovery response contract](wm-pkn47knm5t0n.md): Per-event synchronization warnings carried in the success metadata, an explicit platform capability declaration instead of per-write noise, and three-state recovery reporting shown to humans as well as machines.
 
+- [Define platform adaptation module design](wm-rn893kzbg524.md): Compile-time capability declarations with per-filesystem checks, an internal capability-organised module, a narrow Windows binding, limited fault injection, and the requirements the first manual Windows pilot must exercise.
+
 ## Not yet specified
 
 - Further compatibility cases, limitations, or trade-offs uncovered by research and decisions that cannot yet be stated as precise questions.
