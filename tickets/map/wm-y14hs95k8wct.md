@@ -7,6 +7,18 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
+updated_at: 2026-11-05T06:58:13Z
+closed_at: 2026-11-03T23:52:21Z
+---
+---
+schema: 1
+id: wm-y14hs95k8wct
+title: 'Waymark: General-purpose tracker design map'
+category: map
+status: closed
+owner: frank
+creator: frank
+created_at: 2026-11-03T23:52:21Z
 updated_at: 2026-11-05T06:52:31Z
 closed_at: 2026-11-03T23:52:21Z
 ---
@@ -655,11 +667,12 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 
 ### Local user configuration
 
-- Confirmed by the user on 2026-11-05: move machine-specific cache settings, the acting `operator` identity, and time zone from shared `.waymark/config.toml` to local `.waymark/user.toml`. Project storage and data-model configuration remain shared. `init` creates both files; the user file is optional at runtime. This supersedes the earlier decision that project timezone is shared and uniform: each user configures their own timezone for display and offset-less local time interpretation.
-- The effective local operator uses an explicit `operator` in `user.toml` when provided; otherwise it defaults from Git `user.name`, and if Git has no configured `user.name`, operator is absent. This is still advisory only and does not authenticate or authorize users. Existing semantics remain: owner mismatch warnings compare against the effective operator and omitted `creator` defaults to that same identity when available.
-- The project configuration never supplies fallback values for local fields. Omitted cache settings use built-in cache defaults; omitted timezone uses the machine's local timezone as the initialization default; omitted operator uses the Git identity fallback. If `user.toml` is absent, normal operations use these defaults and ordinary reads do not create the file. An existing malformed or invalid `user.toml` is an explicit configuration error, not silently ignored.
+- Confirmed by the user on 2026-11-05: move machine-specific cache settings, the acting `operator` identity, and time zone from shared `.waymark/config.toml` to local `.waymark/user.toml`. Project storage and data-model configuration remain shared. The time zone is a per-user preference for display and interpretation of offset-less local time, not a shared project time baseline; this supersedes the earlier decision that project timezone is shared and uniform.
+- `init` creates `.waymark/user.toml` with the current Git `user.name` as operator when configured, the current machine-local time zone, and the existing cache defaults. If Git `user.name` is absent, operator is omitted. At runtime, explicit values in `user.toml` override defaults; when a local value is absent, operator falls back to the current Git `user.name`, timezone falls back to the current machine-local time zone, and cache settings use built-in defaults. An absent `user.toml` does not cause ordinary reads to create it.
+- Operator remains advisory only and does not authenticate or authorize users. Owner mismatch warnings compare against the effective operator; omitted `creator` defaults to that same identity when available, preserving existing semantics.
 - The old `operator`, cache, and timezone settings are removed from shared `config.toml`; they are not migration fallbacks. This is a pre-release change, so backward compatibility and automatic migration of old settings are not required.
-- Users edit `user.toml` manually; no dedicated user-config command is required in this scope. `init` ensures `.waymark/.gitignore` ignores `user.toml`, without modifying repository-level `.gitignore` or `.git/info/exclude`. Existing tracked `user.toml` cannot be made untracked by an ignore rule; `init` reports this rather than silently removing it from the Git index. Detailed ignore-rule repair and error reporting remain to be specified.
+- Users edit `user.toml` manually; no dedicated user-config command is required in this scope. If the file exists but is malformed or contains invalid values, report a configuration error rather than silently ignoring it.
+- `init` ensures `.waymark/.gitignore` ignores `user.toml`, without modifying repository-level `.gitignore` or `.git/info/exclude`. If `user.toml` is already tracked, `init` reports this and continues without modifying the Git index; the user must untrack it manually. Details of ignore-rule repair and error reporting remain to be specified.
 
 ## Not yet specified
 
