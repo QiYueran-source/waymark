@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T00:48:12Z
+updated_at: 2026-11-05T00:49:27Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -423,12 +423,15 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 
 - Confirmed by the user on 2026-11-05: Windows MSVC and GNU toolchains are both to be built and tested in CI; initially publish only MSVC-built Windows artifacts. GNU users can build from source; no separate GNU release artifact is initially promised. The exact target matrix, test gates, and dependency and runtime compatibility still require investigation. This is a later planning direction, not a claim of current support, and supersedes the MSVC-only scope in the existing Windows platform specification once that specification is synchronized.
 
+- Confirmed by the user on 2026-11-05: retain the existing Linux and macOS target scope and add Windows x86_64 MSVC and x86_64 GNU. Windows ARM64, Cygwin, and WSL-specific behavior are not in this effort.
+- The adaptation design covers core filesystem operations, Git, CLI, MCP, Web, CI, and release verification for platform compatibility; it does not introduce new product features.
+- Support is limited to local filesystems. Concurrent access to the same project over NFS, SMB, or other network filesystems is not supported by this effort.
+
 ## Not yet specified
 
 ### Cross-platform planning
 
-- Clarify the detailed scope of the proposed cross-platform map and how it relates to the existing Windows specification.
-- Clarify supported OS, architecture, filesystems, environments, and concrete test and release gates beyond the confirmed Windows toolchain direction.
+- Determine the concrete platform adaptation contracts, safety guarantees, test and release gates, and required changes to the existing Windows specification.
 
 
 ### Distribution
