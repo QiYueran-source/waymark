@@ -37,6 +37,8 @@ Reach an implementable cross-platform adaptation design and a basis for revising
 - [Define platform response interface details](wm-r6bmw1xrk5mn.md): A single warning code with registered details, three-state rollback reporting that replaces the ambiguous lists, and a tagged union that keeps UTF-8 paths readable while representing non-UTF-8 paths losslessly.
 - [Define safe temporary and recovery file diagnostics](wm-dq6f226w3g5k.md): Configuration-derived candidate locations, unconfirmed coverage reported instead of assumed clean, and two read-only finding codes that reuse the existing diagnostic surface.
 
+- [Define cross-platform verification and release gates](wm-9ghaw0aqapyf.md): Native MSVC and GNU legs with no cross-compilation substitute, an explicit skip allowlist, MSVC-only publishing, narrow filesystem support, and a no-retry rule for safety gates.
+
 ## Not yet specified
 
 - Further compatibility cases, limitations, or trade-offs uncovered by research and decisions that cannot yet be stated as precise questions.
