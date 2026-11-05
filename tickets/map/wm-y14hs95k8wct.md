@@ -7,6 +7,18 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
+updated_at: 2026-11-05T06:48:33Z
+closed_at: 2026-11-03T23:52:21Z
+---
+---
+schema: 1
+id: wm-y14hs95k8wct
+title: 'Waymark: General-purpose tracker design map'
+category: map
+status: closed
+owner: frank
+creator: frank
+created_at: 2026-11-03T23:52:21Z
 updated_at: 2026-11-05T06:41:55Z
 closed_at: 2026-11-03T23:52:21Z
 ---
@@ -632,7 +644,9 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 ### Local user configuration
 
 - Confirmed by the user on 2026-11-05: keep the project time zone and project data model in shared `.waymark/config.toml`, but move machine-specific cache settings and the acting `operator` identity to a local `.waymark/user.toml`. `init` creates both files; the user file is optional at runtime, and its cache settings override built-in cache defaults. Operator identity and its existing semantics remain unchanged: it is used for advisory owner-mismatch warnings and remains the effective-operator default for `creator` when creator is omitted.
-- `init` ensures `.waymark/.gitignore` ignores `user.toml`, keeping the local settings out of the shared Git baseline without modifying repository-level `.gitignore` or `.git/info/exclude`. Existing tracked `user.toml` cannot be made untracked by an ignore rule and must be reported rather than silently removed from the Git index. Detailed behavior for malformed local settings, legacy project-level operator/cache values, and ignore-rule repair remains to be specified.
+- The project configuration never supplies fallback values for local fields: explicit values in `user.toml` override built-in defaults, and omitted local fields use built-in defaults. If `user.toml` is absent, normal operations continue with built-in cache defaults and no operator; ordinary reads do not create the file. An existing but malformed or invalid `user.toml` is an explicit configuration error, not silently ignored.
+- The old `operator` and cache settings are removed from shared `config.toml`; they are not migration fallbacks. The existing operator behavior remains unchanged, including advisory owner mismatch warnings and defaulting omitted `creator` to the effective operator when one is set.
+- `init` ensures `.waymark/.gitignore` ignores `user.toml`, keeping local settings out of the shared Git baseline without modifying repository-level `.gitignore` or `.git/info/exclude`. Existing tracked `user.toml` cannot be made untracked by an ignore rule; `init` must report this rather than silently remove it from the Git index. Details of ignore-rule repair and error reporting remain to be specified.
 
 ## Not yet specified
 
