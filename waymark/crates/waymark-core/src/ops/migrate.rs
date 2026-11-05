@@ -1094,7 +1094,7 @@ pub fn plan_storage(
         .categories
         .values()
         .filter(|category| !moved_sources.contains(category.path.as_str()))
-        .map(|category| root.join(&category.path))
+        .map(|category| crate::config::resolve_relative(root, &category.path))
         .collect();
     check_move_paths(root, &moves, &remaining, &mut diagnostics, &mut conflicts);
 
@@ -1590,8 +1590,10 @@ fn recheck_storage(
     let remaining: Vec<Utf8PathBuf> = current
         .categories
         .values()
-        .filter(|category| !moved_sources.contains(root.join(&category.path).as_str()))
-        .map(|category| root.join(&category.path))
+        .filter(|category| {
+            !moved_sources.contains(crate::config::resolve_relative(root, &category.path).as_str())
+        })
+        .map(|category| crate::config::resolve_relative(root, &category.path))
         .collect();
     check_move_paths(
         root,

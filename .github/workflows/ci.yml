@@ -122,11 +122,13 @@ jobs:
       - name: Lint
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
+      # `--no-fail-fast` so one red platform reports every failing test in a
+      # single run instead of one per push.
       - name: Test (all features)
-        run: cargo test --workspace --all-features
+        run: cargo test --workspace --all-features --no-fail-fast
 
       - name: Test (default features)
-        run: cargo test --workspace
+        run: cargo test --workspace --no-fail-fast
 
       - name: Assert the basic build excludes waymark-web
         run: |

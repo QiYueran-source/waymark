@@ -371,7 +371,7 @@ pub fn add_category(
                 .categories
                 .get(key)
                 .expect("the replacement declares the category");
-            let directory = project.root().join(&category.path);
+            let directory = crate::config::resolve_relative(project.root(), &category.path);
             let created = create_directory_tree(&directory)?;
             Ok(Some(Box::new(move || remove_directory_tree(&created))))
         },

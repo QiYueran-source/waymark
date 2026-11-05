@@ -235,7 +235,7 @@ impl Project {
         crate::write::replace_unchecked(&config_path, config.to_toml_string().as_bytes())?;
 
         for category in config.categories.values() {
-            let path = root.join(&category.path);
+            let path = crate::config::resolve_relative(&root, &category.path);
             fs::create_dir_all(&path)
                 .map_err(|source| WaymarkError::io(path.to_string(), "create", &source))?;
         }
@@ -349,7 +349,7 @@ impl Project {
     pub fn category_for_path(&self, path: &Utf8Path) -> Option<CategoryKey> {
         let mut best: Option<(usize, CategoryKey)> = None;
         for (key, category) in &self.config.categories {
-            let directory = self.root.join(&category.path);
+            let directory = crate::config::resolve_relative(&self.root, &category.path);
             if path.starts_with(&directory) {
                 let length = directory.as_str().len();
                 if best.as_ref().is_none_or(|(known, _)| length > *known) {
@@ -369,7 +369,7 @@ impl Project {
     pub fn inventory(&self) -> Result<Inventory, WaymarkError> {
         let mut inventory = Inventory::default();
         for (key, category) in &self.config.categories {
-            let directory = self.root.join(&category.path);
+            let directory = crate::config::resolve_relative(&self.root, &category.path);
             let entries = match fs::read_dir(&directory) {
                 Ok(entries) => entries,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
