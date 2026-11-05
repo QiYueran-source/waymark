@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T02:17:34Z
+updated_at: 2026-11-05T02:19:04Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -487,6 +487,11 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - Reject path components that are not portable to Windows on every platform: Windows reserved device names case-insensitively, including forms with extensions such as `con.txt`; Windows-forbidden characters and control characters; and components ending in a space or dot. The exhaustive rules and native verification still need investigation; the examples are not a complete specification.
 - Unicode names, including Chinese components such as `工作项/设计`, are allowed rather than limiting names to ASCII. They must still satisfy all other portability and safety checks. Case-equivalence, Unicode normalization and collision policies remain open; acceptance of Unicode is not a promise that all Unicode names are distinct on every filesystem.
 - Git work-item paths, storage-root paths, and `git history --path` denote literal project paths, not Git pathspec magic or wildcard patterns. Special characters must not accidentally expand the query scope; a directory path still denotes the directory's contents. Exact validation and native Git verification remain open.
+
+
+- Confirmed by the user on 2026-11-05: the existing no-symlink policy for configured category paths and storage migration targets also rejects all pre-existing Windows reparse points in those restricted paths, including junctions and mounted folders, rather than checking symbolic links alone. If a migration cannot verify that target components are safe, actual execution refuses and reports why. The separately approved project-root alias remains allowed; this does not promise defense against malicious ancestor replacement during an operation. Read behavior and other path classes remain open.
+- A working-tree diff requested by ID for an existing work-item file that Git ignores still produces a whole-new-file patch. The explicit single-item request is not suppressed by ignore rules. Storage-root diff continues to exclude untracked and ignored files.
+- When a Git repository has no `HEAD`, working-tree diff uses an empty tree as its baseline. A specified untracked item still produces a whole-new-file patch; staged items and staged files in storage-root scope are compared with that empty baseline, including their current working-tree state. Storage-root scope still does not automatically include untracked files. Once `HEAD` exists, the working-tree comparison remains against `HEAD`.
 
 ## Not yet specified
 

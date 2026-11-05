@@ -6,7 +6,7 @@ category: map
 status: open
 owner: frank
 created_at: 2026-11-05T00:53:10Z
-updated_at: 2026-11-05T02:17:34Z
+updated_at: 2026-11-05T02:19:04Z
 parent: wm-4wbvzsv34g2p
 dependencies:
   - wm-78d0sa7jaxpb
@@ -30,6 +30,11 @@ How should project-relative paths and work-item files remain safe and portable a
 - Reject Windows-reserved device names case-insensitively including extensions, Windows-forbidden and control characters, and components ending in space or dot, on every platform. The complete rules and native validation remain to be established.
 - Allow Unicode, such as `工作项/设计`, subject to all other rules; do not assume names that differ only in case or Unicode representation are distinct on all filesystems.
 - Git work-item paths, storage-root paths and history path filters are literal paths, not wildcard or Git pathspec expressions. Directories still scope their contents; validation and native verification remain open.
+
+
+- For configured category paths and storage-migration targets, reject pre-existing Windows reparse points of any kind, including junctions and mount points, extending the existing no-symlink policy. Actual migration refuses when target component safety cannot be established; root aliases remain permitted and adversarial ancestor replacement is not covered. Read behavior and other paths remain open.
+- An explicitly requested existing ignored work item gets a whole-new-file patch; storage-root scope does not automatically include ignored or untracked files.
+- Without `HEAD`, the working-tree diff baseline is the empty tree: an untracked item still has a whole-new-file patch, while staged item and storage-root files are compared to the empty baseline using their current working-tree state. Storage-root scope still omits untracked files. With `HEAD`, compare against it as before.
 
 ## Still to resolve
 
