@@ -371,6 +371,9 @@ fn a_constant_id_source_exhausts_its_budget_rather_than_looping_forever() {
     assert_eq!(error.code(), Code::IdGenerationFailed);
 }
 
+// A symlink is a Unix-only fixture: on Windows the equivalent
+// reparse-point behaviour needs the platform effort that owns it.
+#[cfg(unix)]
 #[test]
 fn a_symlinked_metadata_gitignore_is_not_written_through() {
     let dir = tempfile::tempdir().unwrap();

@@ -1430,6 +1430,22 @@ fn check_target_parent(target: &Utf8Path, diagnostics: &mut Vec<Value>) {
     }
 }
 
+/// Whether a failed rename says "the target is on another filesystem".
+///
+/// Every platform has its own errno for it, and only Unix defines `EXDEV`, so
+/// the mapping is per-platform instead of reaching for a libc constant that
+/// does not exist everywhere.
+#[cfg(unix)]
+fn is_cross_device(error: &std::io::Error) -> bool {
+    error.raw_os_error() == Some(libc::EXDEV)
+}
+
+/// `ERROR_NOT_SAME_DEVICE` (17), Windows' cross-volume rename failure.
+#[cfg(windows)]
+fn is_cross_device(error: &std::io::Error) -> bool {
+    error.raw_os_error() == Some(17)
+}
+
 /// A pure relocation is `rename(2)`; a cross-filesystem target cannot be one.
 #[cfg(unix)]
 fn check_cross_device(moved: &PlannedMove, diagnostics: &mut Vec<Value>) {
@@ -1673,7 +1689,7 @@ fn apply_move(
         created.push(directory);
     }
     std::fs::rename(moved.from.as_std_path(), moved.to.as_std_path()).map_err(|source| {
-        if source.raw_os_error() == Some(libc::EXDEV) {
+        if is_cross_device(&source) {
             WaymarkError::io(
                 moved.to.to_string(),
                 "rename onto another filesystem (a storage migration never copies)",

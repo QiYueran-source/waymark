@@ -620,6 +620,9 @@ fn overlapping_category_paths_are_a_finding() {
     );
 }
 
+// A symlink is a Unix-only fixture: on Windows the equivalent
+// reparse-point behaviour needs the platform effort that owns it.
+#[cfg(unix)]
 #[test]
 fn a_symlinked_category_path_is_a_finding() {
     let (_dir, project) = fixtures::deterministic_project();

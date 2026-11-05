@@ -691,14 +691,19 @@ fn open_lock_file(path: &Utf8Path) -> Result<fs::File, WaymarkError> {
     }
 
     let file = options.open(path).map_err(|source| {
-        if source.raw_os_error() == Some(libc::ELOOP) {
-            WaymarkError::lock_failed(
-                path.to_string(),
-                "the lock path is a symbolic link and will not be followed",
-            )
-        } else {
-            WaymarkError::lock_failed(path.to_string(), source.to_string())
+        #[cfg(unix)]
+        {
+            // `O_NOFOLLOW` turns a symlinked lock path into `ELOOP`; no other
+            // platform reports it, so the mapping lives here rather than in the
+            // general case.
+            if source.raw_os_error() == Some(libc::ELOOP) {
+                return WaymarkError::lock_failed(
+                    path.to_string(),
+                    "the lock path is a symbolic link and will not be followed",
+                );
+            }
         }
+        WaymarkError::lock_failed(path.to_string(), source.to_string())
     })?;
 
     let metadata = file
@@ -792,6 +797,7 @@ mod tests {
         .unwrap();
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_symlinked_lock_path_is_refused() {
         let dir = scratch();
@@ -831,6 +837,7 @@ mod tests {
         assert_eq!(fs::read_to_string(&path).unwrap(), "two\n");
     }
 
+    #[cfg(unix)]
     #[test]
     fn an_atomic_replace_preserves_the_existing_file_mode() {
         use std::os::unix::fs::PermissionsExt;
@@ -843,6 +850,7 @@ mod tests {
         assert_eq!(mode, 0o600);
     }
 
+    #[cfg(unix)]
     #[test]
     fn an_atomic_replace_gives_a_new_file_the_standard_mode() {
         use std::os::unix::fs::PermissionsExt;

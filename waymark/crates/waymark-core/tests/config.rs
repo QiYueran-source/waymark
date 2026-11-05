@@ -205,6 +205,9 @@ fn a_backslash_separator_is_rejected() {
     assert!(error.message().contains("POSIX"), "{error}");
 }
 
+// A symlink is a Unix-only fixture: on Windows the equivalent
+// reparse-point behaviour needs the platform effort that owns it.
+#[cfg(unix)]
 #[test]
 fn a_symlinked_category_directory_is_refused_when_loading() {
     let dir = tempfile::tempdir().unwrap();

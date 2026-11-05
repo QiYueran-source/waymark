@@ -76,13 +76,26 @@ jobs:
     name: Rust (${{ matrix.os }})
     needs: frontend
     runs-on: ${{ matrix.os }}
+    # Windows is observational for now: the library and tests build there, but
+    # the platform's own locking, replacement, permission and reparse behaviour
+    # is exactly what this leg exists to discover. A red Windows run is a
+    # finding to fix, not a reason to hold the pull request; flip `experimental`
+    # to `false` once a full run is green.
+    continue-on-error: ${{ matrix.experimental || false }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+          - os: macos-latest
+          - os: windows-latest
+            experimental: true
     defaults:
       run:
         working-directory: waymark
+        # Git Bash exists on all three runners, so one POSIX script body per
+        # step works everywhere instead of a per-platform branch.
+        shell: bash
     steps:
       - name: Check out the repository
         uses: actions/checkout@v4
@@ -123,11 +136,15 @@ jobs:
           fi
 
       - name: Smoke-test the basic and Web build variants
+        # The scratch project is the working directory, so no path has to cross
+        # a shell boundary: `--manifest-path` still points at the workspace.
         run: |
+          manifest="$GITHUB_WORKSPACE/waymark/Cargo.toml"
           project="$(mktemp -d)"
-          cargo run --quiet --locked -p waymark-cli --bin waymark -- --project "$project" init
+          cd "$project"
+          cargo run --quiet --locked --manifest-path "$manifest" -p waymark-cli --bin waymark -- init
           set +e
-          output="$(cargo run --quiet --locked -p waymark-cli --bin waymark -- --json --project "$project" serve)"
+          output="$(cargo run --quiet --locked --manifest-path "$manifest" -p waymark-cli --bin waymark -- --json serve)"
           status=$?
           set -e
           if [ "$status" -ne 3 ]; then
@@ -138,7 +155,7 @@ jobs:
             echo "::error::basic serve did not report WEB_NOT_INCLUDED: $output"
             exit 1
           fi
-          version="$(cargo run --quiet --locked -p waymark-cli --features web --bin waymark -- version)"
+          version="$(cargo run --quiet --locked --manifest-path "$manifest" -p waymark-cli --features web --bin waymark -- version)"
           if ! printf '%s\n' "$version" | grep -q 'web'; then
             echo "::error::the Web version did not report the web capability: $version"
             exit 1
