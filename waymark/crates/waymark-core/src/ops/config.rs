@@ -152,14 +152,14 @@ impl InitRequest {
 /// facts, not CLI presentation.
 pub fn init(root: &Utf8Path, request: InitRequest, force: bool) -> Result<Project, WaymarkError> {
     let config = request.config()?;
+    let metadata = root.join(crate::config::METADATA_DIR);
     // Re-initialization is a no-op and must not build — let alone write — a
-    // local document, so the seed is only resolved when the shared document is
-    // genuinely absent.
-    let local = if root
-        .join(crate::config::METADATA_DIR)
-        .join(CONFIG_FILE)
-        .exists()
-        && !force
+    // local document, so the seed is only resolved when this call is creating
+    // both documents. An existing local document is never reseeded, not even by
+    // `force`: it holds this collaborator's preferences, and `force` only
+    // replaces the shared configuration.
+    let local = if (metadata.join(CONFIG_FILE).exists() && !force)
+        || metadata.join(crate::user_config::USER_CONFIG_FILE).exists()
     {
         None
     } else {

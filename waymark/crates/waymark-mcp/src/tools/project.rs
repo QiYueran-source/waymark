@@ -66,7 +66,7 @@ impl WaymarkServer {
     /// it. Defaults: category `task`, storage root `work`, operator and time
     /// zone seeded from the Git identity and the machine, and no forced
     /// overwrite. Re-running init reuses an existing configuration unless
-    /// `force` is true.
+    /// `force` is true, and never rewrites an existing local user document.
     #[tool(
         name = "waymark_project_init",
         annotations(title = "Initialise the Waymark project")
@@ -78,10 +78,11 @@ impl WaymarkServer {
         envelope::respond(|| {
             let project =
                 waymark_core::ops::config::init(self.start(), args.request(), args.force)?;
-            Ok(envelope::success(
-                project_data(&project)?,
-                Meta::direct_file_scoped(),
-            ))
+            let mut data = project_data(&project)?;
+            data["local_config_path"] = json!(project.user_config_path().to_string());
+            data["local_config_tracked"] =
+                json!(waymark_core::ops::local_config::tracked(&project));
+            Ok(envelope::success(data, Meta::direct_file_scoped()))
         })
     }
 

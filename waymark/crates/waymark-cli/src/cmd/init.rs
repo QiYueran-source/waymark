@@ -19,11 +19,11 @@ pub struct InitArgs {
     #[arg(long, value_name = "PATH", default_value = waymark_core::config::DEFAULT_STORAGE_ROOT)]
     pub storage_root: String,
 
-    /// Advisory operator identity recorded in the configuration.
+    /// Advisory operator identity seeded into a newly created local configuration.
     #[arg(long, value_name = "NAME")]
     pub operator: Option<String>,
 
-    /// IANA time zone used for human display.
+    /// IANA time zone seeded into a newly created local configuration.
     #[arg(long, value_name = "ZONE")]
     pub timezone: Option<String>,
 
@@ -49,6 +49,9 @@ pub fn run(args: InitArgs, explicit: Option<&Utf8Path>, json: bool) -> Result<()
         request = request.with_timezone(timezone);
     }
     let project = waymark_core::ops::config::init(&root, request, args.force)?;
+    // A tracked local document is a repository mistake Waymark reports without
+    // repairing: the index is left exactly as it was found.
+    let local_tracked = waymark_core::ops::local_config::tracked(&project);
 
     if json {
         let categories: Vec<serde_json::Value> = project
@@ -68,6 +71,8 @@ pub fn run(args: InitArgs, explicit: Option<&Utf8Path>, json: bool) -> Result<()
                 "root": project.root().to_string(),
                 "metadata_dir": project.metadata_dir().to_string(),
                 "config_path": project.config_path().to_string(),
+                "local_config_path": project.user_config_path().to_string(),
+                "local_config_tracked": local_tracked,
                 "storage_root": project.config().storage_root,
                 "categories": categories,
             }),
@@ -79,6 +84,16 @@ pub fn run(args: InitArgs, explicit: Option<&Utf8Path>, json: bool) -> Result<()
             project.root()
         ));
         err_line(&format!("  configuration  {}", project.config_path()));
+        if project.user_config_path().is_file() {
+            err_line(&format!("  local settings  {}", project.user_config_path()));
+        }
+        if local_tracked {
+            err_line(&format!(
+                "  warning: {} is tracked by Git; untrack it to keep preferences out of the \
+                 shared baseline",
+                project.user_config_path()
+            ));
+        }
         for (key, category) in &project.config().categories {
             err_line(&format!("  category {}  {}", key, category.path));
         }

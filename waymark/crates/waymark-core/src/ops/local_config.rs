@@ -85,6 +85,20 @@ pub fn validate_path(path: &Utf8Path) -> Vec<Finding> {
     }
 }
 
+/// Whether Git's index already tracks the local document.
+///
+/// A tracked local document is readable, but Waymark never writes it: every such
+/// write would add a change to the shared baseline in every clone. `false` when
+/// Git cannot answer, because an unknown answer must not block an ordinary
+/// write.
+pub fn tracked(project: &Project) -> bool {
+    let probe = crate::git::GitProbe::from_parts(
+        crate::git::find_repository_at(project.root()),
+        crate::git::find_executable(),
+    );
+    crate::git::tracks(&probe, &project.user_config_path())
+}
+
 /// The effective operator identity operations resolve without an explicit
 /// override.
 ///
@@ -182,6 +196,19 @@ pub fn set_scalar(
         }
 
         next.validate()?;
+        // A tracked document belongs to the shared baseline by mistake. Writing
+        // it would deepen that mistake in every clone, so refuse and name the
+        // manual repair instead of working around it.
+        if tracked(project) {
+            return Err(WaymarkError::config_invalid(
+                path.to_string(),
+                vec![format!(
+                    "the local user configuration is tracked by Git; untrack it with \
+                     `git rm --cached {}` before Waymark writes it",
+                    path.file_name().unwrap_or_else(|| path.as_str())
+                )],
+            ));
+        }
         if !options.dry_run {
             if next.is_empty() {
                 remove_if_present(&path)?;

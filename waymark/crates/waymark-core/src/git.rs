@@ -231,6 +231,28 @@ pub fn user_name(probe: &GitProbe) -> Option<String> {
     (!name.is_empty()).then_some(name)
 }
 
+/// Whether Git's index tracks `path`.
+///
+/// `false` covers every way the answer can be unavailable — no repository, no
+/// executable, a path outside the repository, or a Git failure — because
+/// tracking is a repository fact Waymark reports, never a precondition for an
+/// ordinary read or write.
+pub fn tracks(probe: &GitProbe, path: &Utf8Path) -> bool {
+    let (Some(executable), Some(repository)) = (probe.executable(), probe.repository()) else {
+        return false;
+    };
+    let path = absolute(path);
+    let Some(relative) = repository.relative(&path) else {
+        return false;
+    };
+    let output = Command::new(executable)
+        .current_dir(repository.root())
+        .args(["ls-files", "--error-unmatch", "--"])
+        .arg(relative)
+        .output();
+    matches!(output, Ok(output) if output.status.success())
+}
+
 /// Find `git` on `PATH`.
 pub fn find_executable() -> Option<Utf8PathBuf> {
     let path = std::env::var_os("PATH")?;

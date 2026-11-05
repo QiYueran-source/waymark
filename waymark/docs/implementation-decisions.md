@@ -3254,3 +3254,38 @@ envelope, with `local: null` when the document is absent and keys omitted rather
 shared document; putting the local half on stdout would silently corrupt that file. The local settings
 are also the part a person is least likely to want to capture, since they are theirs, not the
 project's.
+
+## Initialization seeds the local document once and never rewrites it
+
+**Choice:** `Project::init` writes the local document only when the file does not already exist, and
+`ops::config::init` only resolves the seed when that is true — `--force` replaces the shared
+configuration but never the local one. The document is written with the effective Git `user.name`, the
+machine zone, and both cache values stated explicitly.
+
+**Why:** `--force` is about the project's shared layout, while the local document holds one
+collaborator's preferences; replacing the first must not silently discard the second. Writing the cache
+defaults out makes the first state a snapshot, so a later release that changes a default cannot change
+what an existing project does.
+
+## A tracked local document is reported, never repaired
+
+**Choice:** `git::tracks` asks `ls-files --error-unmatch`; `local_config::tracked` exposes it. `init`
+reports trackedness in its output (`local_config_tracked`, plus a human stderr warning) and leaves both
+the file and the index alone. A local write to a tracked document fails with `CONFIG_INVALID` located at
+the document and a message naming `git rm --cached .waymark/user.toml`.
+
+**Why:** ignore rules do not apply to an already tracked path, so the only safe repair is a deliberate
+human one — `Waymark` must not stage, unstage, or delete anything in the repository. `CONFIG_INVALID` is
+the registry's configuration-state failure, and the local document is configuration; the report is data
+about what initialization found, not a diagnostic about the data.
+
+## An unsafe ignore file stops init before any local settings exist
+
+**Choice:** `ensure_gitignore` refuses a symlink, a non-regular file, and a read-only file that would
+need an entry added, and it runs before either document is written. The lock's acquisition pass repairs
+both entries (`write.lock` and `user.toml`).
+
+**Why:** the replacement is a rename, which would quietly work around a read-only file's permissions;
+refusing is the only way "an unwritable ignore file stops the write" can be true. Repairing on every
+lock acquisition means a project cloned without the entry heals on its first mediated write instead of
+leaving preferences exposed until someone runs `init` again.

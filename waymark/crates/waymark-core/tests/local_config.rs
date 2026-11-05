@@ -16,7 +16,7 @@ use std::process::Command;
 use camino::{Utf8Path, Utf8PathBuf};
 use waymark_core::config::CacheSettings;
 use waymark_core::error::Code;
-use waymark_core::ops::config::Scalar;
+use waymark_core::ops::config::{InitRequest, Scalar};
 use waymark_core::ops::{create, local_config, OpOptions};
 use waymark_core::store::InitOptions;
 use waymark_core::testing::fixtures;
@@ -565,4 +565,302 @@ fn a_cache_only_document_shape_survives_a_round_trip() {
     let document = local.to_toml_string();
     assert_eq!(document, "[cache]\nenabled = false\n");
     assert_eq!(UserConfig::parse(&document).unwrap(), local);
+}
+
+// ---------------------------------------------------------------------------
+// Initialization
+// ---------------------------------------------------------------------------
+
+/// A temporary project directory inside a fresh Git repository.
+///
+/// `identity` is written as the repository-local `user.name`; `None` writes an
+/// empty one so Git's effective lookup is deterministic and says "no identity",
+/// whatever the developer's global configuration holds.
+fn repository(identity: Option<&str>) -> Option<(tempfile::TempDir, Utf8PathBuf)> {
+    if !git_available() {
+        eprintln!("skipping: no `git` executable on PATH");
+        return None;
+    }
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let root = utf8(&dir);
+    git(&root, &["init", "--quiet"]);
+    git(&root, &["config", "user.name", identity.unwrap_or("")]);
+    Some((dir, root))
+}
+
+/// Run `git` in `root` and return its stdout.
+fn git_output(root: &Utf8Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .current_dir(root)
+        .args(args)
+        .output()
+        .expect("the git binary runs");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+fn initialize(root: &Utf8Path) -> Project {
+    waymark_core::ops::config::init(root, InitRequest::new(), false).expect("init succeeds")
+}
+
+#[test]
+fn first_initialization_seeds_the_git_identity_zone_and_cache_defaults() {
+    let Some((_dir, root)) = repository(Some("Grace Hopper")) else {
+        return;
+    };
+    let project = initialize(&root);
+
+    let local = local_config::load(&project)
+        .expect("the local document is readable")
+        .expect("first initialization writes it");
+    assert_eq!(local.operator.as_deref(), Some("Grace Hopper"));
+    assert_eq!(
+        local.timezone,
+        waymark_core::time::detect_machine_timezone(),
+        "the machine zone is the seed, or UTC when it cannot be detected"
+    );
+    // Both cache values are written out, so a later release cannot change what
+    // this project snapshotted.
+    assert_eq!(local.cache.enabled, Some(CacheSettings::default().enabled));
+    assert_eq!(
+        local.cache.capacity,
+        Some(CacheSettings::default().capacity)
+    );
+
+    let findings = waymark_core::ops::config::validate_both(&project);
+    assert!(findings.is_empty(), "{findings:?}");
+}
+
+#[test]
+fn a_missing_git_identity_leaves_the_operator_out_of_the_seed() {
+    let Some((_dir, root)) = repository(None) else {
+        return;
+    };
+    let project = initialize(&root);
+
+    let local = local_config::load(&project)
+        .expect("the local document is readable")
+        .expect("first initialization writes it");
+    assert_eq!(local.operator, None, "nothing invents an identity");
+    let text = local_text(&project).expect("the document exists");
+    assert!(!text.contains("operator"), "{text}");
+    assert!(text.contains("[cache]"), "{text}");
+}
+
+#[test]
+fn initialization_options_seed_only_a_newly_created_document() {
+    let Some((_dir, root)) = repository(None) else {
+        return;
+    };
+    let seeded = waymark_core::ops::config::init(
+        &root,
+        InitRequest::new()
+            .with_operator("seed")
+            .with_timezone("Europe/Berlin"),
+        false,
+    )
+    .expect("the seeded init succeeds");
+    let local = local_config::load(&seeded)
+        .expect("the local document is readable")
+        .expect("the seed created it");
+    assert_eq!(local.operator.as_deref(), Some("seed"));
+    assert_eq!(
+        local.timezone.map(|zone| zone.name()),
+        Some("Europe/Berlin")
+    );
+    let written = local_text(&seeded).expect("the document exists");
+
+    // Neither an ordinary re-run nor a forced replacement reseeds it: the
+    // options apply only when the document is being created.
+    let rerun = waymark_core::ops::config::init(
+        &root,
+        InitRequest::new()
+            .with_operator("other")
+            .with_timezone("Asia/Tokyo"),
+        true,
+    )
+    .expect("the forced init succeeds");
+    assert_eq!(local_text(&rerun).as_deref(), Some(written.as_str()));
+}
+
+#[test]
+fn re_initializing_creates_and_overwrites_nothing() {
+    let Some((_dir, root)) = repository(Some("Grace Hopper")) else {
+        return;
+    };
+    let project = initialize(&root);
+    let seeded = local_text(&project).expect("the document exists");
+    let shared = std::fs::read_to_string(project.config_path()).expect("the shared document");
+
+    // A missing document is not recreated.
+    std::fs::remove_file(project.user_config_path()).expect("the document is removable");
+    let project = initialize(&root);
+    assert_eq!(local_text(&project), None, "a repeat creates nothing");
+
+    // And an existing document is left byte-identical, hand edit and all.
+    std::fs::write(project.user_config_path(), "operator = \"manual\"\n").expect("a hand edit");
+    let project = initialize(&root);
+    assert_eq!(
+        local_text(&project).as_deref(),
+        Some("operator = \"manual\"\n")
+    );
+    assert_eq!(
+        std::fs::read_to_string(project.config_path()).expect("the shared document"),
+        shared,
+        "the shared document is untouched"
+    );
+    let _ = seeded;
+}
+
+#[test]
+fn initialization_adds_the_local_entry_to_the_ignore_file_without_duplicating() {
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let root = utf8(&dir);
+    std::fs::create_dir_all(root.join(".waymark")).expect("the metadata directory exists");
+    std::fs::write(root.join(".waymark/.gitignore"), "write.lock\n").expect("a pre-existing file");
+
+    let project = initialize(&root);
+    let ignore = std::fs::read_to_string(project.metadata_dir().join(".gitignore"))
+        .expect("the ignore file exists");
+    assert_eq!(ignore.matches("write.lock").count(), 1, "{ignore}");
+    assert_eq!(ignore.matches(USER_CONFIG_FILE).count(), 1, "{ignore}");
+
+    // Repeating the repair neither duplicates nor reorders anything.
+    let project = initialize(&root);
+    let again = std::fs::read_to_string(project.metadata_dir().join(".gitignore"))
+        .expect("the ignore file exists");
+    assert_eq!(again, ignore);
+}
+
+#[test]
+fn initialization_never_touches_the_repository_level_ignore_files() {
+    let Some((_dir, root)) = repository(Some("Grace Hopper")) else {
+        return;
+    };
+    let root_ignore = root.join(".gitignore");
+    let exclude = root.join(".git/info/exclude");
+    std::fs::write(&root_ignore, "target/\n").expect("the repository ignore file");
+    std::fs::write(&exclude, "# keep this\nnode_modules\n").expect("the exclude file");
+
+    let project = initialize(&root);
+    assert!(project.user_config_path().is_file());
+    assert_eq!(
+        std::fs::read_to_string(&root_ignore).expect("the repository ignore file"),
+        "target/\n",
+        "the repository-level .gitignore is not touched"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&exclude).expect("the exclude file"),
+        "# keep this\nnode_modules\n",
+        "the repository-level exclude file is not touched"
+    );
+}
+
+#[test]
+fn an_unsafe_ignore_file_stops_initialization_before_any_local_settings_exist() {
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let root = utf8(&dir);
+    let metadata = root.join(".waymark");
+    std::fs::create_dir_all(&metadata).expect("the metadata directory exists");
+
+    // A symlinked ignore file is refused, not written through.
+    let outside = dir.path().join("outside-gitignore");
+    std::fs::write(&outside, "keep me\n").expect("the link target");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&outside, metadata.join(".gitignore")).expect("the symlink");
+    #[cfg(unix)]
+    {
+        let error = waymark_core::ops::config::init(&root, InitRequest::new(), false)
+            .expect_err("a symlinked ignore file is refused");
+        assert_eq!(error.code(), Code::LockFailed);
+        assert_eq!(
+            std::fs::read_to_string(&outside).expect("the link target"),
+            "keep me\n"
+        );
+        assert!(
+            !metadata.join(USER_CONFIG_FILE).exists(),
+            "no local settings"
+        );
+        assert!(!metadata.join("config.toml").exists(), "no configuration");
+        std::fs::remove_file(metadata.join(".gitignore")).expect("cleanup");
+    }
+
+    // A non-regular ignore file is refused.
+    std::fs::create_dir(metadata.join(".gitignore")).expect("a directory in place of the file");
+    let error = waymark_core::ops::config::init(&root, InitRequest::new(), false)
+        .expect_err("a non-regular ignore file is refused");
+    assert_eq!(error.code(), Code::LockFailed);
+    assert!(
+        !metadata.join(USER_CONFIG_FILE).exists(),
+        "no local settings"
+    );
+    std::fs::remove_dir(metadata.join(".gitignore")).expect("cleanup");
+
+    // A read-only ignore file that is missing the entry is refused rather than
+    // replaced behind its permissions.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let path = metadata.join(".gitignore");
+        std::fs::write(&path, "write.lock\n").expect("a read-only ignore file");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444))
+            .expect("the read-only mode");
+        let error = waymark_core::ops::config::init(&root, InitRequest::new(), false)
+            .expect_err("a read-only ignore file is refused");
+        assert_eq!(error.code(), Code::LockFailed);
+        assert!(
+            !metadata.join(USER_CONFIG_FILE).exists(),
+            "no local settings"
+        );
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
+            .expect("the mode is restorable");
+    }
+}
+
+#[test]
+fn a_tracked_local_document_is_reported_and_never_written() {
+    let Some((_dir, root)) = repository(Some("Grace Hopper")) else {
+        return;
+    };
+    let project = initialize(&root);
+    local_config::set_scalar(&project, Scalar::Operator, "manual", &options())
+        .expect("the local write succeeds");
+    git(&root, &["add", "--force", ".waymark/user.toml"]);
+    let tracked = std::fs::read_to_string(project.user_config_path()).expect("the document");
+    let index = git_output(&root, &["ls-files", "-s", ".waymark/user.toml"]);
+    assert!(local_config::tracked(&project));
+
+    // A write refuses and names the manual repair.
+    let error = local_config::set_scalar(&project, Scalar::Operator, "other", &options())
+        .expect_err("a tracked document is never written");
+    assert_eq!(error.code(), Code::ConfigInvalid);
+    assert!(
+        error.message().contains("untrack"),
+        "the refusal explains the repair: {}",
+        error.message()
+    );
+    assert_eq!(
+        std::fs::read_to_string(project.user_config_path()).expect("the document"),
+        tracked
+    );
+
+    // Initialization reports it too, and leaves both the file and the index
+    // exactly as they were.
+    let project =
+        waymark_core::ops::config::init(&root, InitRequest::new().with_operator("seed"), true)
+            .expect("initialization still succeeds");
+    assert!(local_config::tracked(&project));
+    assert_eq!(
+        std::fs::read_to_string(project.user_config_path()).expect("the document"),
+        tracked
+    );
+    assert_eq!(
+        git_output(&root, &["ls-files", "-s", ".waymark/user.toml"]),
+        index,
+        "the Git index is unmodified"
+    );
 }
