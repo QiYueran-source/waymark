@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T04:01:39Z
+updated_at: 2026-11-05T04:08:27Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -570,6 +570,11 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - Confirmed by the user on 2026-11-05: native verification on Linux, macOS and Windows MSVC/GNU must cover portable path validation, case and Unicode collisions, symlinks and reparse points, project-root aliases, linked worktrees, unborn repositories, ignored and untracked work items. Apply generated patches in isolated clean worktrees and check results. Fault-inject unreadable paths, uncertain Git scope and migration-target races. Exact CI provisioning, capability exceptions and mandatory release gates remain for the verification and release decision.
 - Do not silently weaken agreed safety or patch behavior to pass tests if a platform cannot provide no-overwrite moves, reliable reparse identification, or verifiable patches. Fail explicitly, carry platform feasibility and alternative mechanisms to module/verification design, and return to the user if the agreed behavior proves infeasible. This is a design requirement, not a claim that any native platform has been validated.
 - Leave undecided response formats and operational limits explicit: lossless diagnostics for non-UTF-8 paths, warning/recovery machine structures, and supported Git attribute combinations require follow-up design. The existing warning/recovery response ticket covers warning aggregation and recovery outcomes; platform module and verification work must address mechanisms, attribute support, and native evidence. Do not infer new fields, sync specifications or create implementation tickets from these open questions.
+
+
+### Cross-platform temporary and recovery diagnostics
+
+- Confirmed by the user: diagnostic checks for possible temporary or recovery material are bounded to known, safely accessible locations; they do not recursively scan the entire project or system to guarantee discovery. Report the checked scope and coverage that cannot be confirmed. A migration interruption may leave material in a former location no longer known from the current configuration, so no findings do not prove that no leftovers exist. Exact locations and inaccessible-scope behavior remain open.
 
 ## Not yet specified
 
