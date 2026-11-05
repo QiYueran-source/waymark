@@ -175,12 +175,16 @@ pub fn init(root: &Utf8Path, request: InitRequest, force: bool) -> Result<Projec
     )
 }
 
-/// One scalar `config set` may address.
+/// One local scalar `config set` may address.
+///
+/// All four are local user settings: the shared configuration has no scalars.
+/// They live here because `config set` is one command, and the adapter-facing
+/// name list must stay in one place.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scalar {
     /// The advisory operator identity.
     Operator,
-    /// The project time zone.
+    /// The zone used for human display and offset-less input.
     Timezone,
     /// Whether the in-process projection is kept.
     CacheEnabled,
@@ -252,11 +256,34 @@ pub fn bundle(project: &Project) -> Result<crate::ops::local_config::Bundle, Way
 /// shared-configuration problem: it never changes the shared revision and says
 /// nothing about another clone.
 pub fn validate_both(project: &Project) -> Vec<Finding> {
-    let mut findings = validate_config(project);
-    findings.extend(crate::ops::local_config::validate_path(
-        &project.user_config_path(),
-    ));
+    validate_documents(&project.config_path())
+}
+
+/// Every complaint about both configuration documents, found from the shared
+/// document's path alone.
+///
+/// The path form exists because a diagnostic command must work when the shared
+/// document cannot be opened as a project at all; the local document is its
+/// sibling in the same metadata directory. Every adapter that reviews
+/// configuration calls this, so which documents are covered cannot diverge.
+pub fn validate_documents(config_path: &Utf8Path) -> Vec<Finding> {
+    let mut findings = validate_config_path(config_path);
+    findings.extend(local_findings_for(config_path));
     findings
+}
+
+/// The local document's findings, found from the shared document's path.
+///
+/// Composition lives here so every review of configuration covers the same
+/// documents; a diagnostic that maps a shared failure to a specific code can
+/// reuse this instead of repeating the sibling-path rule.
+pub fn local_findings_for(config_path: &Utf8Path) -> Vec<Finding> {
+    match config_path.parent() {
+        Some(metadata) => crate::ops::local_config::validate_path(
+            &metadata.join(crate::user_config::USER_CONFIG_FILE),
+        ),
+        None => Vec::new(),
+    }
 }
 
 /// The configuration file of the nearest project at or above `start`, found

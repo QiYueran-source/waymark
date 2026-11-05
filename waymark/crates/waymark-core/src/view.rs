@@ -316,23 +316,27 @@ pub fn local_config_json(local: Option<&crate::user_config::UserConfig>) -> Valu
 /// adapter renders precedence instead of deciding it.
 pub fn effective_config_json(effective: &crate::user_config::EffectiveConfig) -> Value {
     json!({
-        "operator": {
-            "value": effective.operator,
-            "source": effective.operator_source.as_str(),
-        },
-        "timezone": {
-            "value": effective.timezone.name(),
-            "source": effective.timezone_source.as_str(),
-        },
+        "operator": effective.operator,
+        "timezone": effective.timezone.name(),
         "cache": {
-            "enabled": {
-                "value": effective.cache.enabled,
-                "source": effective.cache_enabled_source.as_str(),
-            },
-            "capacity": {
-                "value": effective.cache.capacity,
-                "source": effective.cache_capacity_source.as_str(),
-            },
+            "enabled": effective.cache.enabled,
+            "capacity": effective.cache.capacity,
+        },
+    })
+}
+
+/// Where each effective value came from, as its own structure.
+///
+/// The values and their provenance are separate objects on purpose: a client
+/// reads the values as configuration, and the sources as an explanation, and
+/// neither has to be unpacked from the other.
+pub fn effective_sources_json(effective: &crate::user_config::EffectiveConfig) -> Value {
+    json!({
+        "operator": effective.operator_source.as_str(),
+        "timezone": effective.timezone_source.as_str(),
+        "cache": {
+            "enabled": effective.cache_enabled_source.as_str(),
+            "capacity": effective.cache_capacity_source.as_str(),
         },
     })
 }
@@ -347,6 +351,44 @@ pub fn config_bundle_json(bundle: &crate::ops::local_config::Bundle) -> Value {
         "project": config_json(&bundle.project),
         "local": local_config_json(bundle.local.as_ref()),
         "effective": effective_config_json(&bundle.effective),
+        "sources": effective_sources_json(&bundle.effective),
+    })
+}
+
+/// The envelope metadata a configuration read carries.
+///
+/// Resolution can warn (an undetectable machine zone falls back to UTC), and a
+/// warning that only the human renderer shows is not reported at all, so the
+/// metadata is built here and both adapters pass it through.
+pub fn config_bundle_meta(bundle: &crate::ops::local_config::Bundle) -> crate::envelope::Meta {
+    crate::envelope::Meta::direct_file_scoped().with_warnings(bundle.effective.warnings.clone())
+}
+
+/// One shared-configuration write: the resulting document and its revision move.
+///
+/// Every adapter returns exactly this shape, so a config write cannot look
+/// different through the CLI and MCP.
+pub fn config_outcome_json(outcome: &crate::ops::config::ConfigOutcome) -> Value {
+    json!({
+        "config": config_json(&outcome.config),
+        "changed": outcome.changed,
+        "changed_keys": outcome.changed_keys,
+        "previous_revision": outcome.previous_revision,
+        "revision": outcome.revision,
+    })
+}
+
+/// One local-configuration write: the local document, never a revision move.
+///
+/// The shared revision is reported unchanged because a local write cannot move
+/// it; reporting it keeps the two write results one shape.
+pub fn local_outcome_json(outcome: &crate::ops::local_config::LocalOutcome) -> Value {
+    json!({
+        "local": local_config_json(Some(&outcome.local)),
+        "changed": outcome.changed,
+        "changed_keys": outcome.changed_keys,
+        "previous_revision": outcome.previous_revision,
+        "revision": outcome.revision,
     })
 }
 
@@ -810,16 +852,51 @@ mod tests {
         assert!(local.get("timezone").is_none());
 
         let resolved = effective_config_json(&effective);
-        assert_eq!(resolved["operator"]["value"], json!("frank"));
-        assert_eq!(resolved["operator"]["source"], json!("local_document"));
-        assert_eq!(resolved["timezone"]["value"], json!("Asia/Shanghai"));
-        assert_eq!(resolved["timezone"]["source"], json!("system_time_zone"));
-        assert_eq!(resolved["cache"]["capacity"]["value"], json!(512));
-        assert_eq!(
-            resolved["cache"]["capacity"]["source"],
-            json!("built_in_default")
-        );
+        assert_eq!(resolved["operator"], json!("frank"));
+        assert_eq!(resolved["timezone"], json!("Asia/Shanghai"));
+        assert_eq!(resolved["cache"]["capacity"], json!(512));
+
+        // Provenance is its own structure, so a client reads values as
+        // configuration and sources as the explanation.
+        let sources = effective_sources_json(&effective);
+        assert_eq!(sources["operator"], json!("local_document"));
+        assert_eq!(sources["timezone"], json!("system_time_zone"));
+        assert_eq!(sources["cache"]["enabled"], json!("built_in_default"));
+        assert_eq!(sources["cache"]["capacity"], json!("built_in_default"));
         assert_eq!(local_config_json(None), Value::Null);
+    }
+
+    #[test]
+    fn a_bundle_carries_its_resolution_warnings_as_envelope_metadata() {
+        use crate::user_config::{EffectiveConfig, LocalEnvironment};
+
+        let effective = EffectiveConfig::resolve(None, &LocalEnvironment::isolated());
+        let bundle = crate::ops::local_config::Bundle {
+            project: crate::config::Config::fresh(),
+            local: None,
+            effective,
+        };
+        let meta = config_bundle_meta(&bundle);
+        assert_eq!(meta.warnings.len(), 1, "{:?}", meta.warnings);
+        assert_eq!(
+            meta.warnings[0].code,
+            crate::error::Code::TimeZoneUndetected
+        );
+
+        // A resolvable zone produces no warning at all.
+        let effective = EffectiveConfig::resolve(
+            None,
+            &LocalEnvironment {
+                operator: None,
+                timezone: Some(chrono_tz::Tz::UTC),
+            },
+        );
+        let bundle = crate::ops::local_config::Bundle {
+            project: crate::config::Config::fresh(),
+            local: None,
+            effective,
+        };
+        assert!(config_bundle_meta(&bundle).warnings.is_empty());
     }
 
     fn listing() -> Listing {

@@ -3322,3 +3322,45 @@ through the one shared boundary is what keeps the browser from inventing a zone 
 precedence. Persisted machine fields stay UTC, so the local context is presentation only. An
 undetectable machine zone degrades to the documented UTC fallback, and a project with no local document
 renders the same way as one that states nothing.
+
+## Values and provenance are separate structures, and warnings travel in the envelope
+
+**Choice:** `config show --json` and `waymark_config_read` return `{project, local, effective,
+sources}`: `effective` holds values only and `sources` holds the origin of each one. Resolution
+warnings are attached to `_meta.warnings` through `view::config_bundle_meta`.
+
+**Why:** the specification asks for separate effective and source structures, and a client that only
+wants a value should not have to unwrap an explanation object. The UTC fallback warning existed only in
+the human renderer, which means machine clients never saw it; building the metadata beside the
+renderer is what makes the warning part of the contract instead of a courtesy to one surface.
+
+## Every local scalar clears, and clearing means "restore the fallback"
+
+**Choice:** an empty value clears `operator`, `timezone`, `cache.enabled`, and `cache.capacity` alike.
+Clearing writes `None`, never a sentinel, and a document that would state nothing is deleted.
+
+**Why:** the setting that has a fallback is the setting that needs a way back to it; making only the
+operator clearable would leave the machine zone and the built-in cache defaults reachable only by hand
+editing. One rule for four settings is also one rule to explain.
+
+## The lock repair stays lock-only; a local write enforces the ignore file itself
+
+**Choice:** `lock::with_project_lock` repairs only the `write.lock` entry, as it always did. A local
+write calls `ensure_gitignore` with both entries inside its own write branch, after the dry-run check.
+
+**Why:** repairing the local entry at every lock acquisition made unrelated work-item writes rewrite a
+tracked ignore file and fail when that file was unusual — the specification scopes that refusal to a
+local settings write. Doing it in the write branch also keeps a dry run from writing anything, which
+is what makes "the dry run reports the change" true rather than approximate.
+
+## A value that will be persisted is resolved strictly
+
+**Choice:** `mediated::operator_to_record` resolves the creator default through the strict
+`local_config::bundle`, while the advisory owner check keeps the lenient path. Only `create` records a
+resolved local value.
+
+**Why:** provenance written into a document must not be invented from a Git fallback while the local
+document that should have supplied it is unreadable — that is the "explicit configuration error rather
+than silent fallback" the specification asks for. Advisory comparisons and performance knobs have no
+such consequence, so they keep degrading, which is what lets a broken preference file be reported by
+`validate` instead of blocking the command that reports it.

@@ -140,20 +140,14 @@ fn config_show_prints_the_document_in_human_mode_and_json_in_machine_mode() {
     );
     assert!(data["local"]["timezone"].is_string(), "{}", data["local"]);
     assert_eq!(
-        data["effective"]["timezone"]["source"], "local_document",
+        data["sources"]["timezone"], "local_document",
         "{}",
-        data["effective"]
+        data["sources"]
     );
     // `init` writes the cache defaults explicitly, so they are stated facts
     // rather than something inherited from a later release's defaults.
-    assert_eq!(
-        data["effective"]["cache"]["capacity"]["value"],
-        json!(512u64)
-    );
-    assert_eq!(
-        data["effective"]["cache"]["capacity"]["source"],
-        "local_document"
-    );
+    assert_eq!(data["effective"]["cache"]["capacity"], json!(512u64));
+    assert_eq!(data["sources"]["cache"]["capacity"], "local_document");
 }
 
 #[test]
@@ -561,7 +555,7 @@ fn clearing_the_local_operator_restores_the_fallback() {
         .arg(&root));
     assert_eq!(shown.status(), 0, "stderr: {}", shown.stderr());
     assert_eq!(
-        shown.json()["data"]["effective"]["operator"]["source"],
+        shown.json()["data"]["sources"]["operator"],
         json!("local_document")
     );
 
@@ -586,9 +580,26 @@ fn clearing_the_local_operator_restores_the_fallback() {
         .arg(&root));
     assert_eq!(shown.status(), 0, "stderr: {}", shown.stderr());
     assert_eq!(
-        shown.json()["data"]["effective"]["operator"]["source"],
+        shown.json()["data"]["sources"]["operator"],
         json!("unset"),
         "no Git identity outside a repository, so nothing supplies one"
+    );
+
+    // Every local setting clears the same way: the fallback takes over again.
+    config(&root, &["set", "timezone", "Europe/Berlin"]);
+    let cleared = config(&root, &["set", "timezone", ""]);
+    assert_eq!(cleared.status(), 0, "stderr: {}", cleared.stderr());
+    let shown = run(waymark()
+        .arg("--json")
+        .arg("config")
+        .arg("show")
+        .arg("--project")
+        .arg(&root));
+    assert_ne!(
+        shown.json()["data"]["sources"]["timezone"],
+        json!("local_document"),
+        "the explicit zone is gone: {}",
+        shown.stdout()
     );
 }
 

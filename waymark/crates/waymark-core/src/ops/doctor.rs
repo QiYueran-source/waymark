@@ -346,7 +346,11 @@ pub fn diagnose_config(
     config_path: &Utf8Path,
     options: DoctorOptions,
 ) -> Result<Report, WaymarkError> {
-    let findings = match Config::issues_in_file(config_path) {
+    // The shared document cannot be opened, but the local one still can: a
+    // diagnostic run reviews both, so a project with two broken files reports
+    // both problems at once. The shared issues keep their own mapping, which
+    // distinguishes an unsupported generation from a plain parse problem.
+    let mut findings = match Config::issues_in_file(config_path) {
         Ok(issues) => issues
             .iter()
             .map(|issue| {
@@ -355,6 +359,7 @@ pub fn diagnose_config(
             .collect(),
         Err(error) => findings_from_error(&error),
     };
+    findings.extend(crate::ops::config::local_findings_for(config_path));
     Ok(Report::new(
         findings,
         options.strict,

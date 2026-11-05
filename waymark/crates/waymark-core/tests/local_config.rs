@@ -232,7 +232,9 @@ fn git_user_name_is_the_operator_fallback_in_a_repository() {
     let Some((_dir, project)) = project_in_repository("Grace Hopper") else {
         return;
     };
-    let effective = local_config::effective(&project).expect("resolution succeeds");
+    let effective = local_config::bundle(&project)
+        .expect("the bundle builds")
+        .effective;
     assert_eq!(effective.operator.as_deref(), Some("Grace Hopper"));
     assert_eq!(effective.operator_source, ValueSource::Git);
 }
@@ -256,7 +258,9 @@ fn a_local_operator_never_consults_git() {
 
     local_config::set_scalar(&project, Scalar::Operator, "frank", &options())
         .expect("the local operator is written");
-    let effective = local_config::effective(&project).expect("resolution succeeds");
+    let effective = local_config::bundle(&project)
+        .expect("the bundle builds")
+        .effective;
     assert_eq!(effective.operator.as_deref(), Some("frank"));
     assert_eq!(effective.operator_source, ValueSource::UserDocument);
 }
@@ -346,7 +350,9 @@ fn initialization_writes_a_cache_snapshot_that_outlives_a_later_default_change()
         Some(CacheSettings::default().capacity)
     );
 
-    let effective = local_config::effective(&project).expect("resolution succeeds");
+    let effective = local_config::bundle(&project)
+        .expect("the bundle builds")
+        .effective;
     assert_eq!(effective.cache, CacheSettings::default());
     assert_eq!(effective.cache_enabled_source, ValueSource::UserDocument);
     assert_eq!(effective.cache_capacity_source, ValueSource::UserDocument);
@@ -354,7 +360,9 @@ fn initialization_writes_a_cache_snapshot_that_outlives_a_later_default_change()
     // A snapshot pinned to a non-default value survives, because it is stated.
     std::fs::remove_file(project.user_config_path()).unwrap();
     std::fs::write(project.user_config_path(), "[cache]\ncapacity = 64\n").unwrap();
-    let pinned = local_config::effective(&project).expect("resolution succeeds");
+    let pinned = local_config::bundle(&project)
+        .expect("the bundle builds")
+        .effective;
     assert_eq!(pinned.cache.capacity, 64);
     assert_eq!(pinned.cache_capacity_source, ValueSource::UserDocument);
 }
@@ -364,7 +372,9 @@ fn resolution_works_with_no_git_and_no_repository() {
     let (_dir, project) = fixtures::deterministic_project();
     // A bare temporary directory is not inside a repository, so the operator
     // fallback is simply unavailable; nothing else degrades.
-    let effective = local_config::effective(&project).expect("resolution succeeds");
+    let effective = local_config::bundle(&project)
+        .expect("the bundle builds")
+        .effective;
     assert_eq!(effective.operator_source, ValueSource::Unset);
     assert!(effective.operator.is_none());
     assert!(matches!(
@@ -394,7 +404,9 @@ fn an_absent_local_document_is_normal_and_never_created_by_a_read() {
         local_config::load(&project).unwrap().is_none(),
         "an absent document reads as not configured"
     );
-    let _ = local_config::effective(&project).expect("resolution succeeds");
+    let _ = local_config::bundle(&project)
+        .expect("the bundle builds")
+        .effective;
     let bundle = local_config::bundle(&project).expect("the bundle builds");
     assert!(bundle.local.is_none());
     assert_eq!(bundle.effective.operator_source, ValueSource::Unset);
@@ -429,8 +441,9 @@ fn clearing_the_local_operator_restores_the_fallback_and_removes_an_empty_docume
     local_config::set_scalar(&project, Scalar::Operator, "frank", &options())
         .expect("the value is written");
     assert_eq!(
-        local_config::effective(&project)
+        local_config::bundle(&project)
             .unwrap()
+            .effective
             .operator
             .as_deref(),
         Some("frank")
@@ -447,7 +460,7 @@ fn clearing_the_local_operator_restores_the_fallback_and_removes_an_empty_docume
     if let Some(remaining) = remaining {
         assert!(remaining.operator.is_none(), "the override is gone");
     }
-    let effective = local_config::effective(&project).unwrap();
+    let effective = local_config::bundle(&project).unwrap().effective;
     assert_eq!(effective.operator_source, ValueSource::Unset);
 }
 
@@ -457,7 +470,7 @@ fn a_broken_local_document_fails_a_value_read_but_not_a_diagnosis() {
     std::fs::write(project.user_config_path(), "timezone = \"Mars/Olympus\"\n").unwrap();
 
     // An operation that needs the value must not guess at it.
-    let error = local_config::effective(&project).expect_err("the document is invalid");
+    let error = local_config::bundle(&project).expect_err("the local document is invalid");
     assert_eq!(error.code(), Code::ConfigInvalid);
     assert!(error.message().contains("timezone"), "{error}");
 
@@ -1029,4 +1042,109 @@ fn every_local_document_problem_becomes_a_named_finding_at_the_document() {
     // An absent document is normal and produces nothing.
     std::fs::remove_file(&path).expect("the document is removable");
     assert!(waymark_core::ops::config::validate_both(&project).is_empty());
+}
+
+#[test]
+fn clearing_any_local_setting_restores_its_fallback() {
+    let (_dir, project) = fixtures::deterministic_project();
+    let path = project.user_config_path();
+    for (scalar, value) in [
+        (Scalar::Timezone, "Europe/Berlin"),
+        (Scalar::CacheEnabled, "false"),
+        (Scalar::CacheCapacity, "64"),
+    ] {
+        local_config::set_scalar(&project, scalar, value, &options())
+            .expect("the value is written");
+        assert!(local_text(&project)
+            .is_some_and(|text| text.contains(scalar.name()) || text.contains("cache")));
+        let cleared = local_config::set_scalar(&project, scalar, "", &options())
+            .expect("an empty value clears the override");
+        assert!(cleared.changed, "{} is cleared", scalar.name());
+        let effective = local_config::bundle(&project)
+            .expect("the bundle builds")
+            .effective;
+        match scalar {
+            Scalar::Timezone => {
+                assert_eq!(
+                    effective.timezone_source,
+                    ValueSource::SystemTimeZone,
+                    "the machine zone is the fallback, or UTC when undetectable"
+                );
+            }
+            Scalar::CacheEnabled => {
+                assert_eq!(effective.cache_enabled_source, ValueSource::BuiltInDefault);
+                assert_eq!(effective.cache.enabled, CacheSettings::default().enabled);
+            }
+            Scalar::CacheCapacity => {
+                assert_eq!(effective.cache_capacity_source, ValueSource::BuiltInDefault);
+                assert_eq!(effective.cache.capacity, CacheSettings::default().capacity);
+            }
+            Scalar::Operator => unreachable!("the operator is covered by its own case"),
+        }
+    }
+    // Clearing everything leaves an empty document, which is deleted.
+    assert!(!path.exists(), "an empty document is removed");
+}
+
+#[test]
+fn a_dry_run_reports_the_intended_change_and_leaves_local_settings_alone() {
+    let (_dir, project) = fixtures::deterministic_project();
+    let ignore = project.metadata_dir().join(".gitignore");
+    std::fs::write(&ignore, "").expect("an empty ignore file");
+    let dry = local_config::set_scalar(&project, Scalar::Operator, "frank", &options().dry_run())
+        .expect("the dry run succeeds");
+    assert!(dry.changed);
+    let contents = std::fs::read_to_string(&ignore).expect("the ignore file");
+    assert!(
+        !contents.contains(USER_CONFIG_FILE),
+        "a dry run does not prepare the ignore file for a local write: {contents}"
+    );
+    assert!(!project.user_config_path().exists());
+}
+
+#[test]
+fn a_work_item_write_leaves_the_local_ignore_entry_alone() {
+    let (_dir, project) = fixtures::deterministic_project();
+    let ignore = project.metadata_dir().join(".gitignore");
+    std::fs::write(&ignore, "write.lock\n").expect("an ignore file without the local entry");
+
+    // A work-item write neither needs the local entry nor may rewrite an ignore
+    // file on its behalf; only a local write repairs it.
+    waymark_core::ops::create::create(
+        &project,
+        waymark_core::ops::create::CreateRequest::new("t", "task", "f"),
+        &options(),
+    )
+    .expect("the work-item write succeeds");
+    assert_eq!(
+        std::fs::read_to_string(&ignore).expect("the ignore file"),
+        "write.lock\n",
+        "a work-item write does not touch the local settings entry"
+    );
+}
+
+#[test]
+fn a_malformed_local_document_fails_an_operator_that_would_be_recorded() {
+    let (_dir, project) = fixtures::deterministic_project();
+    std::fs::write(project.user_config_path(), "timezone = \"Mars/Olympus\"\n")
+        .expect("a broken local document");
+
+    // Provenance that is about to be written must not be invented from a
+    // fallback, so the error is explicit rather than a silent degradation.
+    let error = waymark_core::ops::create::create(
+        &project,
+        waymark_core::ops::create::CreateRequest::new("t", "task", "f"),
+        &options(),
+    )
+    .expect_err("a broken local document fails the creator default");
+    assert_eq!(error.code(), Code::ConfigInvalid);
+    assert!(error.message().contains("timezone"), "{error}");
+
+    // An explicit creator needs no local value, so it still works.
+    waymark_core::ops::create::create(
+        &project,
+        waymark_core::ops::create::CreateRequest::new("t", "task", "f").with_creator("explicit"),
+        &options(),
+    )
+    .expect("an explicit creator is unaffected");
 }

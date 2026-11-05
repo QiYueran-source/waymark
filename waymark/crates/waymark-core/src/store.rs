@@ -44,6 +44,13 @@ pub const MAX_DISCOVERY_DEPTH: usize = 64;
 /// The `.gitignore` entry the write lock needs.
 pub const LOCK_IGNORE_ENTRY: &str = "write.lock";
 
+/// Every `.gitignore` entry the metadata directory needs, in the order they are
+/// written.
+pub const IGNORE_ENTRIES: &[&str] = &[
+    LOCK_IGNORE_ENTRY,
+    crate::user_config::USER_CONFIG_IGNORE_ENTRY,
+];
+
 /// How many ID candidates are tried before `ID_GENERATION_FAILED`.
 pub const MAX_ID_ATTEMPTS: u32 = 64;
 
@@ -216,13 +223,7 @@ impl Project {
         // ignore rule covers.
         let local = opts.local.unwrap_or_default();
         local.validate()?;
-        ensure_gitignore(
-            &metadata,
-            &[
-                LOCK_IGNORE_ENTRY,
-                crate::user_config::USER_CONFIG_IGNORE_ENTRY,
-            ],
-        )?;
+        ensure_gitignore(&metadata, IGNORE_ENTRIES)?;
 
         // The local document is created once and then left alone. It holds one
         // collaborator's preferences, so neither a `--force` replacement of the

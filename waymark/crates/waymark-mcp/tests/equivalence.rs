@@ -740,11 +740,11 @@ async fn config_read_matches_the_cli() {
         "the two adapters must report the same documents and the same effective values"
     );
     assert_eq!(
-        mcp["data"]["effective"]["operator"]["source"], "local_document",
+        mcp["data"]["sources"]["operator"], "local_document",
         "the source report is part of the contract, not a rendering detail"
     );
     assert_eq!(
-        mcp["data"]["effective"]["cache"]["capacity"]["source"],
+        mcp["data"]["sources"]["cache"]["capacity"],
         "local_document"
     );
     assert_eq!(

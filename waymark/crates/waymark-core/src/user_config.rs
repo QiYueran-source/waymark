@@ -112,14 +112,6 @@ impl UserConfig {
         Ok(Self::build(&text, path.as_str())?.1)
     }
 
-    /// Every complaint about this in-memory document.
-    pub fn issues(&self) -> Vec<ConfigIssue> {
-        match Self::build(&self.to_toml_string(), USER_CONFIG_FILE) {
-            Ok((_, issues)) => issues,
-            Err(error) => vec![ConfigIssue::key("", error.message())],
-        }
-    }
-
     /// Refuse a document that would not survive a reload.
     pub fn validate(&self) -> Result<(), WaymarkError> {
         Self::build(&self.to_toml_string(), "in-memory user configuration").map(|_| ())
@@ -274,15 +266,6 @@ pub enum ValueSource {
 }
 
 impl ValueSource {
-    /// Every source, in the order the sources read as precedence.
-    pub const ALL: &'static [ValueSource] = &[
-        ValueSource::UserDocument,
-        ValueSource::Git,
-        ValueSource::SystemTimeZone,
-        ValueSource::BuiltInDefault,
-        ValueSource::Unset,
-    ];
-
     /// The stable on-the-wire literal.
     pub fn as_str(self) -> &'static str {
         match self {

@@ -33,11 +33,8 @@ async fn config_read_returns_the_effective_configuration() {
     // The operator is a local setting: it appears in the local document and in
     // the resolved values, never in the shared project document.
     assert_eq!(envelope["data"]["local"]["operator"], "frank");
-    assert_eq!(envelope["data"]["effective"]["operator"]["value"], "frank");
-    assert_eq!(
-        envelope["data"]["effective"]["operator"]["source"],
-        "local_document"
-    );
+    assert_eq!(envelope["data"]["effective"]["operator"], "frank");
+    assert_eq!(envelope["data"]["sources"]["operator"], "local_document");
     assert!(envelope["data"]["project"].get("operator").is_none());
     assert!(envelope["data"]["project"].get("timezone").is_none());
     assert!(envelope["data"]["project"].get("cache").is_none());

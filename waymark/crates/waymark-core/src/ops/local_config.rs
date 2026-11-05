@@ -6,16 +6,17 @@
 //!
 //! - **Reading.** [`load`] parses the local document if it exists and never
 //!   creates it.
-//! - **Resolving.** [`effective`] and [`effective_lenient`] run
+//! - **Resolving.** [`bundle`] and [`effective_lenient`] run
 //!   [`EffectiveConfig::resolve`] with the environment the document actually
-//!   needs.
+//!   needs; the first is strict, the second is for diagnostics.
 //! - **Writing.** [`set_scalar`] updates one local setting under the project
 //!   lock, leaving the shared configuration — and therefore its revision —
 //!   untouched.
 //!
-//! A local-document problem is `CONFIG_INVALID` located at the key that carries
-//! it. The [`Bundle`] form keeps the shared and local documents side by side so a
-//! renderer can show both plus the resolved values in one pass.
+//! A local-document problem is `CONFIG_INVALID` located at the document that
+//! carries it, and its message names the key. The [`Bundle`] keeps the shared
+//! and local documents side by side so a renderer can show both plus the resolved
+//! values in one pass.
 
 use camino::Utf8Path;
 
@@ -37,24 +38,14 @@ pub fn load(project: &Project) -> Result<Option<UserConfig>, WaymarkError> {
     UserConfig::load_optional(&project.user_config_path())
 }
 
-/// The effective values the project uses, with their sources.
-///
-/// An invalid local document is a failure: an operation that needs a value the
-/// document was supposed to supply must not guess at it. Diagnostics use
-/// [`effective_lenient`] instead, so they can report the problem and carry on.
-pub fn effective(project: &Project) -> Result<EffectiveConfig, WaymarkError> {
-    let local = load(project)?;
-    let environment = LocalEnvironment::detect_for(project.root(), local.as_ref());
-    Ok(EffectiveConfig::resolve(local.as_ref(), &environment))
-}
-
 /// The effective values, treating an unreadable local document as absent.
 ///
-/// This exists for the diagnostic and advisory paths: `validate`, `doctor`, and
-/// the advisory owner check must keep working while the local document is
-/// broken, and the command that reports the problem is the one that has to run.
-/// The precedence itself is the same [`EffectiveConfig::resolve`] call — only the
-/// error policy differs.
+/// This is the lenient half of [`bundle`]: a broken document is absent here
+/// instead of an error, because the diagnostic and advisory paths (`validate`,
+/// `doctor`, the owner check) must keep working while the document is broken —
+/// the command that reports the problem is the one that has to run. The
+/// precedence is the same [`EffectiveConfig::resolve`] call; only the error
+/// policy differs.
 pub fn effective_lenient(project: &Project) -> EffectiveConfig {
     let local = load(project).ok().flatten();
     let environment = LocalEnvironment::detect_for(project.root(), local.as_ref());
@@ -191,9 +182,9 @@ pub fn set_scalar(
 
         match parsed {
             LocalScalar::Operator(operator) => next.operator = operator,
-            LocalScalar::Timezone(zone) => next.timezone = Some(zone),
-            LocalScalar::CacheEnabled(enabled) => next.cache.enabled = Some(enabled),
-            LocalScalar::CacheCapacity(capacity) => next.cache.capacity = Some(capacity),
+            LocalScalar::Timezone(zone) => next.timezone = zone,
+            LocalScalar::CacheEnabled(enabled) => next.cache.enabled = enabled,
+            LocalScalar::CacheCapacity(capacity) => next.cache.capacity = capacity,
         }
 
         // A document that states nothing is deleted rather than written empty:
@@ -219,12 +210,17 @@ pub fn set_scalar(
                 path.to_string(),
                 vec![format!(
                     "the local user configuration is tracked by Git; untrack it with \
-                     `git rm --cached {}` before Waymark writes it",
-                    path.file_name().unwrap_or_else(|| path.as_str())
+                     `git rm --cached {}/{}` before Waymark writes it",
+                    crate::config::METADATA_DIR,
+                    crate::user_config::USER_CONFIG_FILE
                 )],
             ));
         }
         if !options.dry_run {
+            // The ignore entry is enforced here rather than at lock acquisition:
+            // it is this write that must not leave an unignored preferences
+            // file, and a dry run must not touch the ignore file at all.
+            crate::store::ensure_gitignore(&project.metadata_dir(), crate::store::IGNORE_ENTRIES)?;
             if next.is_empty() {
                 remove_if_present(&path)?;
             } else {
@@ -260,7 +256,7 @@ fn local_conflict(
         "expected_fingerprint": expected.as_str(),
         "actual_fingerprint": actual,
     }))
-    .with_location(Location::config_key(crate::user_config::USER_CONFIG_FILE))
+    .with_location(Location::file(path.to_string()))
 }
 
 fn remove_if_present(path: &Utf8Path) -> Result<(), WaymarkError> {
@@ -272,40 +268,50 @@ fn remove_if_present(path: &Utf8Path) -> Result<(), WaymarkError> {
 }
 
 /// One local scalar value, already validated.
+///
+/// `None` means "clear this override", which for every local setting restores
+/// its fallback: Git for the operator, the machine zone, the built-in defaults
+/// for the cache. There is no sentinel value that opts out instead.
 enum LocalScalar {
     Operator(Option<String>),
-    Timezone(chrono_tz::Tz),
-    CacheEnabled(bool),
-    CacheCapacity(usize),
+    Timezone(Option<chrono_tz::Tz>),
+    CacheEnabled(Option<bool>),
+    CacheCapacity(Option<usize>),
 }
 
 fn parse_scalar(scalar: Scalar, value: &str) -> Result<LocalScalar, WaymarkError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        // An empty value is the uniform way to drop an override, for every local
+        // setting rather than only the operator.
+        return Ok(match scalar {
+            Scalar::Operator => LocalScalar::Operator(None),
+            Scalar::Timezone => LocalScalar::Timezone(None),
+            Scalar::CacheEnabled => LocalScalar::CacheEnabled(None),
+            Scalar::CacheCapacity => LocalScalar::CacheCapacity(None),
+        });
+    }
     match scalar {
-        Scalar::Operator => {
-            let trimmed = value.trim();
-            Ok(LocalScalar::Operator(
-                (!trimmed.is_empty()).then(|| trimmed.to_owned()),
-            ))
-        }
+        Scalar::Operator => Ok(LocalScalar::Operator(Some(trimmed.to_owned()))),
         Scalar::Timezone => {
-            let zone = parse_timezone(value.trim()).map_err(|_| {
+            let zone = parse_timezone(trimmed).map_err(|_| {
                 crate::ops::config::invalid(
                     "timezone",
                     format!("{value:?} is not a known IANA time zone"),
                 )
             })?;
-            Ok(LocalScalar::Timezone(zone))
+            Ok(LocalScalar::Timezone(Some(zone)))
         }
-        Scalar::CacheEnabled => match value.trim() {
-            "true" => Ok(LocalScalar::CacheEnabled(true)),
-            "false" => Ok(LocalScalar::CacheEnabled(false)),
+        Scalar::CacheEnabled => match trimmed {
+            "true" => Ok(LocalScalar::CacheEnabled(Some(true))),
+            "false" => Ok(LocalScalar::CacheEnabled(Some(false))),
             other => Err(crate::ops::config::invalid(
                 "cache.enabled",
                 format!("expected `true` or `false`, found {other:?}"),
             )),
         },
-        Scalar::CacheCapacity => match value.trim().parse::<usize>() {
-            Ok(capacity) if capacity > 0 => Ok(LocalScalar::CacheCapacity(capacity)),
+        Scalar::CacheCapacity => match trimmed.parse::<usize>() {
+            Ok(capacity) if capacity > 0 => Ok(LocalScalar::CacheCapacity(Some(capacity))),
             _ => Err(crate::ops::config::invalid(
                 "cache.capacity",
                 format!("expected a positive whole number, found {value:?}"),

@@ -174,10 +174,10 @@ impl WaymarkServer {
     async fn waymark_config_read(&self) -> ToolResult {
         envelope::respond(|| {
             let project = self.project()?;
-            let bundle = config::bundle(&project)?;
+            let bundle = waymark_core::ops::local_config::bundle(&project)?;
             Ok(envelope::success(
                 waymark_core::view::config_bundle_json(&bundle),
-                Meta::direct_file_scoped(),
+                waymark_core::view::config_bundle_meta(&bundle),
             ))
         })
     }
@@ -193,17 +193,11 @@ impl WaymarkServer {
     async fn waymark_config_validate(&self) -> ToolResult {
         envelope::respond(|| {
             // Validation must work when the document cannot be opened as a
-            // project, so the file is located without parsing it.
+            // project, so the file is located without parsing it. Core decides
+            // which documents that path covers, so both documents are always
+            // reviewed together.
             let path = config::locate_config_path(self.start())?;
-            let mut findings = config::validate_config_path(&path);
-            // The local document is a second, separate authority: when the
-            // project opens, its complaints are reported alongside the shared
-            // ones and located at the document that carries each.
-            if let Ok(project) = self.project() {
-                findings.extend(waymark_core::ops::local_config::validate_path(
-                    &project.user_config_path(),
-                ));
-            }
+            let findings = config::validate_documents(&path);
             let meta = Meta::direct_file_scoped().with_diagnostics(findings.clone());
             Ok(envelope::success(
                 json!({"valid": findings.is_empty(), "findings": findings}),
@@ -428,13 +422,7 @@ impl WaymarkServer {
 /// local write never moves.
 fn local_result(outcome: &waymark_core::ops::local_config::LocalOutcome) -> ToolResult {
     envelope::success(
-        json!({
-            "local": waymark_core::view::local_config_json(Some(&outcome.local)),
-            "changed": outcome.changed,
-            "changed_keys": outcome.changed_keys,
-            "previous_revision": outcome.previous_revision,
-            "revision": outcome.revision,
-        }),
+        waymark_core::view::local_outcome_json(outcome),
         Meta::direct_file_scoped(),
     )
 }
@@ -445,13 +433,7 @@ fn local_result(outcome: &waymark_core::ops::local_config::LocalOutcome) -> Tool
 /// plus what the write changed and the revision it moved from and to.
 fn config_result(outcome: &ConfigOutcome) -> ToolResult {
     envelope::success(
-        json!({
-            "config": waymark_core::view::config_json(&outcome.config),
-            "changed": outcome.changed,
-            "changed_keys": outcome.changed_keys,
-            "previous_revision": outcome.previous_revision,
-            "revision": outcome.revision,
-        }),
+        waymark_core::view::config_outcome_json(outcome),
         Meta::direct_file_scoped(),
     )
 }

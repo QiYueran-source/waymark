@@ -123,6 +123,24 @@ pub fn effective_operator(project: &Project, options: &OpOptions) -> Option<Stri
     crate::ops::local_config::effective_operator(project)
 }
 
+/// The operator an operation is about to *persist*, resolved strictly.
+///
+/// Provenance recorded in a document must not be invented from a fallback while
+/// the local document that should have supplied it is unreadable, so this
+/// propagates the document's error instead of degrading the way the advisory
+/// [`effective_operator`] does.
+pub fn operator_to_record(
+    project: &Project,
+    options: &OpOptions,
+) -> Result<Option<String>, WaymarkError> {
+    if let Some(operator) = options.operator() {
+        return Ok(Some(operator.to_owned()));
+    }
+    Ok(crate::ops::local_config::bundle(project)?
+        .effective
+        .operator)
+}
+
 /// The `OWNER_MISMATCH` warnings this write justifies.
 ///
 /// The mismatch is advisory: the caller attaches these to the result's `_meta`

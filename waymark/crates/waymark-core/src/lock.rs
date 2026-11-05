@@ -15,22 +15,17 @@ pub const LOCK_FILE: &str = "write.lock";
 
 /// Take the store-wide write lock for `project`, run `body`, and release it.
 ///
-/// Acquisition repairs a missing `.waymark/.gitignore` entry first, for both the
-/// lock file and the local user document, so neither ever shows up as an
-/// untracked change and an unsafe ignore file stops the write before anything is
-/// written.
+/// Acquisition repairs a missing `.waymark/.gitignore` entry for the lock file
+/// itself. It does not touch the local user document's entry: a work-item write
+/// must neither rewrite an ignore file it does not use nor fail because that
+/// file is unusual. The local write path enforces both entries itself, and it
+/// skips everything for a dry run.
 pub fn with_project_lock<T>(
     project: &Project,
     wait: LockWait,
     body: impl FnOnce() -> Result<T, WaymarkError>,
 ) -> Result<T, WaymarkError> {
-    crate::store::ensure_gitignore(
-        &project.metadata_dir(),
-        &[
-            crate::store::LOCK_IGNORE_ENTRY,
-            crate::user_config::USER_CONFIG_IGNORE_ENTRY,
-        ],
-    )?;
+    crate::store::ensure_gitignore(&project.metadata_dir(), &[crate::store::LOCK_IGNORE_ENTRY])?;
     with_write_lock(&project.lock_path(), wait, |_lock| body())
 }
 
