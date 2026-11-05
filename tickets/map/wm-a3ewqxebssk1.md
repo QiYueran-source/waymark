@@ -6,7 +6,7 @@ category: map
 status: open
 owner: frank
 created_at: 2026-11-05T00:53:09Z
-updated_at: 2026-11-05T01:59:49Z
+updated_at: 2026-11-05T02:01:02Z
 parent: wm-4wbvzsv34g2p
 dependencies:
   - wm-78d0sa7jaxpb
@@ -26,6 +26,11 @@ What guarantees and explicit limitations should file replacement, rollback, perm
 - A storage migration across filesystem volumes is rejected. It must not silently substitute copying and deleting for the same-filesystem directory move. Preflight behavior when volume identity is uncertain remains open.
 - On Windows, replacing an existing file must not silently broaden its prior access permissions: e.g. a previously restricted work item must not become readable by additional users as a side effect of an edit. Windows ACLs are not Unix mode bits; exact preserved attributes and failure policy remain open.
 
+- Confirmed by the user on 2026-11-05: when storage-migration preflight cannot determine whether source and target are on the same volume, dry-run explicitly reports the uncertainty and the actual migration refuses to execute. Actual execution repeats complete prevalidation; an earlier successful preview is not authorization. A successful precheck does not guarantee the eventual rename succeeds, so execution failures must still be handled and reported.
+- On a handled file-replacement error, do not assume the failing destination was unchanged: inspect and handle its actual state as well as restoring earlier completed targets. If restoration fails or the final state cannot be confirmed, explicitly report affected paths and recovery state instead of returning an ordinary failure that implies nothing changed.
+- On Windows, if Waymark cannot establish that replacement preserves the existing file's access restrictions without broadening them, refuse the replacement and report an error rather than inheriting potentially broader temporary-file or directory permissions. If a failure during replacement leaves final permissions uncertain, report affected paths and recovery state under the preceding failure rule. ACL mechanism and exact metadata coverage remain to be determined.
+- If an existing work-item file is marked read-only, editing fails and preserves the original file; Waymark does not automatically clear the read-only attribute in order to replace it. Windows read-only attributes and ACLs are distinct and both require validation and tests.
+
 ## Still to decide
 
-Specify handled-failure outcomes and recovery, preflight uncertainty and stale previews, Windows security metadata preservation, filesystem capabilities, and native verification.
+Specify exact Windows security metadata preservation, recovery reporting details, filesystem capabilities and native verification.
