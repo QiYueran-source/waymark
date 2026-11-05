@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T04:08:27Z
+updated_at: 2026-11-05T06:41:55Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -626,6 +626,11 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - Synchronization updates normative text only; it does not implement the platform module, change the CI matrix or add release jobs. The Windows-only behaviour that appears as explicit per-platform statements rather than platform-neutral prose is: capability declarations, owner and DACL preservation, read-only refusal, reparse-point refusal, NTFS-only support, and the MSVC-only artifact with a GNU build-and-test leg. Any statement that Windows is supported, that a capability is verified, or that an artifact exists stays out of the specification until evidence exists; the specification states required behaviour and required evidence, not achieved results.
 - Linux and macOS behaviour already specified is preserved unless a platform decision explicitly changed it; synchronization is not an occasion to restate or re-derive settled non-platform rules.
 - The reconciliation approach is decided; the reconciliation itself has not been performed. No specification text has changed, no implementation ticket has been cut, and the Windows specification still contains the superseded statements.
+
+### Local user configuration
+
+- Confirmed by the user on 2026-11-05: keep the project time zone and project data model in shared `.waymark/config.toml`, but move machine-specific cache settings and the acting `operator` identity to a local `.waymark/user.toml`. `init` creates both files; the user file is optional at runtime, and its cache settings override built-in cache defaults. Operator identity and its existing semantics remain unchanged: it is used for advisory owner-mismatch warnings and remains the effective-operator default for `creator` when creator is omitted.
+- `init` ensures `.waymark/.gitignore` ignores `user.toml`, keeping the local settings out of the shared Git baseline without modifying repository-level `.gitignore` or `.git/info/exclude`. Existing tracked `user.toml` cannot be made untracked by an ignore rule and must be reported rather than silently removed from the Git index. Detailed behavior for malformed local settings, legacy project-level operator/cache values, and ignore-rule repair remains to be specified.
 
 ## Not yet specified
 
