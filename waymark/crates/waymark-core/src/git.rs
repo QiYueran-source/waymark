@@ -213,7 +213,7 @@ pub fn find_repository_at(root: &Utf8Path) -> Option<Repository> {
         if dot_git.is_dir() || dot_git.is_file() {
             let project_prefix = root
                 .strip_prefix(directory)
-                .map(|relative| relative.as_str().to_owned())
+                .map(|relative| relative.as_str().replace('\\', "/"))
                 .unwrap_or_default();
             return Some(Repository {
                 root: directory.to_path_buf(),
@@ -795,8 +795,9 @@ fn repo_paths(probe: &GitProbe, project_paths: &[String]) -> Vec<String> {
     project_paths
         .iter()
         .map(|path| {
+            let path = path.replace('\\', "/");
             if prefix.is_empty() {
-                path.clone()
+                path
             } else if path.is_empty() {
                 prefix.to_owned()
             } else {

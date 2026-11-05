@@ -236,13 +236,14 @@ fn removing_a_category_in_use_exits_three_and_changes_no_item() {
     let envelope = refused.json();
     assert_eq!(envelope["ok"], false);
     assert_eq!(envelope["error"]["code"], "VALIDATION_ERROR");
+    let located = root.join("work").join("bugs");
     assert!(envelope["error"]["details"]["issues"]
         .as_array()
         .expect("a per-issue list")
         .iter()
         .any(|issue| issue["reason"]
             .as_str()
-            .is_some_and(|reason| reason.contains("work/bugs"))));
+            .is_some_and(|reason| reason.contains(located.as_str()))));
     assert_eq!(items(&root), before);
     assert_eq!(config_bytes(&root), config_before);
 }
