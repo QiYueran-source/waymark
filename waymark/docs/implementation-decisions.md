@@ -3365,20 +3365,27 @@ than silent fallback" the specification asks for. Advisory comparisons and perfo
 such consequence, so they keep degrading, which is what lets a broken preference file be reported by
 `validate` instead of blocking the command that reports it.
 
-## The Windows CI leg starts observational
+## The Windows CI leg blocks
 
-**Choice:** `.github/workflows/ci.yml` gains a `windows-latest` entry in the Rust matrix marked
-`experimental`, which sets `continue-on-error`. The job runs every gate the other two legs run
-(formatting, clippy, both test variants, the dependency assertion, and the build-variant smoke test)
-through Git Bash; it just does not fail the pull request yet.
+**Choice:** `.github/workflows/ci.yml` runs the same gate set on `ubuntu-latest`, `macos-latest`, and
+`windows-latest`, and all three block a pull request. The Windows job runs through Git Bash so one
+POSIX script body serves every runner, and both `cargo test` steps pass `--no-fail-fast` so one red
+platform reports every failure in a single run.
 
-**Why:** the distribution specification makes the MSVC leg blocking from the start, but that assumes a
-codebase already known to build and test on Windows. Today the library needed two `libc` constants
-moved behind `cfg` and four Unix-only symlink fixtures guarded before it would even compile there, so
-the first runs are the measurement, not a regression. Observational status keeps the signal without
-blocking unrelated changes on platform work that the separate Windows effort owns.
+**Why:** the distribution specification requires a blocking MSVC leg. It was introduced observationally
+only because the codebase had never built on Windows; once the first full run was green there was no
+reason left to keep it advisory. The first run paid for itself immediately: the library needed two
+`libc` constants moved behind `cfg`, migration built configured category paths with the platform
+separator (which the configuration validator refuses), and several fixtures assumed Unix semantics.
 
-**Flip condition:** when a full Windows run is green — no skipped test outside the documented allowlist
-— set `experimental: false` on that matrix entry. The GNU leg and the Windows release matrix stay out
-of this change for the same reason. The remaining first-run failures, and the promotion itself, are
-tracked in [wm-t19sq5mv7fdy](../../tickets/implement/wm-t19sq5mv7fdy.md).
+**Documented exclusions.** A test that needs Unix semantics is guarded rather than skipped silently, so
+the exclusion is visible in the source. The current list:
+
+- `#[cfg(unix)]` fixtures that create symlinks, reparse points, or POSIX permission bits — the lock
+  file, the metadata `.gitignore`, category paths, storage targets, archive links, and the `--open`
+  opener. Windows owns those behaviours with the platform effort, and no exclusion touches locking,
+  replacement, rollback, migration, or path validation logic itself.
+- `#[cfg(not(windows))]` on the two case-variant projection tests, which need a case-sensitive
+  filesystem to have two documents that differ only in case.
+
+The GNU leg and the Windows release matrix remain out of scope; the platform effort owns both.
