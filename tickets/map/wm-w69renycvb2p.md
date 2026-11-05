@@ -6,7 +6,7 @@ category: map
 status: open
 owner: frank
 created_at: 2026-11-05T00:53:10Z
-updated_at: 2026-11-05T03:57:10Z
+updated_at: 2026-11-05T04:01:30Z
 parent: wm-4wbvzsv34g2p
 dependencies:
   - wm-78d0sa7jaxpb
@@ -21,18 +21,18 @@ How should project-relative paths and work-item files remain safe and portable a
 
 ## Confirmed decisions
 
-- Persisted storage-root and category paths and storage-migration targets use a common cross-platform lexical validation policy, requiring a safe project-relative representation. It does not constrain the project's actual absolute path. Exact syntax and existing incompatible configurations remain unresolved.
+- Persisted storage-root and category paths and storage-migration targets use a common cross-platform lexical validation policy, requiring a safe project-relative representation. It does not constrain the project's actual absolute path. Exact rules and the initial incompatible-configuration policy are recorded below; detailed remediation remains unresolved.
 - A working-tree diff for a specified existing, untracked work-item file produces a nonempty whole-new-file patch across Linux, macOS, Windows MSVC and GNU when Git is available, rather than returning empty based on platform. Special cases and implementation remain unresolved.
 - A storage-root working-tree diff without an item continues to include tracked files only. Explain that an empty patch does not prove that untracked files are absent; a user can request a single untracked item by ID.
 
 
-- Use `/` separators in persisted storage/category paths and migration targets on every platform; reject absolute and drive-relative forms, backslashes without conversion, empty components and `..`. The standalone `.` may represent the project root, but which fields permit it remains open.
+- Use `/` separators in persisted storage/category paths and migration targets on every platform; reject absolute and drive-relative forms, backslashes without conversion, empty components and `..`. Standalone `.` is permitted for storage root but forbidden for category paths, as specified below.
 - Reject Windows-reserved device names case-insensitively including extensions, Windows-forbidden and control characters, and components ending in space or dot, on every platform. The complete rules and native validation remain to be established.
 - Allow Unicode, such as `工作项/设计`, subject to all other rules; do not assume names that differ only in case or Unicode representation are distinct on all filesystems.
 - Git work-item paths, storage-root paths and history path filters are literal paths, not wildcard or Git pathspec expressions. Directories still scope their contents; validation and native verification remain open.
 
 
-- For configured category paths and storage-migration targets, reject pre-existing Windows reparse points of any kind, including junctions and mount points, extending the existing no-symlink policy. Actual migration refuses when target component safety cannot be established; root aliases remain permitted and adversarial ancestor replacement is not covered. Read behavior and other paths remain open.
+- For configured category paths and storage-migration targets, reject pre-existing Windows reparse points of any kind, including junctions and mount points, extending the existing no-symlink policy. Actual migration refuses when target component safety cannot be established; root aliases remain permitted and adversarial ancestor replacement is not covered. Work-item reads and scans are specified below; other path classes remain open.
 - An explicitly requested existing ignored work item gets a whole-new-file patch; storage-root scope does not automatically include ignored or untracked files.
 - Without `HEAD`, the working-tree diff baseline is the empty tree: an untracked item still has a whole-new-file patch, while staged item and storage-root files are compared to the empty baseline using their current working-tree state. Storage-root scope still omits untracked files. With `HEAD`, compare against it as before.
 
@@ -42,7 +42,7 @@ How should project-relative paths and work-item files remain safe and portable a
 - Git history/diff locate the actual containing working tree for projects in subdirectories, accessible through permitted project-root aliases, or in linked worktrees, and remain scoped to the requested project. Preserve informational empty results for unavailable Git or absence of a repository. Detection and scope-uncertainty handling remain open.
 
 
-- Use fixed-version Unicode normalization and full case folding as a conservative component-wise comparison during configuration validation and migration prechecks; reject equality and ancestor/descendant overlap, preserve names, and do not claim this covers every filesystem alias. Exact normalization algorithm, Unicode version and tests remain open.
+- Use fixed-version Unicode normalization and full case folding as a conservative component-wise comparison during configuration validation and migration prechecks; reject equality and ancestor/descendant overlap, preserve names, and do not claim this covers every filesystem alias. The algorithm and version are specified below; tests and native validation remain open.
 - When inspection required to establish migration safety cannot read or interpret directory entries, dry-run reports uncertainty and execution refuses with a reason; failed checks are not evidence of no conflict. Unrelated unreadable directories do not automatically block all operations. Exact inspection scope and error shape remain open.
 - Storage migration targets must not exist, even as empty directories. This supersedes the prior prohibition limited to non-empty targets. Do not remove or replace existing targets; prevent an external target created after prevalidation from being overwritten, and refuse if this cannot be guaranteed. Mechanism and feasibility remain open.
 - If Git exists but project scope within its containing working tree cannot be determined reliably, history/diff fail explicitly instead of guessing, broadening the query or reporting a normal empty result. Confirmed missing Git or no repository retains informational empty results.
@@ -54,7 +54,7 @@ How should project-relative paths and work-item files remain safe and portable a
 
 
 - Work-item create must not overwrite an existing or concurrently created target. Report conflict and leave the external object untouched; prechecking and the cooperative lock alone are insufficient, and create refuses if the guarantee is unavailable.
-- Reject writes to existing work-item targets that are any Windows reparse point or whose type cannot be established. Never write through them; a separate path precheck alone is insufficient. Native mechanism and read policy remain open; project-root aliases remain allowed.
+- Reject writes to existing work-item targets that are any Windows reparse point or whose type cannot be established. Never write through them; a separate path precheck alone is insufficient. Native mechanism remains open; the later rules specify reads and project-root aliases remain allowed.
 - On failed storage migration, only attempt to remove missing-parent directories actually created by this run, only while still empty, without recursion or deleting external content. Report cleanup failure or uncertain state; dry-run never creates directories. Safe identification under races remains open.
 
 
@@ -71,7 +71,7 @@ How should project-relative paths and work-item files remain safe and portable a
 
 - An untracked single-item patch represents actual working-tree file content when requested, not a predicted staged representation, and for supported ordinary text should reproduce it on a compatible clean target worktree. Do not promise byte identity after target-side conversion, filtering or special apply settings. Fail explicitly if a safe applicable patch cannot be produced.
 - Do not invoke external diff or textconv for the applicable untracked-item patch; preserve Git path quoting. Fail rather than emit a fake patch when other attributes prevent safety. Supported Git attributes and platform/version tests remain open.
-- Inventory/projection scans do not follow any Windows reparse point as a work-item document; diagnose the path and never claim an uncertain scan is complete. Independent valid scoped reads remain available; project-root aliases and adversarial ancestor limits are unchanged. Direct-read details and native verification remain open.
+- Inventory/projection scans do not follow any Windows reparse point as a work-item document; diagnose the path and never claim an uncertain scan is complete. Independent valid scoped reads remain available; project-root aliases and adversarial ancestor limits are unchanged. Direct-read behavior is specified below; native verification remains open.
 
 
 - Direct work-item reads refuse final symbolic links and all Windows reparse points, fail if target type cannot be established, and cannot rely on a separate pre-read path check alone. Other valid scoped reads and project-root aliases remain allowed; native mechanism is open.
@@ -108,8 +108,13 @@ How should project-relative paths and work-item files remain safe and portable a
 - An empty or damaged work-item file may be diffed if safely located by ID, without claiming it parses as a valid work item; parse diagnostics and diff are distinct. Return an untracked new-file patch only if safe applicability can be established, and never apply lossy UTF-8 conversion.
 - If patch output cannot be carried losslessly as text in CLI JSON and MCP, fail explicitly rather than substituting U+FFFD. Do not add a new binary transport in this effort; text-encoded Git binary patches remain allowed.
 
-## Still to resolve
 
-- Native verification of Windows reserved-name/character rules and remaining edge cases; Unicode table/dependency verification and native collision checks; detailed guidance for existing incompatible configurations.
-- Path traversal, reparse points, project-root aliases, and collision checks in the context of existing lock and migration decisions.
-- Git path arguments, discovery, untracked single-item edge cases, error behavior and native verification.
+- Native Linux, macOS, Windows MSVC/GNU validation covers portable path rules, case/Unicode collisions, links and reparse points, root aliases, linked worktrees, no `HEAD`, ignored and untracked items. Apply generated patches in isolated clean worktrees and verify results; inject unreadable paths, uncertain scope and target races. CI provisioning, capability exceptions and release gates remain for [verification and release](wm-9ghaw0aqapyf.md).
+- If a platform cannot provide an agreed safety or patch guarantee, fail explicitly rather than silently weakening it. Carry feasibility and alternatives to [platform module design](wm-rn893kzbg524.md) and verification; return to the user if the promised behavior proves infeasible. Native feasibility is not yet established.
+
+## Still to resolve and handoff
+
+- [Platform module design](wm-rn893kzbg524.md): choose and validate mechanisms for safe no-replace creation, directory moves/rollback, identity-based cleanup, no-follow reads/writes and required filesystem alias checks; define what happens when checks cannot be established. Decide how dependencies consistently implement Unicode 16.0.0 and how to handle old incompatible configurations safely.
+- [Verification and release](wm-9ghaw0aqapyf.md): determine native CI environments, capabilities and release gates, Unicode data and Rust compatibility checks, filesystem support, path length boundaries, Git version/attribute coverage and applicable text/binary patch tests. No native Windows validation is claimed.
+- [Filesystem warning and recovery response contract](wm-pkn47knm5t0n.md): specify machine-readable warning aggregation, recovery outcomes and actual recovery-material paths.
+- Interface follow-up remains necessary for lossless display of non-UTF-8 path diagnostics and exact Git scope presentation. Git attribute combinations that can guarantee safe applicable patches remain open; do not introduce a binary transport without a separate decision. Detailed manual remediation guidance and whether a dedicated tool is necessary remain open.
