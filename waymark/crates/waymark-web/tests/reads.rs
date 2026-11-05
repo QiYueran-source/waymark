@@ -278,7 +278,11 @@ async fn unresolved_parent_does_not_suppress_valid_roots() {
 async fn damaged_document_fails_the_tree_with_code_and_diagnostics() {
     let fixture = populated();
     std::fs::write(
-        fixture.root().join("work/bugs/wm-0000000000aa.md"),
+        fixture
+            .root()
+            .join("work")
+            .join("bugs")
+            .join("wm-0000000000aa.md"),
         "this is not a work-item document\n",
     )
     .expect("the broken document is writable");

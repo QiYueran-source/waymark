@@ -269,7 +269,7 @@ impl Config {
     pub fn category_dir(&self, root: &Utf8Path, category: &CategoryKey) -> Option<Utf8PathBuf> {
         self.categories
             .get(category)
-            .map(|entry| root.join(&entry.path))
+            .map(|entry| resolve_relative(root, &entry.path))
     }
 
     /// Parse and validate a configuration document without filesystem checks.
@@ -866,4 +866,16 @@ impl IntoFieldValue for toml::Value {
             other => FieldValue::String(other.to_string()),
         }
     }
+}
+
+/// Resolve a configuration-relative path against `root`.
+pub fn resolve_relative(root: &Utf8Path, relative: &str) -> Utf8PathBuf {
+    let mut path = root.to_path_buf();
+    for component in relative.split('/') {
+        match component {
+            "" | "." => {}
+            other => path.push(other),
+        }
+    }
+    path
 }

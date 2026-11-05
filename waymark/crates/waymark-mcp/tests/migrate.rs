@@ -16,7 +16,7 @@ use waymark_core::FieldValue;
 
 /// Rewrite one document's generation literal to the previous generation.
 fn downgrade_item(root: &Utf8Path, id: &str) {
-    let path = root.join("work/task").join(format!("{id}.md"));
+    let path = root.join("work").join("task").join(format!("{id}.md"));
     let text = common::read(&path);
     let downgraded = text.replacen(
         &format!("schema: {FORMAT_GENERATION}\n"),
@@ -30,7 +30,7 @@ fn downgrade_item(root: &Utf8Path, id: &str) {
 /// Rewrite the configuration's version literal by hand, so the migration has an
 /// older generation to upgrade.
 fn downgrade_config(root: &Utf8Path) {
-    let path = root.join(".waymark/config.toml");
+    let path = root.join(".waymark").join("config.toml");
     let text = common::read(&path);
     let current = waymark_core::Project::discover(root)
         .expect("the project opens")
@@ -48,7 +48,11 @@ async fn migrate_version_dry_run_reports_the_work_and_writes_nothing() {
     let id = fixture.ids[0].clone();
     downgrade_item(&fixture.root, &id);
     downgrade_config(&fixture.root);
-    let item_path = fixture.root.join("work/task").join(format!("{id}.md"));
+    let item_path = fixture
+        .root
+        .join("work")
+        .join("task")
+        .join(format!("{id}.md"));
 
     let project = common::warm_lock(&fixture.root);
     let before = common::snapshot(&fixture.root);
@@ -145,7 +149,11 @@ async fn migrate_schema_removes_the_declaration_and_every_value() {
         &common::options(),
     )
     .expect("the value is written");
-    let item_path = fixture.root.join("work/task").join(format!("{id}.md"));
+    let item_path = fixture
+        .root
+        .join("work")
+        .join("task")
+        .join(format!("{id}.md"));
     assert!(common::read(&item_path).contains("note"));
 
     common::warm_lock(&fixture.root);
@@ -240,7 +248,11 @@ async fn migrate_schema_adds_a_required_field_with_its_default() {
     let project = fixture.project();
     assert!(project.config().fields[&FieldKey::parse("points").unwrap()].required);
     for id in &fixture.ids {
-        let path = fixture.root.join("work/task").join(format!("{id}.md"));
+        let path = fixture
+            .root
+            .join("work")
+            .join("task")
+            .join(format!("{id}.md"));
         let text = common::read(&path);
         assert!(text.contains("points: 0"), "{text}");
     }
@@ -297,9 +309,13 @@ async fn migrate_storage_moves_one_category_and_rewrites_the_key() {
     let envelope = common::envelope(&result);
     assert_eq!(envelope["ok"], true);
     assert_eq!(envelope["data"]["written"], true);
-    assert!(fixture.root.join("work/todo").is_dir());
-    assert!(!fixture.root.join("work/task").exists());
-    let moved = fixture.root.join("work/todo").join(format!("{id}.md"));
+    assert!(fixture.root.join("work").join("todo").is_dir());
+    assert!(!fixture.root.join("work").join("task").exists());
+    let moved = fixture
+        .root
+        .join("work")
+        .join("todo")
+        .join(format!("{id}.md"));
     assert!(common::read(&moved).contains("category: todo"));
 
     client.shutdown().await;

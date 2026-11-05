@@ -232,7 +232,7 @@ fn tree_renders_parent_edges_and_reports_unresolved_items() {
 
     // An orphan whose parent does not exist, written behind the tool's back.
     let orphan = create(&root, "orphan");
-    let path = root.join("work/task").join(format!("{orphan}.md"));
+    let path = root.join("work").join("task").join(format!("{orphan}.md"));
     let text = std::fs::read_to_string(&path).unwrap();
     let patched = text.replace(
         &format!("id: {orphan}"),

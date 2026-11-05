@@ -48,7 +48,11 @@ fn make(project: &Project, title: &str) -> String {
 }
 
 fn task_path(project: &Project, id: &str) -> Utf8PathBuf {
-    project.root().join(format!("work/task/{id}.md"))
+    project
+        .root()
+        .join("work")
+        .join("task")
+        .join(format!("{id}.md"))
 }
 
 fn break_document(project: &Project, id: &str) {

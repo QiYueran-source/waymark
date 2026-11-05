@@ -373,7 +373,7 @@ fn a_basic_build_reports_no_asset_mismatch() {
 fn validate_and_doctor_report_a_broken_local_document_at_its_file() {
     let (_dir, root) = project();
     std::fs::write(
-        root.join(".waymark/user.toml"),
+        root.join(".waymark").join("user.toml"),
         "timezone = \"Mars/Olympus\"\n",
     )
     .unwrap();

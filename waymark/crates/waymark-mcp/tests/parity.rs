@@ -166,7 +166,10 @@ fn every_cli_command_family_has_an_mcp_tool_and_vice_versa() {
 fn every_deliberate_exception_is_documented_in_the_decisions_record() {
     let decisions = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../docs/implementation-decisions.md"),
+            .join("..")
+            .join("..")
+            .join("docs")
+            .join("implementation-decisions.md"),
     )
     .expect("the decisions record is readable");
     let phase_b = decisions

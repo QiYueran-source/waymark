@@ -58,8 +58,11 @@ async fn config_validate_reports_findings_without_a_business_failure() {
 
     // Break the document on disk: validation must still answer with a report,
     // and the findings must reuse the shared registry.
-    std::fs::write(fixture.root.join(".waymark/config.toml"), "not = [toml")
-        .expect("the configuration is replaced");
+    std::fs::write(
+        fixture.root.join(".waymark").join("config.toml"),
+        "not = [toml",
+    )
+    .expect("the configuration is replaced");
     let result = client
         .call("waymark_config_validate", common::no_args())
         .await;
@@ -75,12 +78,12 @@ async fn config_validate_reports_findings_without_a_business_failure() {
     // The local document is validated alongside it, and a local finding reuses
     // the same registry and the same shape.
     std::fs::write(
-        fixture.root.join(".waymark/config.toml"),
+        fixture.root.join(".waymark").join("config.toml"),
         waymark_core::config::Config::fresh().to_toml_string(),
     )
     .expect("the configuration is healthy again");
     std::fs::write(
-        fixture.root.join(".waymark/user.toml"),
+        fixture.root.join(".waymark").join("user.toml"),
         "timezone = \"Mars/Olympus\"\n",
     )
     .expect("the local document is replaced");
@@ -121,7 +124,7 @@ async fn validate_and_doctor_return_the_shared_diagnostic_report() {
     // A document the parser cannot read produces a diagnostic rather than a
     // failure, which is the whole point of `validate` and `doctor`.
     std::fs::write(
-        fixture.root.join("work/task/broken.md"),
+        fixture.root.join("work").join("task").join("broken.md"),
         "---\nnot frontmatter",
     )
     .expect("the broken document is written");
@@ -267,7 +270,7 @@ async fn config_category_and_field_writes_use_the_domain() {
         "Bugs"
     );
     assert!(
-        fixture.root.join("work/bugs").is_dir(),
+        fixture.root.join("work").join("bugs").is_dir(),
         "a real add creates the category directory"
     );
 

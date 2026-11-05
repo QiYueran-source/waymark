@@ -44,7 +44,7 @@ fn two_category_project() -> (tempfile::TempDir, Project) {
     );
     let dir = tempfile::tempdir().unwrap();
     let root = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
-    std::fs::create_dir_all(root.join("work/bugs")).unwrap();
+    std::fs::create_dir_all(root.join("work").join("bugs")).unwrap();
     let project = Project::init(
         &root,
         InitOptions {
@@ -599,7 +599,11 @@ fn a_retained_projection_reports_new_deleted_moved_and_changed_files() {
 fn an_uncertain_inventory_path_is_reported() {
     let (_dir, project) = project();
     create_item(&project, "one");
-    std::fs::write(project.root().join("work/task/notes.md"), "not a document").unwrap();
+    std::fs::write(
+        project.root().join("work").join("task").join("notes.md"),
+        "not a document",
+    )
+    .unwrap();
 
     let report = doctor::diagnose(&project).unwrap();
     let findings = messages(&report, Code::IncompleteProjection);
@@ -843,7 +847,7 @@ fn diagnose_from_derives_the_root_and_maps_a_broken_configuration() {
     );
 
     std::fs::write(project.config_path(), "categories = [not valid toml").unwrap();
-    for start in [root.clone(), root.join("work/task")] {
+    for start in [root.clone(), root.join("work").join("task")] {
         let report = doctor::diagnose_from(&start, DoctorOptions::new())
             .expect("a broken configuration still yields a report");
         assert_eq!(report.scope, vec!["configuration".to_owned()]);

@@ -91,9 +91,12 @@ impl Repository {
     /// `path` as a repository-relative pathspec, when it is inside the
     /// repository.
     pub fn relative(&self, path: &Utf8Path) -> Option<String> {
-        path.strip_prefix(&self.root)
-            .ok()
-            .map(|relative| relative.as_str().to_owned())
+        path.strip_prefix(&self.root).ok().map(|relative| {
+            // A pathspec is a Git path, not a filesystem path: Git reads and
+            // reports `/` on every platform, so a Windows `\` would name
+            // nothing.
+            relative.as_str().replace('\\', "/")
+        })
     }
 }
 
@@ -210,7 +213,7 @@ pub fn find_repository_at(root: &Utf8Path) -> Option<Repository> {
         if dot_git.is_dir() || dot_git.is_file() {
             let project_prefix = root
                 .strip_prefix(directory)
-                .map(|relative| relative.as_str().to_owned())
+                .map(|relative| relative.as_str().replace('\\', "/"))
                 .unwrap_or_default();
             return Some(Repository {
                 root: directory.to_path_buf(),
@@ -792,8 +795,9 @@ fn repo_paths(probe: &GitProbe, project_paths: &[String]) -> Vec<String> {
     project_paths
         .iter()
         .map(|path| {
+            let path = path.replace('\\', "/");
             if prefix.is_empty() {
-                path.clone()
+                path
             } else if path.is_empty() {
                 prefix.to_owned()
             } else {
@@ -930,10 +934,12 @@ impl Git {
                 &[1],
             )?;
             if !tracked.status.success() {
-                if cfg!(windows) {
-                    return Ok(String::new());
-                }
-                let output = self.run(
+                // `/dev/null` is what Git itself uses for the absent side. Git
+                // for Windows resolves it through its MSYS layer, so the same
+                // command is attempted everywhere; a platform that cannot
+                // resolve it degrades to the empty patch rather than failing the
+                // read.
+                let attempt = self.run(
                     &[
                         "diff".to_owned(),
                         "--no-index".to_owned(),
@@ -943,8 +949,12 @@ impl Git {
                         path.clone(),
                     ],
                     &[1],
-                )?;
-                return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
+                );
+                return match attempt {
+                    Ok(output) => Ok(String::from_utf8_lossy(&output.stdout).into_owned()),
+                    Err(_) if cfg!(windows) => Ok(String::new()),
+                    Err(error) => Err(error),
+                };
             }
         }
         let mut args: Vec<String> = vec![
