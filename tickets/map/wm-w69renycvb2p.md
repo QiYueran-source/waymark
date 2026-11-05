@@ -6,7 +6,7 @@ category: map
 status: open
 owner: frank
 created_at: 2026-11-05T00:53:10Z
-updated_at: 2026-11-05T03:55:53Z
+updated_at: 2026-11-05T03:57:10Z
 parent: wm-4wbvzsv34g2p
 dependencies:
   - wm-78d0sa7jaxpb
@@ -102,6 +102,11 @@ How should project-relative paths and work-item files remain safe and portable a
 - Storage root cannot equal or descend into project-root `.waymark` or `.git`, including conservative-equivalent variants; standalone `.` remains permitted and old configurations follow the agreed diagnostic policy.
 - CLI documentation and MCP results identify default history/diff scope as storage root rather than all items: `.` can include other tracked project files, and out-of-root categories can be omitted. An item ID scopes its concrete file. Exact presentation remains open.
 - A Git executable that exists but cannot run or whose command fails produces an explicit Git error, not a missing-Git finding or successful empty result. Confirmed Git absence or absence of a containing repository retains the existing informational behavior.
+
+
+- For untracked valid work items that Git classifies as binary, including content with NUL, support an applicable Git binary patch; `Binary files differ` alone is not a usable patch. Fail explicitly if the Git version, attributes or environment prevent confirming it is safe and usable. Native verification remains open.
+- An empty or damaged work-item file may be diffed if safely located by ID, without claiming it parses as a valid work item; parse diagnostics and diff are distinct. Return an untracked new-file patch only if safe applicability can be established, and never apply lossy UTF-8 conversion.
+- If patch output cannot be carried losslessly as text in CLI JSON and MCP, fail explicitly rather than substituting U+FFFD. Do not add a new binary transport in this effort; text-encoded Git binary patches remain allowed.
 
 ## Still to resolve
 

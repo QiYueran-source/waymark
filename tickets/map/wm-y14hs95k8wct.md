@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T03:55:53Z
+updated_at: 2026-11-05T03:57:10Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -560,6 +560,11 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - Confirmed by the user on 2026-11-05: the configured storage root cannot be project-root `.waymark` or `.git`, or a descendant of either, including variants equivalent under the conservative comparison. Standalone `.` remains permitted. Diagnose existing incompatible configuration under the established transition policy; do not automatically modify it.
 - CLI documentation and MCP results must explicitly identify default Git history/diff scope as the configured storage root, not all work items. Root `.` may include other tracked project files, and categories outside the root may be omitted. An item query by ID addresses its concrete file. Exact presentation remains for interface design.
 - An existing Git executable that fails to run or whose command fails, including permission or corrupt-worktree errors, produces an explicit Git error rather than a missing-Git finding or successful empty result. Informational empty results apply only when Git is confirmed unavailable or the project is confirmed outside a repository, according to the existing availability contract.
+
+
+- Confirmed by the user on 2026-11-05: an untracked valid work item containing NUL may be classified as binary by Git; support a Git binary patch that can actually be applied rather than presenting only a `Binary files differ` notice as an applicable patch. If the Git version, attributes or environment prevent confirming a safe usable patch, fail explicitly. Native and Git-version validation remains open.
+- Git diff may inspect a damaged or empty work-item file if it can be safely located by ID; this does not make it a valid work item, and parse diagnostics remain distinct from the diff result. For an untracked file, return a patch only if a safe applicable new-file patch can be generated and verified; otherwise report an error. Never use lossy UTF-8 conversion to invent patch content.
+- If a patch cannot be represented losslessly in the text carried by CLI JSON and MCP, return an explicit error rather than replacing invalid bytes with U+FFFD and claiming applicability. A separate binary transport format is not added as part of this platform adaptation; whether one is needed remains an independent future design question. This does not forbid a Git binary patch that is itself losslessly representable as text.
 
 ## Not yet specified
 
