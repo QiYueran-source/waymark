@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T02:06:10Z
+updated_at: 2026-11-05T02:06:59Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -471,7 +471,9 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - Confirmed by the user on 2026-11-05: diagnostics must not infer that a temporary or recovery file is abandoned solely from its name or age. If activity cannot be ruled out, describe it only as a file requiring inspection and do not claim it is safe to delete; another Waymark process might be using it.
 - Diagnostics of potential temporary or recovery material report its path and the reason for inspection; they do not automatically delete, move, restore, or follow a link to read its contents. This does not make the material authoritative or promise automatic crash recovery.
 - A local filesystem is supported only if it meets the agreed locking, atomic replacement, permissions, and migration requirements; local status alone does not prove those guarantees. Do not silently weaken safety when capabilities cannot be established. The exact supported filesystem list and verification strategy remain for the verification and release decision.
-- Do not describe an incomplete or failed file/directory synchronization as safely persisted to disk. Atomic visibility is distinct from power-loss durability. Which sync failures make an operation fail remains open for platform implementation and testing; no durable-commit guarantee is implied.
+- Do not describe an incomplete or failed file/directory synchronization as safely persisted to disk. Atomic visibility is distinct from power-loss durability. The later decision below specifies staged-file and post-replacement directory-sync failures; no durable-commit guarantee is implied.
+
+- Confirmed by the user on 2026-11-05: if synchronization of a staged temporary file fails before replacement begins, stop and report failure without replacing the original target. When replacement has succeeded but subsequent directory synchronization fails, report the successful replacement with a warning that directory synchronization was not confirmed; do not describe the write as safely durable after power loss or return an ordinary failure implying the target did not change. The warning must reach callers; its exact machine-readable representation and batch aggregation remain to be designed.
 
 ## Not yet specified
 
