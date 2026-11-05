@@ -878,6 +878,7 @@ mod tests {
         assert_eq!(fs::read_to_string(&path).unwrap(), "edited elsewhere\n");
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_write_through_a_symlink_is_refused() {
         let dir = scratch();
