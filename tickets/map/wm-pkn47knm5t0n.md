@@ -3,10 +3,11 @@ schema: 1
 id: wm-pkn47knm5t0n
 title: Define filesystem warning and recovery response contract
 category: map
-status: open
+status: closed
 owner: frank
 created_at: 2026-11-05T02:09:09Z
-updated_at: 2026-11-05T04:37:58Z
+updated_at: 2026-11-05T04:39:03Z
+closed_at: 2026-11-05T04:39:03Z
 parent: wm-4wbvzsv34g2p
 dependencies:
   - wm-a3ewqxebssk1
@@ -34,3 +35,11 @@ How do CLI, MCP and shared machine responses represent a successful replacement 
 - Which of the three recovery states, if any, corresponds to the existing `applied` and `failed` detail lists, and how existing consumers migrate.
 - Lossless non-UTF-8 path representation inside warnings and recovery details.
 - Native Windows evidence for the declared directory-synchronization capability, and whether MSVC and GNU share one declaration.
+
+## Resolution
+
+The user confirmed the response contract above on 2026-11-05. It records behavior, not an implemented or verified state: the current engine ignores directory-synchronization errors, the shared warning entry has no details field, and human failure output prints counts rather than paths, so all three must change before the contract holds.
+
+## Handoff
+
+Exact interface work remains and is routed through the platform module design: the registry code name and warning details schema, whether optional details extend the shared warning type or a success-only structure, how the three recovery states relate to the existing `applied`, `failed` and `rollback_failed` detail lists, and the lossless non-UTF-8 path representation. Native Windows evidence for the declared directory-synchronization capability belongs to verification and release gates. Do not create implementation tickets or synchronize the specification from these decisions yet.

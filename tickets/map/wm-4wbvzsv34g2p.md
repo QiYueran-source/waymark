@@ -31,6 +31,8 @@ Reach an implementable cross-platform adaptation design and a basis for revising
 
 - [Define cross-platform paths and Git behavior](wm-w69renycvb2p.md): Portable path syntax and Unicode comparison, fail-closed link and migration safeguards, scoped Git behavior and applicable untracked-file patches; native feasibility and interface details remain for follow-up.
 
+- [Define filesystem warning and recovery response contract](wm-pkn47knm5t0n.md): Per-event synchronization warnings carried in the success metadata, an explicit platform capability declaration instead of per-write noise, and three-state recovery reporting shown to humans as well as machines.
+
 ## Not yet specified
 
 - Further compatibility cases, limitations, or trade-offs uncovered by research and decisions that cannot yet be stated as precise questions.
