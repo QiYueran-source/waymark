@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T02:29:52Z
+updated_at: 2026-11-05T02:30:45Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -503,6 +503,11 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - If a directory must be inspected to establish migration safety but its entries cannot be read, interpreted, or checked, dry-run reports that safety cannot be confirmed and actual migration refuses with a reason. Do not treat a failed check as no conflict, and do not automatically block unrelated operations because an unrelated directory is unreadable. The exact required inspection scope and error representation remain open.
 - Storage migration targets must not already exist, including empty directories. This stricter decision supersedes the earlier rule that specifically rejected non-empty existing targets; an existing empty target is now a conflict too, not something Waymark deletes or replaces. Execution must prevent an externally created target from being overwritten after prevalidation; if it cannot provide that guarantee, it refuses migration. The project advisory lock does not exclude external processes; the mechanism and feasibility remain open.
 - If Git is found but the project's scope within its containing working tree cannot be established reliably, history and diff fail explicitly rather than querying a broader scope, guessing a prefix, or returning a normal empty result. Retain the informational empty-result behavior only when Git is absent or the project is confirmed not to be in a repository.
+
+
+- Confirmed by the user on 2026-11-05: passing the fixed Unicode string comparison does not establish filesystem safety. Configuration and migration involving actual paths must also inspect relevant existing objects; if an actual filesystem alias would cause category overlap, migration overwrite, or escape, report the conflict and refuse the relevant operation. If a migration safety check cannot be completed, dry-run reports uncertainty and execution refuses, as already decided. Mechanisms and the scope that can actually be verified remain open; do not claim string folding detects every alias.
+- Storage-migration rollback must not overwrite an object another process has created at an original location after the move. If a particular move cannot be safely restored, stop that restoration and explicitly report rollback failure, affected paths and the current location of any material that actually exists for user recovery. Do not delete or overwrite the external object to claim rollback success. This does not promise detection of every malicious ancestor replacement.
+- For a supported ordinary text work item requested by ID, an untracked-file diff is a new-file Git patch, with paths relative to the actual working tree, that Git can apply against an appropriate clean baseline. Human-mode CLI stdout contains the patch only; CLI JSON and MCP carry the same patch content in their structured responses. If a safe patch cannot be produced, report an error rather than inventing one. Cross-platform tests and effects of Git configuration remain open.
 
 ## Not yet specified
 
