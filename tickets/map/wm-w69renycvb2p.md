@@ -6,7 +6,7 @@ category: map
 status: open
 owner: frank
 created_at: 2026-11-05T00:53:10Z
-updated_at: 2026-11-05T03:53:41Z
+updated_at: 2026-11-05T03:55:53Z
 parent: wm-4wbvzsv34g2p
 dependencies:
   - wm-78d0sa7jaxpb
@@ -97,6 +97,11 @@ How should project-relative paths and work-item files remain safe and portable a
 - Category paths cannot equal or lie inside project-root `.git`, including conservative case/Unicode-equivalent variants. This covers both directory and linked-worktree file forms; storage root `.` remains permitted.
 - An untracked single-item patch cannot be accepted solely on `git diff --no-index` exit `1`; establish it is a valid new-file patch for the requested file and report Git, read, encoding or verification errors. Exit-code or stderr checks alone are not assumed sufficient.
 - Configuration and migration prechecks share Unicode 16.0.0 component comparison and fixed-version conformance cases; native Linux, macOS, Windows MSVC/GNU tests cover actual collisions and links as well. CI provisioning and gates remain separate.
+
+
+- Storage root cannot equal or descend into project-root `.waymark` or `.git`, including conservative-equivalent variants; standalone `.` remains permitted and old configurations follow the agreed diagnostic policy.
+- CLI documentation and MCP results identify default history/diff scope as storage root rather than all items: `.` can include other tracked project files, and out-of-root categories can be omitted. An item ID scopes its concrete file. Exact presentation remains open.
+- A Git executable that exists but cannot run or whose command fails produces an explicit Git error, not a missing-Git finding or successful empty result. Confirmed Git absence or absence of a containing repository retains the existing informational behavior.
 
 ## Still to resolve
 

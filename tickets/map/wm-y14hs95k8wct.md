@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T03:53:41Z
+updated_at: 2026-11-05T03:55:53Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -555,6 +555,11 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - Category paths cannot equal or lie inside project-root `.git`, including variants equivalent under the agreed conservative path comparison. `.git` can be a directory or a linked-worktree file; do not treat it as a movable category. The storage root may still be `.`. This does not assume the Git metadata of every nested project is located inside its project root.
 - Untracked single-item patch generation must not treat Git `diff --no-index` exit status `1` alone as proof of a valid diff: it can also occur on some failure paths. Establish that output is a valid new-file patch for the specified file; explicitly report Git, read, encoding or verification errors rather than returning a normal empty result. Neither an exit-code check nor stderr check is assumed sufficient without evidence and tests; implementation remains open.
 - Configuration validation and storage migration prechecks must share the Unicode 16.0.0 comparison semantics and fixed-data-version tests, including canonical equivalence, full case folding and component-based ancestry. Native Linux, macOS, Windows MSVC and GNU testing must also cover actual collisions and links; string-only tests do not establish filesystem behavior. CI provisioning and release gates remain in verification and release planning.
+
+
+- Confirmed by the user on 2026-11-05: the configured storage root cannot be project-root `.waymark` or `.git`, or a descendant of either, including variants equivalent under the conservative comparison. Standalone `.` remains permitted. Diagnose existing incompatible configuration under the established transition policy; do not automatically modify it.
+- CLI documentation and MCP results must explicitly identify default Git history/diff scope as the configured storage root, not all work items. Root `.` may include other tracked project files, and categories outside the root may be omitted. An item query by ID addresses its concrete file. Exact presentation remains for interface design.
+- An existing Git executable that fails to run or whose command fails, including permission or corrupt-worktree errors, produces an explicit Git error rather than a missing-Git finding or successful empty result. Informational empty results apply only when Git is confirmed unavailable or the project is confirmed outside a repository, according to the existing availability contract.
 
 ## Not yet specified
 
