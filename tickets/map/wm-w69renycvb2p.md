@@ -6,7 +6,7 @@ category: map
 status: open
 owner: frank
 created_at: 2026-11-05T00:53:10Z
-updated_at: 2026-11-05T02:27:08Z
+updated_at: 2026-11-05T02:29:52Z
 parent: wm-4wbvzsv34g2p
 dependencies:
   - wm-78d0sa7jaxpb
@@ -41,8 +41,14 @@ How should project-relative paths and work-item files remain safe and portable a
 - All platforms reject ASCII case-equivalent category paths in configuration and migration prechecks, including equality and ancestor/descendant overlap; identify conflicts and never select or overwrite one. Unicode and other filesystem aliases require additional policy.
 - Git history/diff locate the actual containing working tree for projects in subdirectories, accessible through permitted project-root aliases, or in linked worktrees, and remain scoped to the requested project. Preserve informational empty results for unavailable Git or absence of a repository. Detection and scope-uncertainty handling remain open.
 
+
+- Use fixed-version Unicode normalization and full case folding as a conservative component-wise comparison during configuration validation and migration prechecks; reject equality and ancestor/descendant overlap, preserve names, and do not claim this covers every filesystem alias. Exact normalization algorithm, Unicode version and tests remain open.
+- When inspection required to establish migration safety cannot read or interpret directory entries, dry-run reports uncertainty and execution refuses with a reason; failed checks are not evidence of no conflict. Unrelated unreadable directories do not automatically block all operations. Exact inspection scope and error shape remain open.
+- Storage migration targets must not exist, even as empty directories. This supersedes the prior prohibition limited to non-empty targets. Do not remove or replace existing targets; prevent an external target created after prevalidation from being overwritten, and refuse if this cannot be guaranteed. Mechanism and feasibility remain open.
+- If Git exists but project scope within its containing working tree cannot be determined reliably, history/diff fail explicitly instead of guessing, broadening the query or reporting a normal empty result. Confirmed missing Git or no repository retains informational empty results.
+
 ## Still to resolve
 
-- Exhaustive Windows reserved-name and character rules, permitted use of standalone `.`, case/Unicode equivalence, and handling existing incompatible configurations.
+- Exhaustive Windows reserved-name and character rules; permitted use of standalone `.`; exact Unicode comparison algorithm/version and native collision checks; detailed guidance for existing incompatible configurations.
 - Path traversal, reparse points, project-root aliases, and collision checks in the context of existing lock and migration decisions.
 - Git path arguments, discovery, untracked single-item edge cases, error behavior and native verification.

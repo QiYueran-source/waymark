@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T02:27:08Z
+updated_at: 2026-11-05T02:29:52Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -497,6 +497,12 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - Confirmed by the user on 2026-11-05: existing projects with configuration paths that violate the new portable rules must not be silently renamed or continue writing as if valid. Report the specific configuration key, path and incompatibility. Preserve read-only configuration diagnostics, explicitly scoped to configuration rather than claiming a full project check. Users should back up and stop writes before coordinating directory and configuration changes and then revalidate; changing configuration alone may hide existing work-item files. Do not claim the existing migration command can repair an invalid configuration. Detailed repair guidance and any dedicated tool remain undecided.
 - Configuration validation and storage-migration prechecks on all platforms reject category path conflicts and overlap that differ only by ASCII letter case, including equality and ancestor/descendant relationships. Report the conflicting paths rather than choosing or overwriting one. This is a minimum portable rule, not a claim that ASCII comparison catches Unicode or all filesystem aliases; further collision policy remains open.
 - Git history and diff must correctly locate the actual containing working tree when the project is inside a repository subdirectory, accessed through a permitted project-root alias, or inside a linked worktree. Queries are limited to the requested project scope; an incorrect prefix must not expand a query to the entire repository or another project. Preserve the existing informational empty-result behavior when Git is missing or the project is not in a repository. Discovery mechanism and inability to establish the scope remain open.
+
+
+- Confirmed by the user on 2026-11-05: configuration validation and storage-migration prechecks apply a fixed-version Unicode normalization and full case-folding policy as a conservative, platform-independent comparison of path components. Reject equal or ancestor/descendant paths under that comparison, retaining the original names without automatically renaming. The concrete normalization algorithm, Unicode version and tests remain open. This may reject names that can coexist on some Linux filesystems; it does not prove that every filesystem alias or collision is covered.
+- If a directory must be inspected to establish migration safety but its entries cannot be read, interpreted, or checked, dry-run reports that safety cannot be confirmed and actual migration refuses with a reason. Do not treat a failed check as no conflict, and do not automatically block unrelated operations because an unrelated directory is unreadable. The exact required inspection scope and error representation remain open.
+- Storage migration targets must not already exist, including empty directories. This stricter decision supersedes the earlier rule that specifically rejected non-empty existing targets; an existing empty target is now a conflict too, not something Waymark deletes or replaces. Execution must prevent an externally created target from being overwritten after prevalidation; if it cannot provide that guarantee, it refuses migration. The project advisory lock does not exclude external processes; the mechanism and feasibility remain open.
+- If Git is found but the project's scope within its containing working tree cannot be established reliably, history and diff fail explicitly rather than querying a broader scope, guessing a prefix, or returning a normal empty result. Retain the informational empty-result behavior only when Git is absent or the project is confirmed not to be in a repository.
 
 ## Not yet specified
 
