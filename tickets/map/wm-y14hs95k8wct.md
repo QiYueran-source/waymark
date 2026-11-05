@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T02:03:35Z
+updated_at: 2026-11-05T02:04:38Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -462,6 +462,11 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - For an existing restricted target, protect temporary files throughout creation, staging, replacement and cleanup so they are not accessible more broadly than the target. If this cannot be ensured, refuse the write. This rule applies to the entire staging interval, not only the final file; its mechanism and native verification remain open.
 - A batch recovery error must distinguish paths confirmed restored from paths whose restoration failed or whose final state is unknown; identify the failing path and locations of any recovery material that actually exists. It must not claim success or imply that nothing changed. Exact machine-readable fields remain for later interface design.
 - Native Windows verification must cover replacement of a restricted-ACL file, refusal to edit a read-only file, temporary-file access restrictions, replacement failure and rollback reporting, and refusal of cross-volume migration. CI provisioning and the policy for unavailable test capabilities remain for the verification and release decision.
+
+- Confirmed by the user on 2026-11-05: any backup or recovery file containing old restricted content must be no more broadly accessible than its original throughout creation, use and retention. If recovery material cannot be safely protected, do not begin an operation that relies on it for recovery. This does not promise durable crash recovery or that recovery files always exist.
+- For a newly created work item with no existing target ACL, the final file may inherit its destination directory's default permissions; do not guess an unrelated work item as a permission template. Staging a new file must not grant broader access than the intended final directory policy. How to enforce this on each supported platform requires native verification.
+- No general preservation of additional Windows metadata such as SACLs, alternate data streams or timestamps is promised at this stage; this does not relax the agreed owner, DACL, read-only, access-control or data-safety guarantees. A concrete need or incompatibility can be brought back for a separate decision.
+- If abrupt termination leaves temporary files or recovery materials, later diagnostics should notify users to inspect those leftovers. Do not automatically treat them as authoritative, restore them, or overwrite existing work items. Identification and safe diagnostic behavior remain to be designed; no automatic crash recovery is promised.
 
 ## Not yet specified
 
