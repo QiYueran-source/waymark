@@ -307,10 +307,11 @@ fn a_storage_migration_previews_then_moves_the_root() {
         envelope["data"]["moves"][0]["outcome"],
         serde_json::json!("skipped")
     );
+    let expected = root.join("items").join("task");
     assert!(envelope["data"]["moves"][0]["to"]
         .as_str()
         .expect("a target")
-        .ends_with("items/task"));
+        .ends_with(expected.as_str()));
     assert_eq!(envelope["data"]["rewritten"], serde_json::json!([]));
     assert!(old.exists(), "the dry run moved nothing");
     assert!(

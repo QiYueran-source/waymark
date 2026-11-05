@@ -1236,9 +1236,13 @@ fn join_relative(root: &str, rest: &str) -> String {
 }
 
 /// A category key change renames the directory's final component to the key.
+///
+/// The result is a configuration value, not a filesystem path, so it is built
+/// from the string form: a `Utf8Path` join would use the platform separator and
+/// the configuration validator accepts `/` only.
 fn key_path(old_path: &str, new_key: &CategoryKey) -> String {
-    match Utf8Path::new(old_path).parent() {
-        Some(parent) if !parent.as_str().is_empty() => parent.join(new_key.as_str()).to_string(),
+    match old_path.rsplit_once('/') {
+        Some((parent, _)) if !parent.is_empty() => format!("{parent}/{}", new_key.as_str()),
         _ => new_key.to_string(),
     }
 }

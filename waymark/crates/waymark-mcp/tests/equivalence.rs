@@ -710,10 +710,13 @@ async fn read_renderings_match_the_cli() {
         let cli = common::cli_json(&cli_root, &cli_args);
         // The two projects live at different paths; nothing else may differ.
         let normalize = |value: &serde_json::Value, root: &camino::Utf8Path| {
+            // A serialized value escapes `\`, so the Windows root appears with
+            // doubled separators; both spellings have to be replaced.
+            let escaped = root.as_str().replace('\\', "\\\\");
             value
                 .to_string()
+                .replace(&escaped, "<root>")
                 .replace(root.as_str(), "<root>")
-                .replace(&format!("{}/", root), "<root>/")
         };
         assert_eq!(
             normalize(&mcp, &fixture.root),

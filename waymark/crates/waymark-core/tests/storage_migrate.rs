@@ -121,7 +121,8 @@ fn a_storage_dry_run_performs_every_check_and_writes_nothing() {
     assert!(report.config_changed);
     assert_eq!(report.moves.len(), 1);
     assert_eq!(report.moves[0].outcome, "skipped");
-    assert!(report.moves[0].to.ends_with("items/task"));
+    let expected = project.root().join("items").join("task");
+    assert!(report.moves[0].to.ends_with(expected.as_str()));
     assert!(report
         .targets
         .iter()
