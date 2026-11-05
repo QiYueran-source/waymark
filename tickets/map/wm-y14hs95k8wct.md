@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T03:50:21Z
+updated_at: 2026-11-05T03:52:54Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -544,6 +544,11 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - Confirmed by the user on 2026-11-05: validate persisted project-relative path inputs as provided; do not silently trim or change them. Reject a trailing space under the existing portability rule; a leading ordinary space in a component is part of its name if otherwise permitted. Diagnose the actual input and reason. Do not silently rewrite existing configuration.
 - When initializing a project with storage root `.`, generate default category paths like `task`, not `./task`. This is the correct spelling for newly generated paths, not permission to normalize old `./task` configurations silently; diagnose those under the existing transition policy.
 - Do not claim a single universal cross-platform path-length limit. Platform and filesystem length failures are reported explicitly; never truncate or automatically rename a path. Test long paths and failure handling; supported environments and exact length guarantees are deferred to verification and release planning.
+
+
+- Confirmed by the user on 2026-11-05: on every platform reject persisted storage/category path components and migration-target components whose device stem, case-insensitively for ASCII letters, is `CON`, `PRN`, `AUX`, `NUL`, `CONIN$`, `CONOUT$`, `COM1`–`COM9`, `LPT1`–`LPT9`, or `COM`/`LPT` followed by superscript `¹`, `²`, or `³`. These names remain rejected with extensions, including multiple extensions such as `NUL.tar.gz`; `COM10` is not reserved by this rule. `CONIN$` and `CONOUT$` are a conservative Waymark portability rule.
+- Also reject `COM0`, `LPT0`, and device stems ending in ordinary ASCII space before an extension, such as `CON .txt`, as a conservative Waymark policy rather than claiming the main Microsoft naming page explicitly bans these variants. Ordinary internal spaces in names such as `my file` remain allowed. Validate platform behavior natively.
+- Reject all Unicode general-category `Cc` control characters in persisted project-relative path components and migration targets on every platform, including NUL, U+0001–U+001F, DEL U+007F and U+0080–U+009F. The latter ranges are a conservative Waymark policy, not a claim that Microsoft's naming page explicitly forbids all of them.
 
 ## Not yet specified
 

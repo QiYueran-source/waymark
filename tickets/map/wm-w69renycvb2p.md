@@ -6,7 +6,7 @@ category: map
 status: open
 owner: frank
 created_at: 2026-11-05T00:53:10Z
-updated_at: 2026-11-05T03:50:21Z
+updated_at: 2026-11-05T03:52:54Z
 parent: wm-4wbvzsv34g2p
 dependencies:
   - wm-78d0sa7jaxpb
@@ -88,8 +88,12 @@ How should project-relative paths and work-item files remain safe and portable a
 - Initialization with storage root `.` generates category paths such as `task` rather than `./task`; old `./task` is diagnosed rather than silently normalized.
 - No universal cross-platform path-length limit is promised. Report actual platform/filesystem failures, without truncation or automatic renaming; long-path tests and supported bounds belong to verification/release.
 
+
+- Cross-platform reserved device stems, ASCII-case-insensitive and also rejected with extensions, include `CON`, `PRN`, `AUX`, `NUL`, `CONIN$`, `CONOUT$`, `COM0`–`COM9`, `LPT0`–`LPT9`, and `COM`/`LPT` followed by `¹`, `²`, or `³`. Reject reserved stems with ordinary trailing spaces before extensions, such as `CON .txt`; `COM10` and ordinary internal spaces remain allowed by this rule. `CONIN$`, `CONOUT$`, zero variants, and space-before-extension are conservative policy and require native verification.
+- Reject all Unicode `Cc` control characters in persisted path and migration components on every platform, including C0, DEL, and C1. DEL/C1 are Waymark's conservative policy rather than a claim of a Microsoft prohibition.
+
 ## Still to resolve
 
-- Exhaustive Windows reserved-name and character rules; Unicode table/dependency verification and native collision checks; detailed guidance for existing incompatible configurations.
+- Native verification of Windows reserved-name/character rules and remaining edge cases; Unicode table/dependency verification and native collision checks; detailed guidance for existing incompatible configurations.
 - Path traversal, reparse points, project-root aliases, and collision checks in the context of existing lock and migration decisions.
 - Git path arguments, discovery, untracked single-item edge cases, error behavior and native verification.
