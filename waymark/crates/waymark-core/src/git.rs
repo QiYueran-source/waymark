@@ -91,9 +91,12 @@ impl Repository {
     /// `path` as a repository-relative pathspec, when it is inside the
     /// repository.
     pub fn relative(&self, path: &Utf8Path) -> Option<String> {
-        path.strip_prefix(&self.root)
-            .ok()
-            .map(|relative| relative.as_str().to_owned())
+        path.strip_prefix(&self.root).ok().map(|relative| {
+            // A pathspec is a Git path, not a filesystem path: Git reads and
+            // reports `/` on every platform, so a Windows `\` would name
+            // nothing.
+            relative.as_str().replace('\\', "/")
+        })
     }
 }
 

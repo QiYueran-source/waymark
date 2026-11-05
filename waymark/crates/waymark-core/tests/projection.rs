@@ -384,6 +384,10 @@ fn a_projection_loaded_with_a_configured_cache_uses_that_capacity() {
     assert_eq!(LoadOptions::default().max_attempts, 3);
 }
 
+// Two stems that differ only in case are two files only on a
+// case-sensitive filesystem; Windows owns that difference with the platform
+// effort.
+#[cfg(not(windows))]
 #[test]
 fn a_case_variant_document_makes_the_projection_scoped_and_names_the_path() {
     let dir = tempfile::tempdir().unwrap();
@@ -454,6 +458,10 @@ fn a_case_variant_document_makes_the_projection_scoped_and_names_the_path() {
     assert_eq!(scoped.meta.completeness, Completeness::Scoped);
 }
 
+// Two stems that differ only in case are two files only on a
+// case-sensitive filesystem; Windows owns that difference with the platform
+// effort.
+#[cfg(not(windows))]
 #[test]
 fn an_uppercase_stem_without_a_live_document_is_scoped() {
     let (_dir, project) = project();

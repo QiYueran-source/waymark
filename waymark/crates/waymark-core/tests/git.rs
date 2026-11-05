@@ -453,20 +453,15 @@ fn probing_finds_a_repository_above_the_project_and_resolves_a_worktree_gitdir_f
     assert_eq!(found.git_dir(), project.root().join(".git"));
 
     // A linked worktree has a `.git` *file* containing `gitdir: <path>`, not a
-    // directory. Reproduce that shape over a directory project.
+    // directory. Reproduce that shape over a directory project with an absolute
+    // path, so the fixture means the same thing on every platform.
     let other = tempfile::tempdir().expect("a second temporary directory");
     let other_root = utf8(&other);
-    std::fs::write(
-        other_root.join(".git"),
-        "gitdir: /tmp/waymark-linked-worktree\n",
-    )
-    .unwrap();
+    let gitdir = other_root.join("waymark-linked-worktree");
+    std::fs::write(other_root.join(".git"), format!("gitdir: {gitdir}\n")).unwrap();
     let linked = Project::init(&other_root, InitOptions::default()).expect("init succeeds");
     let found = git::find_repository(&linked).expect("a gitdir file still marks a repository");
-    assert_eq!(
-        found.git_dir(),
-        Utf8PathBuf::from("/tmp/waymark-linked-worktree")
-    );
+    assert_eq!(found.git_dir(), gitdir);
     drop(dir);
 }
 

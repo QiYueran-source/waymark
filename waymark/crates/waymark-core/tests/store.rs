@@ -103,7 +103,8 @@ fn discover_reports_the_directory_it_searched_from() {
     let root = utf8(&dir);
     let error = Project::discover(&root.join("some").join("deeper").join("path")).unwrap_err();
     assert_eq!(error.code(), Code::ProjectNotFound);
-    assert!(error.message().contains("some/deeper/path"), "{error}");
+    let searched = root.join("some").join("deeper").join("path").to_string();
+    assert!(error.message().contains(&searched), "{error}");
 }
 
 #[test]
