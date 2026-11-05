@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T03:52:54Z
+updated_at: 2026-11-05T03:53:41Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -549,6 +549,12 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - Confirmed by the user on 2026-11-05: on every platform reject persisted storage/category path components and migration-target components whose device stem, case-insensitively for ASCII letters, is `CON`, `PRN`, `AUX`, `NUL`, `CONIN$`, `CONOUT$`, `COM1`–`COM9`, `LPT1`–`LPT9`, or `COM`/`LPT` followed by superscript `¹`, `²`, or `³`. These names remain rejected with extensions, including multiple extensions such as `NUL.tar.gz`; `COM10` is not reserved by this rule. `CONIN$` and `CONOUT$` are a conservative Waymark portability rule.
 - Also reject `COM0`, `LPT0`, and device stems ending in ordinary ASCII space before an extension, such as `CON .txt`, as a conservative Waymark policy rather than claiming the main Microsoft naming page explicitly bans these variants. Ordinary internal spaces in names such as `my file` remain allowed. Validate platform behavior natively.
 - Reject all Unicode general-category `Cc` control characters in persisted project-relative path components and migration targets on every platform, including NUL, U+0001–U+001F, DEL U+007F and U+0080–U+009F. The latter ranges are a conservative Waymark policy, not a claim that Microsoft's naming page explicitly forbids all of them.
+
+
+- Confirmed by the user on 2026-11-05: persisted project-relative storage/category path components and storage-migration target components reject `<`, `>`, `:`, `"`, `\`, `|`, `?`, `*` and the previously specified controls on all platforms. `/` separates components and cannot be component content. This rejects drive-relative forms and alternate-data-stream syntax; other Unicode remains eligible but actual filesystem acceptance is not guaranteed.
+- Category paths cannot equal or lie inside project-root `.git`, including variants equivalent under the agreed conservative path comparison. `.git` can be a directory or a linked-worktree file; do not treat it as a movable category. The storage root may still be `.`. This does not assume the Git metadata of every nested project is located inside its project root.
+- Untracked single-item patch generation must not treat Git `diff --no-index` exit status `1` alone as proof of a valid diff: it can also occur on some failure paths. Establish that output is a valid new-file patch for the specified file; explicitly report Git, read, encoding or verification errors rather than returning a normal empty result. Neither an exit-code check nor stderr check is assumed sufficient without evidence and tests; implementation remains open.
+- Configuration validation and storage migration prechecks must share the Unicode 16.0.0 comparison semantics and fixed-data-version tests, including canonical equivalence, full case folding and component-based ancestry. Native Linux, macOS, Windows MSVC and GNU testing must also cover actual collisions and links; string-only tests do not establish filesystem behavior. CI provisioning and release gates remain in verification and release planning.
 
 ## Not yet specified
 

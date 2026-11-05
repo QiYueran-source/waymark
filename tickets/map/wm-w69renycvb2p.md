@@ -6,7 +6,7 @@ category: map
 status: open
 owner: frank
 created_at: 2026-11-05T00:53:10Z
-updated_at: 2026-11-05T03:52:54Z
+updated_at: 2026-11-05T03:53:41Z
 parent: wm-4wbvzsv34g2p
 dependencies:
   - wm-78d0sa7jaxpb
@@ -91,6 +91,12 @@ How should project-relative paths and work-item files remain safe and portable a
 
 - Cross-platform reserved device stems, ASCII-case-insensitive and also rejected with extensions, include `CON`, `PRN`, `AUX`, `NUL`, `CONIN$`, `CONOUT$`, `COM0`–`COM9`, `LPT0`–`LPT9`, and `COM`/`LPT` followed by `¹`, `²`, or `³`. Reject reserved stems with ordinary trailing spaces before extensions, such as `CON .txt`; `COM10` and ordinary internal spaces remain allowed by this rule. `CONIN$`, `CONOUT$`, zero variants, and space-before-extension are conservative policy and require native verification.
 - Reject all Unicode `Cc` control characters in persisted path and migration components on every platform, including C0, DEL, and C1. DEL/C1 are Waymark's conservative policy rather than a claim of a Microsoft prohibition.
+
+
+- Reject `<`, `>`, `:`, `"`, `\`, `|`, `?`, `*`, and previously specified controls in persisted storage/category path and migration-target components across platforms; `/` is a separator, never component content. Other Unicode is eligible subject to other rules and actual filesystem limits.
+- Category paths cannot equal or lie inside project-root `.git`, including conservative case/Unicode-equivalent variants. This covers both directory and linked-worktree file forms; storage root `.` remains permitted.
+- An untracked single-item patch cannot be accepted solely on `git diff --no-index` exit `1`; establish it is a valid new-file patch for the requested file and report Git, read, encoding or verification errors. Exit-code or stderr checks alone are not assumed sufficient.
+- Configuration and migration prechecks share Unicode 16.0.0 component comparison and fixed-version conformance cases; native Linux, macOS, Windows MSVC/GNU tests cover actual collisions and links as well. CI provisioning and gates remain separate.
 
 ## Still to resolve
 
