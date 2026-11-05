@@ -6,7 +6,7 @@ category: map
 status: open
 owner: frank
 created_at: 2026-11-05T00:53:09Z
-updated_at: 2026-11-05T01:56:07Z
+updated_at: 2026-11-05T01:56:54Z
 parent: wm-4wbvzsv34g2p
 dependencies:
   - wm-78d0sa7jaxpb
@@ -35,6 +35,8 @@ What safety and concurrency guarantees must the project lock provide on Windows 
 - Preserve the shared error taxonomy: lock contention that exceeds the configured bounded wait returns retryable `LOCK_TIMEOUT`; inability to safely open or verify the lock file returns `LOCK_FAILED` and the write is not automatically retried. CLI and MCP use the same classification; neither failure permits an unlocked write.
 - Native Windows verification must include MSVC and GNU processes contending on the same project lock, reacquisition after a holder exits or crashes, rejection of lock-file symbolic links and reparse points without writing through them, and the required error classifications. Concrete CI provisioning and handling of unavailable test capabilities remain for the verification and release decision.
 
+- Confirmed by the user on 2026-11-05: reject a lock file when the OS can establish that it has multiple hard links; if its hard-link count cannot be reliably checked, fail closed with `LOCK_FAILED`, without proceeding to an unlocked write. Native cross-platform feasibility and filesystem support must be validated; if a supported filesystem cannot meet the requirement, return to the user for a decision instead of silently weakening it.
+
 ## Still to decide
 
-Determine the hard-link policy and any remaining lock correctness and verification gaps before final review. This ticket remains open.
+Review the complete agreed lock contract with the user; verify hard-link inspection and other implementation choices on supported platforms. This ticket remains open pending confirmation.

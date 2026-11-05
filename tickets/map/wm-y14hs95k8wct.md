@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T01:56:07Z
+updated_at: 2026-11-05T01:56:54Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -445,6 +445,8 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - Waymark never deletes or recreates a lock file merely to release the lock and should tell users not to manually clean it. External deletion or replacement of the lock path while a write is in progress is unsupported. If the OS prevents replacement or Waymark detects an anomaly, fail safely; do not promise detection of every external replacement.
 - Preserve the shared error taxonomy: lock contention that exceeds the configured bounded wait returns retryable `LOCK_TIMEOUT`; inability to safely open or verify the lock file returns `LOCK_FAILED` and the write is not automatically retried. CLI and MCP use the same classification; neither failure permits an unlocked write.
 - Native Windows verification must include MSVC and GNU processes contending on the same project lock, reacquisition after a holder exits or crashes, rejection of lock-file symbolic links and reparse points without writing through them, and the required error classifications. Concrete CI provisioning and handling of unavailable test capabilities remain for the verification and release decision.
+
+- Confirmed by the user on 2026-11-05: reject a lock file when the OS can establish that it has multiple hard links; if its hard-link count cannot be reliably checked, fail closed with `LOCK_FAILED`, without proceeding to an unlocked write. Native cross-platform feasibility and filesystem support must be validated; if a supported filesystem cannot meet the requirement, return to the user for a decision instead of silently weakening it.
 
 ## Not yet specified
 
