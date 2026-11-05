@@ -6,7 +6,7 @@ category: map
 status: open
 owner: frank
 created_at: 2026-11-05T00:53:09Z
-updated_at: 2026-11-05T02:09:09Z
+updated_at: 2026-11-05T04:04:29Z
 ---
 ## Destination
 
@@ -28,6 +28,8 @@ Reach an implementable cross-platform adaptation design and a basis for revising
 - [Define cross-platform lock safety contract](wm-0jfnex3j130v.md): Fail-closed lock-path safety and a shared cooperative lock protocol, with explicit threat limits and native validation.
 
 - [Define cross-platform file replacement and migration guarantees](wm-a3ewqxebssk1.md): Atomic single-file visibility, fail-closed permissions and migration, honest recovery and explicit durability limits.
+
+- [Define cross-platform paths and Git behavior](wm-w69renycvb2p.md): Portable path syntax and Unicode comparison, fail-closed link and migration safeguards, scoped Git behavior and applicable untracked-file patches; native feasibility and interface details remain for follow-up.
 
 ## Not yet specified
 

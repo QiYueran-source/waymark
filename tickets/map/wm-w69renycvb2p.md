@@ -3,10 +3,11 @@ schema: 1
 id: wm-w69renycvb2p
 title: Define cross-platform paths and Git behavior
 category: map
-status: open
+status: closed
 owner: frank
 created_at: 2026-11-05T00:53:10Z
-updated_at: 2026-11-05T04:01:30Z
+updated_at: 2026-11-05T04:04:29Z
+closed_at: 2026-11-05T04:04:29Z
 parent: wm-4wbvzsv34g2p
 dependencies:
   - wm-78d0sa7jaxpb

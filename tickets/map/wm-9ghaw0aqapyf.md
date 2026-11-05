@@ -6,7 +6,7 @@ category: map
 status: open
 owner: frank
 created_at: 2026-11-05T00:53:10Z
-updated_at: 2026-11-05T02:09:10Z
+updated_at: 2026-11-05T04:04:29Z
 parent: wm-4wbvzsv34g2p
 dependencies:
   - wm-0jfnex3j130v
@@ -24,3 +24,7 @@ grilling
 ## Question
 
 What native CI, integration, safety, packaging and release checks must pass for Linux/macOS and Windows MSVC/GNU; what test exceptions require explicit reporting, and how is the MSVC-only Windows artifact verified?
+
+## Path and Git verification handoff
+
+The completed [paths and Git decision](wm-w69renycvb2p.md) specifies native coverage of portable path validation, case/Unicode collisions, links and reparse points, project-root aliases, linked worktrees, unborn repositories, ignored and untracked items, isolated patch application, and injected read/scope/target-race failures. Decide CI provisioning, capability exceptions, Unicode and Rust compatibility, supported filesystem/path limits, Git versions and attribute combinations, and release gates; no Windows native validation has yet been performed.
