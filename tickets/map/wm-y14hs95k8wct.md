@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T02:15:49Z
+updated_at: 2026-11-05T02:17:34Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -481,6 +481,12 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - Confirmed by the user on 2026-11-05: persisted storage-root and category paths, and storage-migration targets, use a common cross-platform lexical validation policy on Linux, macOS, and Windows, rather than being accepted solely according to the host platform. They must safely represent paths relative to the project; Windows drive-relative forms such as `C:work` cannot be treated as ordinary Unix names and then acquire a different meaning on Windows. Exact component and separator rules and the treatment of existing incompatible configurations remain open. This rule applies to persisted project-relative paths, not to the actual absolute path where a project resides.
 - A working-tree diff for a specified existing, untracked work-item file returns a nonempty patch representing the whole new file on Linux, macOS, Windows MSVC, and Windows GNU when Git is available. It must not silently report an empty diff solely because of the platform. The implementation mechanism and edge cases remain open.
 - A working-tree diff scoped to the storage root without an item continues to cover tracked files only, rather than automatically including all untracked work items. Document that scope explicitly: an empty directory-scope patch does not establish that there are no untracked files. A user may request an individual untracked work-item diff by ID. This preserves existing scope instead of adding a new aggregation feature.
+
+
+- Confirmed by the user on 2026-11-05: persisted project-relative storage and category paths and storage-migration targets use `/` as their separator on every platform. Reject absolute paths, Windows drive-relative paths such as `C:work`, backslashes rather than silently converting them, empty path components, and `..` components. The standalone `.` remains a potential representation of the project root; which fields permit it remains open. The actual absolute project location is outside this path grammar.
+- Reject path components that are not portable to Windows on every platform: Windows reserved device names case-insensitively, including forms with extensions such as `con.txt`; Windows-forbidden characters and control characters; and components ending in a space or dot. The exhaustive rules and native verification still need investigation; the examples are not a complete specification.
+- Unicode names, including Chinese components such as `工作项/设计`, are allowed rather than limiting names to ASCII. They must still satisfy all other portability and safety checks. Case-equivalence, Unicode normalization and collision policies remain open; acceptance of Unicode is not a promise that all Unicode names are distinct on every filesystem.
+- Git work-item paths, storage-root paths, and `git history --path` denote literal project paths, not Git pathspec magic or wildcard patterns. Special characters must not accidentally expand the query scope; a directory path still denotes the directory's contents. Exact validation and native Git verification remain open.
 
 ## Not yet specified
 
