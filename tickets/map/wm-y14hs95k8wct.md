@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T02:32:12Z
+updated_at: 2026-11-05T02:33:13Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -513,6 +513,12 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - Confirmed by the user on 2026-11-05: creating a work item must not overwrite an already existing target or one created by an external process after prevalidation. Creation fails with a conflict and leaves that other object untouched; a precheck or cooperative lock alone is not sufficient. If the platform cannot provide the guarantee, refuse the create. Mechanism and validation remain open.
 - Reject writing an existing work-item target that is any Windows reparse point; never write through it or replace its target. If the target type cannot be established, refuse the write. Do not rely solely on a separate pre-write path check; the mechanism requires native validation. Permitted project-root aliases remain allowed, and the read policy remains open.
 - A storage migration may create missing target parent directories. On failure, only attempt to remove parent directories actually created by that migration, and only if still empty at cleanup; never recursively delete them or external contents. Report paths whose cleanup failed or state is unknown rather than claiming complete restoration. A dry-run creates no directories. Details of safely identifying directories under races remain open.
+
+
+- Confirmed by the user on 2026-11-05: the conservative component comparison uses Unicode 16.0.0 canonical caseless matching, computing `NFD(full_default_case_fold(NFD(component)))` for each path component, then comparing component sequences for equality or ancestor/descendant overlap. Preserve original names. The Unicode data version and dependencies must be verified for consistency and compatibility with Rust 1.85; full conformance and native tests remain to be specified. Unicode upgrades may affect previously valid configurations and require explicit compatibility review, not a silent table update. This comparison is not a complete filesystem alias detector.
+- A storage-root configuration or corresponding migration input may be the standalone `.` meaning the Waymark project root, not the containing Git repository root. For a project nested within a repository, Git scope must stay within that project. A storage-root-scoped Git diff for `.` can include tracked project files beyond work items; document this rather than calling it a work-item-only patch.
+- A category path, including a category-path migration target, may not be the standalone `.`: the project root contains metadata and other project files and must not be treated as a movable category directory. Existing configurations using it follow the incompatibility diagnosis and manually coordinated remediation rules, with no automatic rename.
+- Except the standalone `.` permitted for storage root, reject `.` components in persisted storage/category paths and storage-migration targets, including `./task` and `work/./task`, rather than silently normalizing or rewriting them. Use `task` and `work/task` respectively. Diagnose existing incompatible configurations under the agreed transition policy.
 
 ## Not yet specified
 

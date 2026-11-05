@@ -6,7 +6,7 @@ category: map
 status: open
 owner: frank
 created_at: 2026-11-05T00:53:10Z
-updated_at: 2026-11-05T02:32:12Z
+updated_at: 2026-11-05T02:33:13Z
 parent: wm-4wbvzsv34g2p
 dependencies:
   - wm-78d0sa7jaxpb
@@ -57,8 +57,14 @@ How should project-relative paths and work-item files remain safe and portable a
 - Reject writes to existing work-item targets that are any Windows reparse point or whose type cannot be established. Never write through them; a separate path precheck alone is insufficient. Native mechanism and read policy remain open; project-root aliases remain allowed.
 - On failed storage migration, only attempt to remove missing-parent directories actually created by this run, only while still empty, without recursion or deleting external content. Report cleanup failure or uncertain state; dry-run never creates directories. Safe identification under races remains open.
 
+
+- Use Unicode 16.0.0 canonical caseless comparison, `NFD(full_default_case_fold(NFD(component)))`, component by component for equality and ancestry; preserve original names. Verify dependency/data consistency, Rust 1.85 and conformance; Unicode table upgrades are explicit compatibility changes. This does not cover all filesystem aliases.
+- Standalone `.` is permitted for storage-root configuration and corresponding migration input and denotes the Waymark project root, not the Git repository root. With `.` the tracked-file storage-root diff can include other project files, and is documented accordingly; nested project scope remains bounded.
+- Standalone `.` is forbidden for category paths and category migration targets. Existing configurations are diagnosed and remediated under the earlier transition policy; no automatic renaming.
+- Apart from standalone storage-root `.`, reject `.` path components such as `./task` and `work/./task` rather than silently normalize. This applies to persisted storage/category paths and migration targets; diagnose existing incompatible configurations.
+
 ## Still to resolve
 
-- Exhaustive Windows reserved-name and character rules; permitted use of standalone `.`; exact Unicode comparison algorithm/version and native collision checks; detailed guidance for existing incompatible configurations.
+- Exhaustive Windows reserved-name and character rules; Unicode table/dependency verification and native collision checks; detailed guidance for existing incompatible configurations.
 - Path traversal, reparse points, project-root aliases, and collision checks in the context of existing lock and migration decisions.
 - Git path arguments, discovery, untracked single-item edge cases, error behavior and native verification.
