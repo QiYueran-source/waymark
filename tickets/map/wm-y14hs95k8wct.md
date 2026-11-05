@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T02:19:04Z
+updated_at: 2026-11-05T02:27:08Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -492,6 +492,11 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - Confirmed by the user on 2026-11-05: the existing no-symlink policy for configured category paths and storage migration targets also rejects all pre-existing Windows reparse points in those restricted paths, including junctions and mounted folders, rather than checking symbolic links alone. If a migration cannot verify that target components are safe, actual execution refuses and reports why. The separately approved project-root alias remains allowed; this does not promise defense against malicious ancestor replacement during an operation. Read behavior and other path classes remain open.
 - A working-tree diff requested by ID for an existing work-item file that Git ignores still produces a whole-new-file patch. The explicit single-item request is not suppressed by ignore rules. Storage-root diff continues to exclude untracked and ignored files.
 - When a Git repository has no `HEAD`, working-tree diff uses an empty tree as its baseline. A specified untracked item still produces a whole-new-file patch; staged items and staged files in storage-root scope are compared with that empty baseline, including their current working-tree state. Storage-root scope still does not automatically include untracked files. Once `HEAD` exists, the working-tree comparison remains against `HEAD`.
+
+
+- Confirmed by the user on 2026-11-05: existing projects with configuration paths that violate the new portable rules must not be silently renamed or continue writing as if valid. Report the specific configuration key, path and incompatibility. Preserve read-only configuration diagnostics, explicitly scoped to configuration rather than claiming a full project check. Users should back up and stop writes before coordinating directory and configuration changes and then revalidate; changing configuration alone may hide existing work-item files. Do not claim the existing migration command can repair an invalid configuration. Detailed repair guidance and any dedicated tool remain undecided.
+- Configuration validation and storage-migration prechecks on all platforms reject category path conflicts and overlap that differ only by ASCII letter case, including equality and ancestor/descendant relationships. Report the conflicting paths rather than choosing or overwriting one. This is a minimum portable rule, not a claim that ASCII comparison catches Unicode or all filesystem aliases; further collision policy remains open.
+- Git history and diff must correctly locate the actual containing working tree when the project is inside a repository subdirectory, accessed through a permitted project-root alias, or inside a linked worktree. Queries are limited to the requested project scope; an incorrect prefix must not expand a query to the entire repository or another project. Preserve the existing informational empty-result behavior when Git is missing or the project is not in a repository. Discovery mechanism and inability to establish the scope remain open.
 
 ## Not yet specified
 

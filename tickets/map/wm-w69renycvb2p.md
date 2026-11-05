@@ -6,7 +6,7 @@ category: map
 status: open
 owner: frank
 created_at: 2026-11-05T00:53:10Z
-updated_at: 2026-11-05T02:19:04Z
+updated_at: 2026-11-05T02:27:08Z
 parent: wm-4wbvzsv34g2p
 dependencies:
   - wm-78d0sa7jaxpb
@@ -35,6 +35,11 @@ How should project-relative paths and work-item files remain safe and portable a
 - For configured category paths and storage-migration targets, reject pre-existing Windows reparse points of any kind, including junctions and mount points, extending the existing no-symlink policy. Actual migration refuses when target component safety cannot be established; root aliases remain permitted and adversarial ancestor replacement is not covered. Read behavior and other paths remain open.
 - An explicitly requested existing ignored work item gets a whole-new-file patch; storage-root scope does not automatically include ignored or untracked files.
 - Without `HEAD`, the working-tree diff baseline is the empty tree: an untracked item still has a whole-new-file patch, while staged item and storage-root files are compared to the empty baseline using their current working-tree state. Storage-root scope still omits untracked files. With `HEAD`, compare against it as before.
+
+
+- Existing configurations incompatible with the new portable path rules are not silently renamed or allowed to continue writing as if valid. Report the config key, path and reason; retain configuration-only read diagnostics without suggesting the entire project was checked. Users back up, stop writes, coordinate directory and config changes and revalidate; editing only the configuration can hide work items. Existing migration cannot be assumed to repair invalid configuration. Repair guidance and any dedicated tool remain open.
+- All platforms reject ASCII case-equivalent category paths in configuration and migration prechecks, including equality and ancestor/descendant overlap; identify conflicts and never select or overwrite one. Unicode and other filesystem aliases require additional policy.
+- Git history/diff locate the actual containing working tree for projects in subdirectories, accessible through permitted project-root aliases, or in linked worktrees, and remain scoped to the requested project. Preserve informational empty results for unavailable Git or absence of a repository. Detection and scope-uncertainty handling remain open.
 
 ## Still to resolve
 
