@@ -6,7 +6,7 @@ category: map
 status: open
 owner: frank
 created_at: 2026-11-05T00:53:09Z
-updated_at: 2026-11-05T02:04:38Z
+updated_at: 2026-11-05T02:06:10Z
 parent: wm-4wbvzsv34g2p
 dependencies:
   - wm-78d0sa7jaxpb
@@ -41,6 +41,11 @@ What guarantees and explicit limitations should file replacement, rollback, perm
 - No general preservation of additional Windows metadata such as SACLs, alternate data streams or timestamps is promised at this stage; this does not relax the agreed owner, DACL, read-only, access-control or data-safety guarantees. A concrete need or incompatibility can be brought back for a separate decision.
 - If abrupt termination leaves temporary files or recovery materials, later diagnostics should notify users to inspect those leftovers. Do not automatically treat them as authoritative, restore them, or overwrite existing work items. Identification and safe diagnostic behavior remain to be designed; no automatic crash recovery is promised.
 
+- Confirmed by the user on 2026-11-05: diagnostics must not infer that a temporary or recovery file is abandoned solely from its name or age. If activity cannot be ruled out, describe it only as a file requiring inspection and do not claim it is safe to delete; another Waymark process might be using it.
+- Diagnostics of potential temporary or recovery material report its path and the reason for inspection; they do not automatically delete, move, restore, or follow a link to read its contents. This does not make the material authoritative or promise automatic crash recovery.
+- A local filesystem is supported only if it meets the agreed locking, atomic replacement, permissions, and migration requirements; local status alone does not prove those guarantees. Do not silently weaken safety when capabilities cannot be established. The exact supported filesystem list and verification strategy remain for the verification and release decision.
+- Do not describe an incomplete or failed file/directory synchronization as safely persisted to disk. Atomic visibility is distinct from power-loss durability. Which sync failures make an operation fail remains open for platform implementation and testing; no durable-commit guarantee is implied.
+
 ## Still to decide
 
-Determine precise diagnostic behavior for leftovers, supported filesystem assumptions, practical verification and any remaining failure cases before final review.
+Review the overall contract with the user. Exact sync failure behavior, supported filesystem lists, diagnostic identification, implementation feasibility and verification remain for platform design and verification decisions.
