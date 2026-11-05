@@ -6,7 +6,7 @@ category: map
 status: open
 owner: frank
 created_at: 2026-11-05T00:53:09Z
-updated_at: 2026-11-05T01:57:39Z
+updated_at: 2026-11-05T02:09:09Z
 ---
 ## Destination
 
@@ -26,6 +26,8 @@ Reach an implementable cross-platform adaptation design and a basis for revising
 - [Research Windows targets and release tooling](wm-31nx004kv0xy.md): Evidence on MSVC/GNU tooling, CI, runtime dependencies, packaging and browser launch; no Windows builds were run.
 
 - [Define cross-platform lock safety contract](wm-0jfnex3j130v.md): Fail-closed lock-path safety and a shared cooperative lock protocol, with explicit threat limits and native validation.
+
+- [Define cross-platform file replacement and migration guarantees](wm-a3ewqxebssk1.md): Atomic single-file visibility, fail-closed permissions and migration, honest recovery and explicit durability limits.
 
 ## Not yet specified
 
