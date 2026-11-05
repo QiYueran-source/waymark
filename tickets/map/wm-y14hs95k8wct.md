@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T00:53:37Z
+updated_at: 2026-11-05T01:54:13Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -431,6 +431,10 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - For this map, record decision-ticket types in bodies and use Waymark native parent and dependency relationships. Do not add project-wide fields for ticket types or claims. The required human owner is not an unclaimed marker. Confirmed by the user on 2026-11-05: one AI will work through decisions sequentially for now; do not change item status or project configuration solely to claim a decision ticket. Revisit a concurrent-claim convention only if parallel work becomes necessary.
 
 - Confirmed by the user on 2026-11-05: keep external research on local research branches, linked from the relevant decision tickets; do not push branches or open PRs automatically.
+
+- Confirmed by the user on 2026-11-05 for cross-platform lock safety: if a cloned project's `.waymark/write.lock` is already a symbolic link to another file, Waymark refuses to open it, reports an error, does not modify its target, and does not continue the project write. Equivalent protection covers relevant Windows reparse points; the precise types and mechanism remain to be established. The check/open race is in scope: a separate pre-open path check alone is insufficient.
+- A malicious process with permission to continuously replace the project directory, `.waymark` directory, or lock path during a write is outside this effort's security promise. This exclusion does not waive the pre-existing malicious-link rule or ordinary Waymark concurrency requirements; detectable anomalies should fail explicitly. Ancestor, hard-link, and path replacement details remain to be specified without implying complete adversarial-directory protection.
+- Windows MSVC and GNU builds must use the same project lock protocol: simultaneous mediated writes to the same local project serialize, or the contender waits and fails under the existing timeout policy. Verify this across actual native builds. The lock is cooperative; external editors do not take it and fingerprint conflict checks still apply.
 
 ## Not yet specified
 
