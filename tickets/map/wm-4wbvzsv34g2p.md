@@ -16,7 +16,7 @@ Reach an implementable cross-platform adaptation design and a basis for revising
 
 - Planning baseline: Linux and macOS existing targets; Windows x86_64 MSVC and GNU both built and tested in CI, with MSVC release artifacts only initially. This is a goal, not a claim of current support.
 - Cover core filesystem, Git, CLI, MCP, Web, CI and release compatibility without adding product features. Local filesystems only; concurrent NFS/SMB access is unsupported. Windows ARM64, Cygwin and WSL-specific behavior are out of scope.
-- Existing Windows specification: [Waymark Windows platform support](../spec/wm-vfbqmw1r7x0j.md). Review it rather than creating a competing specification. The older Unix-only functional scope is historical; decide how later changes relate to it.
+- Existing Windows specification: [Waymark Windows platform support](../spec/wm-vfbqmw1r7x0j.md) was absorbed into [Waymark functional specification](../spec/wm-srxj8ztv1zfz.md) on 2026-11-05 and closed; the functional specification is the single normative document. The older Unix-only functional scope is historical.
 - Waymark requires an owner and has no configured labels or claim field: decision type is in each ticket body; use native parent and dependency relations. One AI works sequentially for now; do not alter status solely to claim. Revisit claims if concurrent work is needed.
 - Consult grilling and domain-modeling for human decisions and codebase-design for module design. Research uses the research skill, local research branches only, no automatic push or PR. Results are linked from tickets.
 
@@ -43,8 +43,8 @@ Reach an implementable cross-platform adaptation design and a basis for revising
 
 ## Not yet specified
 
-- Nothing remains to decide before the destination is reached. Every branch of the design tree was visited: lock safety, replacement and migration guarantees, portable paths and Unicode comparison, Git scope and patch behaviour, warning and recovery responses, response interface details, temporary and recovery diagnostics, the platform module design, and the verification and release gates.
-- What remains is work, not a decision: synchronize the specification (rewrite the functional specification, absorb the Windows specification, update the release specification and the frozen registry with its snapshot), cut implementation tickets from the synchronized text in dependency order, and obtain native Windows evidence. Those are tracked below rather than as open questions here.
+- Nothing remains to decide before the destination is reached. Every branch of the design tree was visited: lock safety, replacement and migration guarantees, portable paths and Unicode comparison, Git scope and patch behaviour, warning and recovery responses, response interface details, temporary and recovery diagnostics, the platform module design, the verification and release gates, and the reconciliation approach.
+- The specification synchronization decided under Decisions so far has been carried out: [Waymark functional specification](../spec/wm-srxj8ztv1zfz.md) now states platform behaviour, [Waymark distribution, packaging, and release](../spec/wm-4125jxq7bpq8.md) carries the Windows legs and artifact, and the former Windows specification is absorbed and closed. What remains is work, not a decision: cut implementation tickets from the synchronized specification in dependency order, then obtain native Windows evidence.
 
 ## Out of scope
 
