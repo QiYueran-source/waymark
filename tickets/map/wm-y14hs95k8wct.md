@@ -7,6 +7,18 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
+updated_at: 2026-11-05T07:12:29Z
+closed_at: 2026-11-03T23:52:21Z
+---
+---
+schema: 1
+id: wm-y14hs95k8wct
+title: 'Waymark: General-purpose tracker design map'
+category: map
+status: closed
+owner: frank
+creator: frank
+created_at: 2026-11-03T23:52:21Z
 updated_at: 2026-11-05T07:10:12Z
 closed_at: 2026-11-03T23:52:21Z
 ---
@@ -728,6 +740,10 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - Writes to `user.toml` use the shared core configuration path, project lock, validation, atomic replacement, and conflict checks. They do not increment the shared project configuration revision and do not touch work-item files.
 - If Git is unavailable, the project is outside a Git repository, or effective `user.name` cannot be read, the Git operator fallback is simply unavailable: an explicit local operator still works, while an absent operator remains unset and ordinary Waymark operations continue. Other local defaults are unaffected.
 - If the machine-local timezone cannot be identified, timezone falls back to UTC with an explicit informational warning; an explicit timezone in `user.toml` does not depend on system timezone detection.
+- Explicit cache values written to `user.toml` remain stable when a later Waymark release changes built-in defaults; only a missing local cache field uses the current built-in default.
+- `validate` and `doctor` inspect `user.toml` as well as shared project configuration. Invalid local settings produce configuration findings located at `user.toml`; they do not change the shared configuration revision or affect other clones.
+- When creating or writing local settings, Waymark repairs a missing `user.toml` entry in `.waymark/.gitignore`. If the ignore file is invalid, non-writable, a symbolic link, or cannot be updated, the operation fails rather than creating or writing a local settings file that may be committed accidentally.
+- Configuration views distinguish shared and local concerns. Human output has project-configuration and local-user-configuration sections. Machine output separates `project_config`, `user_config`, effective values, and per-field source metadata identifying `user.toml`, Git, system timezone, or built-in defaults.
 
 ## Not yet specified
 
