@@ -6,7 +6,7 @@ category: map
 status: open
 owner: frank
 created_at: 2026-11-05T00:53:10Z
-updated_at: 2026-11-05T02:30:45Z
+updated_at: 2026-11-05T02:32:12Z
 parent: wm-4wbvzsv34g2p
 dependencies:
   - wm-78d0sa7jaxpb
@@ -51,6 +51,11 @@ How should project-relative paths and work-item files remain safe and portable a
 - String comparison is not enough to establish filesystem safety. Inspect relevant existing objects for aliases that could cause category overlap, migration overwrite or escape; report conflicts and refuse the affected operation. Migration inspection uncertainty follows the existing dry-run/execution rule. Mechanism and verifiable scope remain open.
 - During storage-migration rollback, do not overwrite a new object at an original path. If that move cannot safely be restored, report rollback failure, affected paths and the actual location of any remaining recovery material; never delete or overwrite the external object for apparent success. Malicious ancestor replacement remains outside the guarantee.
 - A supported ordinary-text untracked item diff is a Git new-file patch using working-tree-relative paths and applicable to an appropriate clean baseline. Human CLI stdout is patch only; CLI JSON and MCP carry identical patch content. Report failure rather than emit a fake patch if safety cannot be established. Cross-platform verification and Git configuration effects remain open.
+
+
+- Work-item create must not overwrite an existing or concurrently created target. Report conflict and leave the external object untouched; prechecking and the cooperative lock alone are insufficient, and create refuses if the guarantee is unavailable.
+- Reject writes to existing work-item targets that are any Windows reparse point or whose type cannot be established. Never write through them; a separate path precheck alone is insufficient. Native mechanism and read policy remain open; project-root aliases remain allowed.
+- On failed storage migration, only attempt to remove missing-parent directories actually created by this run, only while still empty, without recursion or deleting external content. Report cleanup failure or uncertain state; dry-run never creates directories. Safe identification under races remains open.
 
 ## Still to resolve
 

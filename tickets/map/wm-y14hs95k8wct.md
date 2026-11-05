@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T02:30:45Z
+updated_at: 2026-11-05T02:32:12Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -508,6 +508,11 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - Confirmed by the user on 2026-11-05: passing the fixed Unicode string comparison does not establish filesystem safety. Configuration and migration involving actual paths must also inspect relevant existing objects; if an actual filesystem alias would cause category overlap, migration overwrite, or escape, report the conflict and refuse the relevant operation. If a migration safety check cannot be completed, dry-run reports uncertainty and execution refuses, as already decided. Mechanisms and the scope that can actually be verified remain open; do not claim string folding detects every alias.
 - Storage-migration rollback must not overwrite an object another process has created at an original location after the move. If a particular move cannot be safely restored, stop that restoration and explicitly report rollback failure, affected paths and the current location of any material that actually exists for user recovery. Do not delete or overwrite the external object to claim rollback success. This does not promise detection of every malicious ancestor replacement.
 - For a supported ordinary text work item requested by ID, an untracked-file diff is a new-file Git patch, with paths relative to the actual working tree, that Git can apply against an appropriate clean baseline. Human-mode CLI stdout contains the patch only; CLI JSON and MCP carry the same patch content in their structured responses. If a safe patch cannot be produced, report an error rather than inventing one. Cross-platform tests and effects of Git configuration remain open.
+
+
+- Confirmed by the user on 2026-11-05: creating a work item must not overwrite an already existing target or one created by an external process after prevalidation. Creation fails with a conflict and leaves that other object untouched; a precheck or cooperative lock alone is not sufficient. If the platform cannot provide the guarantee, refuse the create. Mechanism and validation remain open.
+- Reject writing an existing work-item target that is any Windows reparse point; never write through it or replace its target. If the target type cannot be established, refuse the write. Do not rely solely on a separate pre-write path check; the mechanism requires native validation. Permitted project-root aliases remain allowed, and the read policy remains open.
+- A storage migration may create missing target parent directories. On failure, only attempt to remove parent directories actually created by that migration, and only if still empty at cleanup; never recursively delete them or external contents. Report paths whose cleanup failed or state is unknown rather than claiming complete restoration. A dry-run creates no directories. Details of safely identifying directories under races remain open.
 
 ## Not yet specified
 
