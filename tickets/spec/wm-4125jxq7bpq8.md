@@ -24,7 +24,7 @@ A tag `v<version>` drives the pipeline: it refuses to run unless the tag equals 
 
 ## User Stories
 
-1. As a Linux user, I download `waymark-v<version>-linux-x86_64.tar.gz`, verify its `.sha256`, extract it, and run `waymark version`, `waymark init`, `waymark new`, and `waymark list` without installing Rust.
+1. As a Linux user, I download `waymark-v<version>-linux-x86_64.tar.gz`, verify its `.sha256`, extract it, and run `waymark version`, `waymark init`, `waymark create`, and `waymark list` without installing Rust.
 2. As a macOS user on either architecture, I do the same with the matching `macos-aarch64` or `macos-x86_64` archive.
 3. As a user who wants the Web view, I download the `waymark-web-…` archive, run `waymark serve`, and get the read-only view in a browser at a loopback URL.
 4. As a basic-package user, running `waymark serve` tells me Web is not included and how to get a Web package, without downloading or installing anything.
@@ -54,9 +54,9 @@ A tag `v<version>` drives the pipeline: it refuses to run unless the tag equals 
 
 ### `waymark serve`
 
-- Surface: `waymark serve [--project DIR] [--port PORT] [--open]` plus the global `--json`, `--color`, `--project`, and `--lock-timeout-ms` flags.
+- Surface: `waymark serve [--project DIR] [--port PORT] [--open]` plus the global `--json`, `--color`, and `--project` flags. `--lock-timeout-ms` is accepted as a global flag but has no effect, because `serve` takes no write lock.
 - Project discovery matches the rest of the CLI: the current directory by default, walking up to the nearest `.waymark/config.toml`; `--project` sets the start directory. A missing or invalid project fails before the listener binds and never creates or modifies anything.
-- Binds `127.0.0.1` only. The default port is `waymark_web::DEFAULT_PORT` (7331); `--port 0` selects a free port.
+- Binds `127.0.0.1` only. The default port is `waymark_core::DEFAULT_PORT` (7331), re-exported by `waymark-web`; `--port 0` selects a free port.
 - A busy port is a `PORT_IN_USE` failure that names the port and suggests `--port 0`. Waymark does not silently fall back to another port.
 - No browser is opened unless `--open` is given; on Linux and macOS it runs `xdg-open` or `open`, and a launch failure is a warning, not a serve failure.
 - Readiness prints `serving http://127.0.0.1:<port>` on stderr in human mode; with `--json`, it prints `{"url": "http://127.0.0.1:<port>"}` as the envelope's data and then blocks serving requests.
@@ -110,7 +110,7 @@ A tag `v<version>` drives the pipeline: it refuses to run unless the tag equals 
 - Assert the variant split: the basic build's dependency graph excludes `waymark-web`; the Web build's `waymark version` reports `web`; the basic build's `serve` returns `WEB_NOT_INCLUDED` with the documented exit class.
 - Test `serve` over real HTTP with `--port 0`: `GET /` returns `index.html`, `_app/` assets resolve, non-GET returns 405, the Host/Origin guard rejects a foreign host, and the served `index.html` hash equals the embedded manifest entry.
 - Test the readiness contract: human mode prints the URL to stderr, `--json` emits the envelope before serving, and a busy port fails with `PORT_IN_USE` naming the suggestion.
-- Smoke the packaged Windows archives from the draft Release: `waymark.exe version`, `init`, `new`, `list`, `show --json`, and `serve --port 0` followed by a `GET /` hash comparison against the embedded manifest, plus the same archive-content and checksum assertions used for the Unix archives.
+- Smoke the packaged Windows archives from the draft Release: `waymark.exe version`, `init`, `create`, `list`, `show --json`, and `serve --port 0` followed by a `GET /` hash comparison against the embedded manifest, plus the same archive-content and checksum assertions used for the Unix archives.
 - Assert that the Windows job was green for the tagged commit before the draft is published, and that the release matrix contains exactly one Windows entry using the MSVC toolchain.
 - Test `version` and `version --json` shapes, including the basic build's absent `assets` field and the Web build's manifest contents.
 - Test the manifest generator as a pure function: stable file list, sorted paths, per-file SHA-256, and a failing exit when `index.html` is missing.

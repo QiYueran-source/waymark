@@ -16,7 +16,7 @@ Teams need a general-purpose work-item tracker that lives inside their Git repos
 
 ## Solution
 
-Waymark is a local-first, Git-friendly tracker for project-defined work items. Each work item is a Markdown document with YAML frontmatter, and those files are the sole authority. Project configuration defines the storage layout, the category set, the operator identity, the custom-field schema, and the project time zone. A shared domain library owns every rule; the CLI and the MCP server are adapters over that library and cannot diverge from it. One shared registry classifies every business error and diagnostic. Readiness and blockage are derived, never stored. Archive is an irreversible-through-Waymark logical deletion that leaves the file and its Git history intact. Format compatibility is versioned and changed only through explicit, previewable migration. A separate, strictly read-only Web view renders the work tree. Waymark runs on Linux, macOS and Windows; one set of rules applies on every supported platform, and platform-specific statements appear only where behaviour genuinely differs.
+Waymark is a local-first, Git-friendly tracker for project-defined work items. Each work item is a Markdown document with YAML frontmatter, and those files are the sole authority. Project configuration defines the storage layout, the category set, and the custom-field schema; a separate local user configuration defines the acting operator identity, the display time zone, and the cache settings. A shared domain library owns every rule; the CLI and the MCP server are adapters over that library and cannot diverge from it. One shared registry classifies every business error and diagnostic. Readiness and blockage are derived, never stored. Archive is an irreversible-through-Waymark logical deletion that leaves the file and its Git history intact. Format compatibility is versioned and changed only through explicit, previewable migration. A separate, strictly read-only Web view renders the work tree. Waymark runs on Linux, macOS and Windows; one set of rules applies on every supported platform, and platform-specific statements appear only where behaviour genuinely differs.
 
 This specification records only the decisions that are settled. Platform behaviour is stated as a requirement, not as verified support: native evidence is recorded separately, and no platform is claimed supported before that evidence exists.
 
@@ -26,7 +26,7 @@ This specification records only the decisions that are settled. Platform behavio
 2. As a project maintainer, I want to configure the storage root and each category's path, so that Waymark fits the repository's existing organization instead of imposing one.
 3. As a project maintainer, I want to define project-specific categories with stable keys and separate display names, so that work can be grouped without adopting Waymark-specific workflow categories.
 4. As a project maintainer, I want to declare project-wide custom fields with basic scalar types, so that work items can carry metadata my team cares about.
-5. As a project maintainer, I want to declare a project time zone, so that timestamps are shown and local time input is interpreted in my team's zone.
+5. As a collaborator, I want to declare my own display time zone, so that timestamps are shown and offset-less local time input is interpreted in my local context without changing what my collaborators see.
 6. As a contributor, I want every work item to have a stable identity independent of its title, category, and path, so that references survive renaming and moving.
 7. As a contributor, I want each work item stored as readable Markdown with typed YAML frontmatter, so that Git can review, diff, and merge project data.
 8. As a contributor, I want files written deterministically, so that repeated operations do not produce meaningless diffs.
@@ -123,7 +123,7 @@ This specification records only the decisions that are settled. Platform behavio
 99. As a project maintainer, I want display-name changes to leave work-item files untouched, so that presentation changes cost nothing.
 100. As a project maintainer, I want category removal refused while any item still uses the category, so that work cannot be orphaned.
 101. As a project maintainer, I want category path and key changes to run only through explicit migration, so that relocation is deliberate and reviewable.
-102. As a maintainer, I want to edit the operator, project time zone, and cache settings directly, so that routine housekeeping never touches work-item data.
+102. As a maintainer, I want to edit my operator, display time zone, and cache settings directly, so that routine housekeeping never touches shared configuration or work-item data.
 103. As a maintainer, I want to add an optional custom field as a configuration operation, so that schema growth rewrites nothing.
 104. As a maintainer, I want adding a required custom field to be a migration with a default, so that no existing item is left invalid.
 105. As a maintainer, I want removing a custom field to be a migration, so that its data deletion is explicit and previewable.
@@ -198,7 +198,7 @@ This specification records only the decisions that are settled. Platform behavio
 - Canonical serialization is strict and deterministic. Emit only the declared fields, in one fixed key order, with one canonical scalar representation. Relationship lists are sorted by stable ID and deduplicated. Unset optional fields are omitted, never written as `null`. Absent relationship lists mean empty lists; absent custom fields mean no custom values. A non-empty body ends in exactly one newline; an empty body has zero length; leading and internal body whitespace is untouched. Re-serializing an unchanged work item is byte-identical.
 - Every single-document write is a validated, atomic replacement of the whole file, using a temporary file and rename. No partial document is ever visible at the target.
 - `created_at` and `updated_at` are set on creation. Every effective ordinary content or metadata change updates `updated_at`; archive is the explicit exception. `closed_at` is set when status becomes `closed`, cleared when it leaves `closed`, and describes only the most recent close transition; it is not an audit record. Toggling between two non-closed statuses does not touch it.
-- Persisted timestamps are UTC RFC 3339 values generated by Waymark. The project configuration declares a time zone used for human-readable display and for interpreting local time input that carries no offset. Offset-bearing input retains its instant regardless of the project time zone. Machine responses default to UTC and may include configured-zone display values where defined. Changing the project time zone never rewrites work-item files and never changes business timestamps.
+- Persisted timestamps are UTC RFC 3339 values generated by Waymark. The local user configuration declares a time zone used for human-readable display and for interpreting local time input that carries no offset. Offset-bearing input retains its instant regardless of that time zone. Machine responses default to UTC and may include configured-zone display values where defined. Changing the effective time zone never rewrites work-item files and never changes business timestamps.
 - Callers cannot supply `id`, `created_at`, `updated_at`, `closed_at`, `archived_at`, or the format generation. Those are system-generated or operation-managed. A separately specified historical migration or import path may transform legacy times; ordinary user APIs may not. External invalid time values are diagnosed, never silently repaired.
 - Fingerprints: a content fingerprint is authoritative for conflict detection and cache invalidation. Path inventory, file size, and modification time are cheap signals; when they change but the content fingerprint is equal, the parsed projection entry may be retained after refreshing metadata, and only a content change triggers semantic re-import. A conflicting write reports the expected and actual fingerprints.
 - Unknown, malformed, or undeclared frontmatter keys are locatable validation errors. A malformed file is never silently dropped, rewritten, or guessed at.
@@ -207,21 +207,31 @@ This specification records only the decisions that are settled. Platform behavio
 
 ### Configuration
 
-- One configuration document at a fixed location inside the Waymark metadata directory defines the project. It is the only configuration authority.
-- The configuration carries a version written `major.minor`, meaning format generation and configuration revision.
+- Two configuration documents define effective behaviour. The shared project configuration at a fixed location inside the Waymark metadata directory defines the project and is the only authority for project structure; the local user configuration in the same metadata directory is an optional, ignored document holding one collaborator's operator identity, time zone, and cache settings. Shared project structure can never be set from the local document.
+- The shared configuration carries a version written `major.minor`, meaning format generation and configuration revision.
+- The local document is ignored by the metadata directory's ignore file and is never part of the shared baseline. Its absence is normal: every local setting has a fallback, and reading never creates it.
+- First initialization writes the local document with the effective Git `user.name`, the current machine-local zone, and the current cache defaults, so a new project is usable without further setup. A missing Git name leaves the operator unset. Initialization options may seed those values only when the document is being created. Initializing an already-initialized project is a no-op: it neither creates nor overwrites the local document, even when seeds are supplied.
+- Effective values resolve local-first: an operation-level explicit operator override, then an explicit local value, then the local fallback. The operator fallback is Git's effective `user.name`, the time-zone fallback is the current machine-local zone, and the cache fallback is the built-in defaults. An absent or unreadable Git identity leaves the operator unset rather than inventing one, and an operation continues without it; an undetectable machine zone falls back to UTC with an informational warning, so the result stays deterministic and visible.
+
+Shared project configuration:
 
 | Setting | Value | Presence | Changed by |
 | --- | --- | --- | --- |
 | format generation (major) | generation declared by the installed Waymark release | required | version migration only; no configuration edit can change it |
-| configuration revision (minor) | monotonic counter | required | Waymark-mediated configuration writes only |
+| configuration revision (minor) | monotonic counter | required | Waymark-mediated shared configuration writes only |
 | storage root | repository-relative directory containing category directories | required | storage migration only |
 | categories | set of stable keys with repository-relative paths and display names | required; may be empty | category operations, with path and key changes through migration |
-| operator | declared identity of whoever runs mediated operations | optional | configuration operation |
-| project time zone | named time zone used for display and local input parsing | required | configuration operation |
 | custom-field declarations | declared keys with type, required or optional, and an optional static default | required; may be empty | optional-field addition and metadata changes through configuration; removal and required-field addition through migration |
-| cache settings | bounded LRU sizing and enablement | optional | configuration operation |
 
-- Configuration validation rejects, with `CONFIG_INVALID` and a per-issue list: malformed or unparseable configuration; unknown keys; a category key that breaks the key grammar or duplicates another; a category path that is absolute, escapes the repository root, overlaps another category path, is duplicated, or traverses a symbolic link; an empty display name; a custom-field key that is not lowercase ASCII `snake_case`, duplicates another, or shadows a reserved core or computed name; an unknown field type; a default that does not conform to its declared type; an empty operator value when the key is present; an invalid time zone; and a version that cannot be parsed.
+Local user configuration:
+
+| Setting | Value | Presence | Changed by |
+| --- | --- | --- | --- |
+| operator | advisory identity of whoever runs mediated operations | optional; falls back to Git's effective `user.name`, then unset | local configuration operation |
+| time zone | named zone used for display and for parsing offset-less local input | optional; falls back to the machine-local zone, then UTC | local configuration operation |
+| cache settings | bounded LRU sizing and enablement | optional; falls back to the built-in defaults | local configuration operation |
+
+- Configuration validation rejects, with `CONFIG_INVALID` and a per-issue list. For the shared document: malformed or unparseable configuration; unknown keys; a category key that breaks the key grammar or duplicates another; a category path that is absolute, escapes the repository root, overlaps another category path, is duplicated, or traverses a symbolic link; an empty display name; a custom-field key that is not lowercase ASCII `snake_case`, duplicates another, or shadows a reserved core or computed name; an unknown field type; a default that does not conform to its declared type; and a version that cannot be parsed. For the local document: malformed or unparseable configuration; unknown or shared project keys; an empty operator value when the key is present; an invalid time zone; and an invalid cache value. Each issue is located at the document that carries it.
 - Persisted storage-root and category paths, and storage-migration targets, use a portable project-relative syntax on every platform rather than being accepted according to the host platform: `/` separates components; absolute paths, Windows drive-relative forms such as `C:work`, backslashes, empty components, and `..` components are rejected rather than normalized; standalone `.` is allowed only as the storage root and rejected as a category path; embedded `.` components are rejected rather than silently collapsed. Validation never trims, rewrites, or reinterprets the supplied value, and it reports the actual input.
 - Components are rejected on every platform when they contain `<`, `>`, `:`, `"`, `\`, `|`, `?`, `*`, any Unicode general-category `Cc` control, or a trailing ASCII space or dot; when the device stem, compared case-insensitively for ASCII letters, is `CON`, `PRN`, `AUX`, `NUL`, `CONIN$`, `CONOUT$`, `COM0`–`COM9`, `LPT0`–`LPT9`, or `COM`/`LPT` followed by a superscript `¹`, `²` or `³`, whether or not an extension follows; or when a device stem is followed by a space before an extension. Unicode names are otherwise allowed. These rules are conservative product policy, not a claim about every Windows naming edge case.
 - A category path may not equal or lie inside the project metadata directory `.waymark` or the project's `.git`, and the storage root may not be either of them; the comparison uses the same conservative caseless rule. Standalone `.` remains a valid storage root.
@@ -230,10 +240,10 @@ This specification records only the decisions that are settled. Platform behavio
 - A Unicode data upgrade is an explicit compatibility change: a newer release validates existing configuration with its new comparison rules, reports concrete collisions, and requires manual repair rather than renaming or merging. Release notes warn collaborators to coordinate versions, because two releases may judge the same path pair differently.
 - Platform and filesystem length limits are reported explicitly when a path fails; no universal cross-platform length limit is claimed, and a path is never truncated or automatically renamed.
 - A configuration whose major generation is newer than the installed release is rejected as `UNSUPPORTED_VERSION`; one older than the immediately previous readable generation is rejected the same way. Configuration inconsistency makes the projection incomplete and prohibits all mediated writes, archive, migration, global statistics, and cross-file relationship writes. Valid work-item files remain locally readable. Waymark never guesses, downgrades, discards unknown data, or repairs it.
-- Configuration writes never read or rewrite work-item files. The only work-item read anywhere in the configuration surface is a read-only reference check that refuses removal of a category still in use, and it never modifies an item. Any operation that must change work-item data is a migration. Consequently configuration owns: operator, project time zone, cache settings, category addition and removal of an unused category, category display-name changes, addition of an optional custom field, and relaxing field metadata. Migration owns: storage root changes, category path changes, category key changes, removal of a custom-field declaration, and addition of a required custom field. The two surfaces share the category and field nouns but keep separate verbs.
+- Configuration writes never read or rewrite work-item files. The only work-item read anywhere in the configuration surface is a read-only reference check that refuses removal of a category still in use, and it never modifies an item. Any operation that must change work-item data is a migration. Consequently shared configuration owns: category addition and removal of an unused category, category display-name changes, addition of an optional custom field, and relaxing field metadata. Local configuration owns the operator, the time zone, and the cache settings. Migration owns: storage root changes, category path changes, category key changes, removal of a custom-field declaration, and addition of a required custom field. The surfaces share the category and field nouns but keep separate verbs.
 - Adding an optional custom field is a configuration operation and rewrites no work-item file; the field stays unset on existing items. Adding a required custom field is a migration taking a default, because no existing item may be left schema-invalid. Removing a declared field is a migration, not a configuration operation.
 - Configuration writes use structured operations with complete validation, fingerprint conflict detection, and one atomic replacement under the project lock. There is no unrestricted raw patch and no partial configuration change.
-- The configuration revision increments by exactly one when a Waymark-mediated configuration write actually changes configuration content, and does not increment for a no-op. Hand edits do not move it. A version migration that rewrites configuration counts as exactly one configuration write.
+- The configuration revision increments by exactly one when a Waymark-mediated write to the shared configuration actually changes its content, and does not increment for a no-op. A write to the local document never moves the shared revision, because it changes no shared content. Hand edits do not move it. A version migration that rewrites configuration counts as exactly one configuration write.
 - The revision is informational. Freshness, projection invalidation, conflict detection, and cache invalidation are determined by file fingerprints, never by the revision counter; hand-edited configuration is detected by fingerprint regardless of the counter.
 - A configuration change that affects the storage root, category keys or paths, or the custom-field schema invalidates the current projection and requires rediscovery and validation. An operator change immediately affects the advisory owner check. A cache-only change clears evictable cache data without invalidating the static projection.
 
@@ -261,7 +271,7 @@ This specification records only the decisions that are settled. Platform behavio
 ### Accountability and writes
 
 - Owner is required human accountability. Creator is optional, immutable provenance assigned at creation and never changed afterward. Executor is project-defined metadata, for example a custom field, and is not a core field. None of the three is interchangeable.
-- Creation may assign an owner other than the creator. Creation requires title, category, and owner with no derivation from configuration. A missing required custom field fails the whole create. Creation may include initial parent, dependencies, and soft links; the complete request validates IDs, category, target existence and active state, self-reference, duplicates, cycles, and atomic persistence before writing, so an invalid initial relationship fails the whole create. A create with initial relations requires a complete, fresh projection.
+- Creation may assign an owner other than the creator. Creation requires title, category, and owner; none of those three is defaulted from configuration. An omitted creator defaults to the effective operator when one is available, and stays unset when none is. A missing required custom field fails the whole create. Creation may include initial parent, dependencies, and soft links; the complete request validates IDs, category, target existence and active state, self-reference, duplicates, cycles, and atomic persistence before writing, so an invalid initial relationship fails the whole create. A create with initial relations requires a complete, fresh projection.
 - Only the current owner initiates an owner transfer as a process rule. Transfer takes effect immediately, updates `updated_at`, rejects empty or whitespace-only identities, and is forbidden for archived items. The previous owner loses mediated-write authority at once. Without an authenticated identity, a transfer initiated under a mismatched operator proceeds with an `OWNER_MISMATCH` warning rather than a refusal.
 - The configured operator is optional and advisory. It names who is running a Waymark-mediated operation. Every mediated write compares it with the target item's current owner and emits an `OWNER_MISMATCH` warning when they differ; the write is never blocked by the mismatch. This is a workflow guardrail, not authentication: users can edit files and configuration directly. Executor metadata grants no authority.
 - Waymark exposes no cross-work-item batch command. Each write targets exactly one work item; there is no multi-ID form, no `items` array, and no mixed-operation array.
@@ -330,11 +340,11 @@ CLI command catalog:
 
 | Command | Arguments | Result |
 | --- | --- | --- |
-| `init` | project context; no business arguments | configuration and metadata created |
-| `project info` | none | storage root, generation, revision, operator, time zone |
-| `config show` | none | effective configuration |
-| `config validate` | none | validation findings |
-| `config set` | scalar name and value (operator, project time zone, cache settings) | updated configuration and revision |
+| `init` | project context; optional operator and time-zone seeds | configuration, metadata, and a local document created on first initialization; a no-op when already initialized |
+| `project info` | none | storage root, generation, revision |
+| `config show` | none | shared and local configuration, effective values, and per-field sources |
+| `config validate` | none | validation findings for both documents |
+| `config set` | scalar name and value (operator, time zone, cache settings) | the local document updated; the shared revision unchanged |
 | `config add category` | key, path, display name | category added |
 | `config set category` | key and display name | display name changed; files untouched |
 | `config remove category` | key | category removed, or refused while items use it |
@@ -370,7 +380,10 @@ CLI command catalog:
 | `link add` | item ID, other ID | both items updated |
 | `link remove` | item ID, other ID | both items updated |
 | `archive` | item ID, optional reason, optional dry-run | archive result with changed items |
+| `version` | none | release version and the capabilities compiled into this build; with `--json`, also the embedded frontend manifest for a Web build |
+| `serve` | port, optional open | the read-only Web view on loopback, or the registered `WEB_NOT_INCLUDED` in a basic build |
 
+- `version` and `serve` exist in both build variants. `serve` binds loopback only, never falls back to another port, and reports readiness before it blocks; the Web view it serves is this specification's read-only view, not a second implementation.
 - `start`, `close`, and `reopen` may exist as CLI conveniences over the status operation; they are not separate domain capabilities, and MCP exposes the structured status operation rather than one tool per alias. Whether these aliases exist is a command-tree presentation choice.
 - Human output keeps a stable text layout: collections render `id`, padded `status`, `state`, and `title` on one line, with indented `needs migration` and `blocked by …` lines and an `N of M match (offset X, limit Y)` footer; a single item renders labeled blocks; edits render one confirmation line; diagnosis, tree, and stats keep sectioned prose. No header row is added. Human prose goes to stderr; stdout carries JSON, `show --raw` documents, and raw `git diff` patches.
 - Colour is added only for a terminal: `--color=auto|always|never`, default `auto`, with `NO_COLOR` honoured. Colour never changes the text and never carries meaning alone. The CLI and Web share the semantic states `ready`, `in_progress`, `blocked`, and `closed` and the same green/blue/red/grey mapping; each medium encodes it itself (ANSI or CSS) and the hex values are not a shared contract. Category identity stays shape-based in the Web and is not colour-coded.
@@ -381,11 +394,11 @@ MCP tool catalog:
 
 | Tool | Inputs | Result |
 | --- | --- | --- |
-| `waymark_project_init` | project context | created project |
-| `waymark_project_info` | none | storage root, generation, revision, operator, time zone |
-| `waymark_config_read` | none | effective configuration |
-| `waymark_config_validate` | none | validation findings |
-| `waymark_config_set` | scalar name and value | updated configuration and revision |
+| `waymark_project_init` | project context; optional operator and time-zone seeds | created project |
+| `waymark_project_info` | none | storage root, generation, revision |
+| `waymark_config_read` | none | shared and local configuration, effective values, and per-field sources |
+| `waymark_config_validate` | none | validation findings for both documents |
+| `waymark_config_set` | scalar name and value | the local document updated; the shared revision unchanged |
 | `waymark_config_add_category` | key, path, display name | category added |
 | `waymark_config_update_category` | key and changed attributes | updated category |
 | `waymark_config_remove_category` | key | category removed, or refused while items use it |
@@ -484,6 +497,7 @@ Error registry:
 | `CYCLE_DETECTED` | 3 | no | error | work_item, relationship | `{kind, cycle[]}` | a dependency or parent cycle was found; kind is dependency or parent |
 | `INVALID_RELATIONSHIP` | 3 | no | none | work_item, relationship | `{relation, from, to, reason}` | self-reference, duplicate edge, or wrong relation kind |
 | `INCOMPLETE_PROJECTION` | 3 | no | error | file, work_item | `{completeness, freshness, diagnostics[]}` | a complete, fresh projection is unavailable |
+| `WEB_NOT_INCLUDED` | 3 | no | none | none | `{}` | a basic build was asked to serve the Web view, which it does not compile in |
 | `WRITE_CONFLICT` | 4 | no | none | work_item, file | `{id, path, expected_fingerprint, actual_fingerprint}` | the target changed since the operation read it |
 | `ITEM_ARCHIVED` | 4 | no | none | work_item | `{id, operation}` | an archived item rejects a write or a write targets an archived item |
 | `ALREADY_ARCHIVED` | 4 | no | none | work_item | `{id}` | archive was requested for an already archived item |
@@ -495,6 +509,7 @@ Error registry:
 | `LOCK_TIMEOUT` | 5 | yes | none | none | `{lock_path, waited_ms}` | the lock wait expired; nothing was written |
 | `LOCK_FAILED` | 5 | no | none | none | `{lock_path, reason}` | the lock file cannot be opened, locked, or is not a regular file |
 | `SNAPSHOT_UNSTABLE` | 5 | yes | none | none | `{retries}` | a reader could not obtain a stable snapshot after bounded retries |
+| `PORT_IN_USE` | 5 | no | none | none | `{port}` | the requested loopback port is already bound; there is no fallback port |
 | `UNSUPPORTED_VERSION` | 6 | no | error | file, work_item, config_key | `{found, supported}` | data declares a generation the installed release cannot read |
 | `ITEM_NEEDS_MIGRATION` | 6 | no | error | work_item, file | `{id, item_generation, project_generation}` | an item's generation is older than the project generation |
 | `ACTION_REQUIRES_MIGRATION` | 6 | no | none | work_item, config_key | `{action, required_command}` | the operation requires an explicit migration first |
@@ -514,13 +529,14 @@ Error registry:
 | `DIRECTORY_SYNC_UNCONFIRMED` | none | no | warning | none | `{directory, paths[]}` | a replacement succeeded but its directory synchronization was not confirmed |
 | `RECOVERY_MATERIAL_FOUND` | none | no | info | file | `{path, reason}` | temporary or recovery material may exist and requires human inspection |
 | `DIAGNOSTIC_SCOPE_UNCONFIRMED` | none | no | info | file | `{path, reason}` | a diagnostic location could not be checked, so clean coverage is not claimed |
+| `ASSETS_VERSION_MISMATCH` | none | no | error | none | `{kind, expected, actual}` | the embedded frontend manifest disagrees with the release it claims to describe |
 
 - `LOCK_TIMEOUT` and `SNAPSHOT_UNSTABLE` are the only retryable codes. Every other code is terminal. `USAGE_ERROR` at exit 1 is adapter-level and deliberately absent from the registry.
 
 ### Versioning and migration
 
 - One command-managed generation governs configuration and work-item compatibility. The configuration version is `major.minor`: the major is the on-disk format generation, declared by the installed Waymark release, and the minor is the monotonic configuration revision.
-- The format generation changes only when Waymark's own file format changes: the core field set, serialization rules, or body rules. No configuration edit can raise it. The configuration revision increments by exactly one per effective mediated configuration write, and never otherwise.
+- The format generation changes only when Waymark's own file format changes: the core field set, serialization rules, or body rules. No configuration edit can raise it. The shared configuration revision increments by exactly one per effective mediated shared-configuration write, never otherwise, and never for a local-document write.
 - Work-item frontmatter persists only the format generation. It never persists the configuration revision, so a configuration change can never make an existing work item stale. The configuration revision is informational; fingerprints determine freshness, projection invalidation, conflict detection, and cache invalidation.
 - Waymark retains a reader for the current and the immediately previous format generation. Older generations are rejected as `UNSUPPORTED_VERSION`. A generation newer than the installed release is reported on local reads as `UNSUPPORTED_VERSION` and makes the project projection incomplete; it never leads to guessing, downgrading, discarding unknown data, or silent repair.
 - A work item whose format generation is older than the configured generation is read-only for mediated writes: title, body, and custom-field edits, status changes, owner transfer, relationship operations, and archive are rejected with `ITEM_NEEDS_MIGRATION` or `ACTION_REQUIRES_MIGRATION` until an explicit version migration runs. Reads and `show` remain allowed, and list, tree, readiness, blocked, and stats still include such items, marked as needing migration rather than hidden.
@@ -564,7 +580,7 @@ Storage migration:
 
 - A diagnostic operation reports data-integrity findings separately from command execution failure. A warning-only report succeeds by default; strict mode returns the validation failure class (exit 3) when error-severity findings remain.
 - Findings reuse the registry and are `{severity: error, warning, or info, code, location?, message, fixable}`. There is no second diagnostic taxonomy. Details are schema-controlled rather than an unbounded string bag, so adding a code or field is a deliberate, tested change.
-- `doctor` and `validate` cover: malformed or oversized frontmatter; duplicate IDs, case variants, and multiple files for one ID; ID/path mismatch; invalid fields and undeclared custom fields; missing or archived relationship targets, reported as `DANGLING_REFERENCE`; dependency and parent cycles; unsupported or future versions; stale or invalid projections; source inventory and fingerprint changes, including new, deleted, moved, and uncertain files; path conflicts; projection incompleteness; timestamp incoherence, reported as `TIMESTAMP_INCOHERENT`; and items needing migration, reported as `MIGRATION_AVAILABLE`.
+- `doctor` and `validate` cover: malformed or oversized frontmatter; duplicate IDs, case variants, and multiple files for one ID; ID/path mismatch; invalid fields and undeclared custom fields; missing or archived relationship targets, reported as `DANGLING_REFERENCE`; dependency and parent cycles; unsupported or future versions; stale or invalid projections; source inventory and fingerprint changes, including new, deleted, moved, and uncertain files; path conflicts; projection incompleteness; invalid or malformed local user configuration, located at the local document; timestamp incoherence, reported as `TIMESTAMP_INCOHERENT`; and items needing migration, reported as `MIGRATION_AVAILABLE`. A local-document finding never changes the shared configuration revision and never affects another clone. A Web build additionally reports an embedded-manifest disagreement as `ASSETS_VERSION_MISMATCH`.
 - `doctor` is diagnostic-only for business data. It never deletes a relationship, modifies body or custom fields, restores an item, or infers user intent. Cache and projection rebuild is the only safe internal repair, and every repair reports what changed and what remains.
 - `doctor` probes the lock with a non-blocking try-lock. When the lock is held it reports `LOCK_HELD` as an info-level, non-fixable finding, never waits, and never reports holder identity.
 - `doctor` also probes Git availability and reports `GIT_UNAVAILABLE` or `NOT_A_GIT_REPOSITORY` as info-level, non-fixable findings; it never installs Git or initializes a repository.
@@ -591,7 +607,7 @@ Storage migration:
 - A bounded, configurable LRU may cache body, detail, or query-result data for performance only. Entries are fingerprint-bound. It never evicts relationship nodes from a complete projection, and no cache setting may weaken freshness, completeness, ownership checks, or archive safety. Cache-only configuration changes clear evictable data without touching the static projection.
 - The project write lock is one store-wide advisory lock on a dedicated file at a fixed location inside the Waymark metadata directory. It is never taken on a work-item file, because those are replaced by temporary file plus rename and an advisory lock on one would bind to a stale inode.
 - It is an OS advisory exclusive lock held on an open descriptor for the operation's whole read-modify-write window and released by the kernel when the process exits or crashes. There is no stale-lock reclamation, no PID probe, no modification-time expiry, and no holder metadata; the lock file's content is never read or written.
-- The lock file is created by the first mediated write and is listed in the project's ignore file for the metadata directory. A missing ignore entry is repaired on the next lock acquisition. It is opened without following a symbolic link and must be a regular file, so a cloned repository cannot turn it into a link to a user file.
+- The lock file is created by the first mediated write and is listed in the project's ignore file for the metadata directory, as is the local user configuration document. A missing entry is repaired on the next lock acquisition or before a local-document write. The ignore file is opened without following a symbolic link and must be a regular file, so a cloned repository cannot turn it into a link to a user file; an invalid, unwritable, or symlinked ignore file stops a local-document write rather than risking a committed preferences file.
 - The lock is non-reentrant. One public operation acquires it exactly once and holds it through prevalidation, every staged write, and rollback. Internal helpers that write receive the held guard instead of acquiring again; nested acquisition is a programming error rather than a wait.
 - Every mediated write takes this one lock: work items, relationships, archive, migration, and configuration edits. Reads, `show`, dry runs, and previews never block on it.
 - Long-lived adapters never hold the lock between calls. The MCP server and any writer acquire it per mediated write and release it before responding.
