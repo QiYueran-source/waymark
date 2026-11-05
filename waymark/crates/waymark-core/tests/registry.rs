@@ -44,6 +44,7 @@ const FINDING_ONLY: &[Code] = &[
     Code::DanglingReference,
     Code::TimestampIncoherent,
     Code::AssetsVersionMismatch,
+    Code::TimeZoneUndetected,
 ];
 
 fn row(code: Code) -> Value {
@@ -210,8 +211,8 @@ fn the_distribution_codes_are_registered_and_classified() {
     );
     assert_eq!(
         Code::ALL.len(),
-        41,
-        "the registry grew by exactly three codes"
+        42,
+        "the registry grew by exactly four codes"
     );
 }
 

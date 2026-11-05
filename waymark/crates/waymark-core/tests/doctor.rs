@@ -380,7 +380,7 @@ fn custom_field_configuration_drift_is_reported_per_field() {
     // Remove the field from the configuration after the document was written:
     // that is exactly the drift a schema removal leaves behind.
     config.fields.remove(&FieldKey::parse("effort").unwrap());
-    waymark_core::ops::config::set_scalar(
+    waymark_core::ops::local_config::set_scalar(
         &project,
         waymark_core::ops::config::Scalar::CacheCapacity,
         "512",
@@ -853,4 +853,86 @@ fn diagnose_from_derives_the_root_and_maps_a_broken_configuration() {
             report.findings
         );
     }
+}
+
+#[test]
+fn a_broken_local_document_is_reported_at_its_own_file() {
+    let (_dir, project) = project();
+    std::fs::write(
+        project.user_config_path(),
+        "timezone = \"Mars/Olympus\"\n[cache]\ncapacity = 0\n",
+    )
+    .unwrap();
+
+    let report = doctor::diagnose(&project).unwrap();
+    let local: Vec<&Finding> = report
+        .findings
+        .iter()
+        .filter(|finding| {
+            finding
+                .location
+                .as_ref()
+                .is_some_and(|location| matches!(location, Location::File { path, .. } if path.ends_with("user.toml")))
+        })
+        .collect();
+    assert_eq!(local.len(), 2, "{:?}", report.findings);
+    assert!(local
+        .iter()
+        .all(|finding| finding.code == Code::ConfigInvalid));
+    assert!(local
+        .iter()
+        .any(|finding| finding.message.contains("timezone")));
+    assert!(local
+        .iter()
+        .any(|finding| finding.message.contains("capacity")));
+    // A local preference is a diagnostic, not business-data damage.
+    assert_eq!(project.config().version.revision, 0);
+}
+
+#[test]
+fn an_absent_local_document_produces_no_findings_at_all() {
+    let (_dir, project) = project();
+    assert!(!project.user_config_path().exists());
+    let report = doctor::diagnose(&project).unwrap();
+    assert!(
+        report.findings.iter().all(|finding| {
+            !finding
+                .location
+                .as_ref()
+                .is_some_and(|location| matches!(location, Location::File { path, .. } if path.ends_with("user.toml")))
+        }),
+        "{:?}",
+        report.findings
+    );
+}
+
+#[test]
+fn a_broken_shared_document_still_reports_the_local_one() {
+    let (_dir, project) = project();
+    std::fs::write(project.config_path(), "not = [toml").unwrap();
+    std::fs::write(project.user_config_path(), "timezone = \"Mars/Olympus\"\n").unwrap();
+
+    // The shared document cannot even be opened, but the diagnostic still
+    // reviews the second configuration document and locates its problem.
+    let report = doctor::diagnose_config(&project.config_path(), DoctorOptions::new()).unwrap();
+    let local: Vec<&Finding> = report
+        .findings
+        .iter()
+        .filter(|finding| {
+            finding.location.as_ref().is_some_and(
+                |location| matches!(location, Location::File { path, .. } if path.ends_with("user.toml")),
+            )
+        })
+        .collect();
+    assert_eq!(local.len(), 1, "{:?}", report.findings);
+    assert!(local[0].message.contains("timezone"), "{:?}", local[0]);
+    assert!(
+        report
+            .findings
+            .iter()
+            .any(|finding| finding.code == Code::ConfigInvalid
+                && !matches!(finding.location, Some(Location::File { .. }))),
+        "the shared document's own problem is reported too: {:?}",
+        report.findings
+    );
 }

@@ -82,6 +82,15 @@ pub fn parse_timezone(input: &str) -> Result<Tz, TimeError> {
     })
 }
 
+/// The machine-local zone, when the host reports one this build knows.
+///
+/// `None` when the platform lookup fails or names a zone `chrono-tz` does not
+/// carry; the caller decides what an undetected zone means.
+pub fn detect_machine_timezone() -> Option<Tz> {
+    let name = iana_time_zone::get_timezone().ok()?;
+    parse_timezone(&name).ok()
+}
+
 /// Render an instant for human display in the configured zone.
 pub fn format_local(value: DateTime<Utc>, zone: Tz) -> String {
     value

@@ -12,15 +12,10 @@ use waymark_core::model::{CategoryKey, FieldKey, FieldValue};
 /// so a change to the writer is a visible change to this file.
 const FRESH: &str = r#"version = "1.0"
 storage_root = "work"
-timezone = "UTC"
 
 [categories.task]
 path = "work/task"
 name = "Task"
-
-[cache]
-enabled = true
-capacity = 512
 "#;
 
 fn fresh() -> Config {
@@ -83,7 +78,6 @@ fn categories_and_fields_are_written_in_sorted_key_order() {
 #[test]
 fn field_declarations_round_trip_with_their_type_requiredness_and_default() {
     let mut config = fresh();
-    config.operator = Some("frank".to_owned());
     config.fields.insert(
         FieldKey::parse("effort").unwrap(),
         FieldDecl {
@@ -103,7 +97,6 @@ fn field_declarations_round_trip_with_their_type_requiredness_and_default() {
     let document = config.to_toml_string();
     assert!(document.contains("type = \"list:string\""), "{document}");
     assert!(document.contains("default = 3"), "{document}");
-    assert!(document.contains("operator = \"frank\""), "{document}");
     assert_eq!(Config::parse(&document).unwrap(), config);
 }
 
@@ -248,19 +241,32 @@ fn an_empty_display_name_is_rejected() {
 }
 
 #[test]
-fn an_unknown_time_zone_is_rejected() {
-    let document = FRESH.replace("timezone = \"UTC\"", "timezone = \"Mars/Olympus\"");
-    let error = Config::parse(&document).unwrap_err();
-    assert_eq!(error.code(), Code::ConfigInvalid);
-    assert!(error.message().contains("timezone"), "{error}");
-}
-
-#[test]
-fn an_empty_operator_is_rejected() {
-    let document = FRESH.replace("timezone = \"UTC\"", "operator = \"\"\ntimezone = \"UTC\"");
-    let error = Config::parse(&document).unwrap_err();
-    assert_eq!(error.code(), Code::ConfigInvalid);
-    assert!(error.message().contains("operator"), "{error}");
+fn the_local_settings_are_refused_by_name_with_their_destination() {
+    // The three local settings are not merely unknown: they are recognised and
+    // reported as belonging to the local document, so an old-shaped repository
+    // gets an actionable message instead of a generic one.
+    for (key, line) in [
+        ("operator", "operator = \"frank\"\n"),
+        ("timezone", "timezone = \"UTC\"\n"),
+        ("cache", "[cache]\nenabled = true\ncapacity = 512\n"),
+    ] {
+        // Inserted at the first top-level key, because a key appended after a
+        // table header would belong to that table instead.
+        let document = FRESH.replace(
+            "storage_root = \"work\"\n",
+            &format!("storage_root = \"work\"\n{line}"),
+        );
+        let error = Config::parse(&document).unwrap_err();
+        assert_eq!(error.code(), Code::ConfigInvalid, "key {key:?}");
+        assert!(
+            error.message().contains(key),
+            "the complaint names {key:?}: {error}"
+        );
+        assert!(
+            error.message().contains("local user configuration"),
+            "the complaint names the destination: {error}"
+        );
+    }
 }
 
 #[test]
@@ -318,9 +324,8 @@ fn a_version_round_trips_through_its_literal() {
 
 #[test]
 fn a_default_that_does_not_match_the_declared_type_is_rejected() {
-    let document = FRESH.replace(
-        "[cache]",
-        "[fields.effort]\ntype = \"integer\"\nrequired = false\ndefault = \"three\"\n\n[cache]",
+    let document = format!(
+        "{FRESH}\n[fields.effort]\ntype = \"integer\"\nrequired = false\ndefault = \"three\"\n"
     );
     let error = Config::parse(&document).unwrap_err();
     assert_eq!(error.code(), Code::ConfigInvalid);
@@ -329,21 +334,10 @@ fn a_default_that_does_not_match_the_declared_type_is_rejected() {
 
 #[test]
 fn a_field_may_not_shadow_a_core_name() {
-    let document = FRESH.replace(
-        "[cache]",
-        "[fields.title]\ntype = \"string\"\nrequired = false\n\n[cache]",
-    );
+    let document = format!("{FRESH}\n[fields.title]\ntype = \"string\"\nrequired = false\n");
     let error = Config::parse(&document).unwrap_err();
     assert_eq!(error.code(), Code::ConfigInvalid);
     assert!(error.message().contains("reserved"), "{error}");
-}
-
-#[test]
-fn a_zero_cache_capacity_is_rejected() {
-    let document = FRESH.replace("capacity = 512", "capacity = 0");
-    let error = Config::parse(&document).unwrap_err();
-    assert_eq!(error.code(), Code::ConfigInvalid);
-    assert!(error.message().contains("capacity"), "{error}");
 }
 
 #[test]
@@ -354,19 +348,14 @@ fn the_declared_categories_are_what_the_configuration_holds() {
         config.categories[&CategoryKey::parse("task").unwrap()].path,
         "work/task"
     );
-    assert_eq!(config.timezone.name(), "UTC");
     assert_eq!(config.storage_root, "work");
-    assert!(config.operator.is_none());
     assert!(config.fields.is_empty());
-    assert_eq!(config.cache.capacity, 512);
-    assert!(config.cache.enabled);
 }
 
 #[test]
 fn the_raw_tables_are_ordered_by_key_when_read() {
-    let document = FRESH.replace(
-        "[cache]",
-        "[fields.beta]\ntype = \"string\"\nrequired = false\n\n[fields.alpha]\ntype = \"string\"\nrequired = false\n\n[cache]",
+    let document = format!(
+        "{FRESH}\n[fields.beta]\ntype = \"string\"\nrequired = false\n\n[fields.alpha]\ntype = \"string\"\nrequired = false\n"
     );
     let config = Config::parse(&document).unwrap();
     let keys: Vec<&str> = config.fields.keys().map(FieldKey::as_str).collect();
@@ -381,21 +370,21 @@ fn a_configuration_file_that_does_not_exist_is_an_io_error() {
 
 #[test]
 fn a_configuration_document_without_a_category_still_parses() {
-    let document = "version = \"1.0\"\nstorage_root = \"work\"\ntimezone = \"UTC\"\n";
+    let document = "version = \"1.0\"\nstorage_root = \"work\"\n";
     let config = Config::parse(document).unwrap();
     assert!(config.categories.is_empty());
-    assert_eq!(
-        config.to_toml_string(),
-        format!("{document}\n[cache]\nenabled = true\ncapacity = 512\n")
-    );
+    assert_eq!(config.to_toml_string(), document);
 }
 
 #[test]
 fn a_quoted_string_survives_the_writer() {
     let mut config = fresh();
-    config.operator = Some("a \"quoted\" \\ operator".to_owned());
+    config.storage_root = "a \"quoted\" operator".to_owned();
     let document = config.to_toml_string();
-    assert_eq!(Config::parse(&document).unwrap().operator, config.operator);
+    assert_eq!(
+        Config::parse(&document).unwrap().storage_root,
+        config.storage_root
+    );
 }
 
 #[test]

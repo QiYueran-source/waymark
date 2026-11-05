@@ -26,11 +26,12 @@ pub struct ProjectInitArgs {
     #[serde(default)]
     pub storage_root: Option<String>,
 
-    /// Advisory operator identity recorded in the configuration.
+    /// Advisory operator identity seeded into the local user configuration.
     #[serde(default)]
     pub operator: Option<String>,
 
-    /// IANA time zone used for human display. Defaults to `UTC`.
+    /// IANA time zone seeded into the local user configuration. Defaults to the
+    /// machine's zone, then `UTC`.
     #[serde(default)]
     pub timezone: Option<String>,
 
@@ -62,9 +63,10 @@ impl ProjectInitArgs {
 #[tool_router(router = project_router, vis = "pub(crate)")]
 impl WaymarkServer {
     /// Create the Waymark project in the server's project directory and return
-    /// it. Defaults: category `task`, storage root `work`, operator unset,
-    /// time zone `UTC`, and no forced overwrite. Re-running init reuses an
-    /// existing configuration unless `force` is true.
+    /// it. Defaults: category `task`, storage root `work`, operator and time
+    /// zone seeded from the Git identity and the machine, and no forced
+    /// overwrite. Re-running init reuses an existing configuration unless
+    /// `force` is true, and never rewrites an existing local user document.
     #[tool(
         name = "waymark_project_init",
         annotations(title = "Initialise the Waymark project")
@@ -76,16 +78,18 @@ impl WaymarkServer {
         envelope::respond(|| {
             let project =
                 waymark_core::ops::config::init(self.start(), args.request(), args.force)?;
-            Ok(envelope::success(
-                project_data(&project)?,
-                Meta::direct_file_scoped(),
-            ))
+            let mut data = project_data(&project)?;
+            data["local_config_path"] = json!(project.user_config_path().to_string());
+            data["local_config_tracked"] =
+                json!(waymark_core::ops::local_config::tracked(&project));
+            Ok(envelope::success(data, Meta::direct_file_scoped()))
         })
     }
 
     /// Describe the project this server operates on: storage root, generation,
-    /// revision, operator, time zone, categories, declared fields, and item
-    /// counts. Reads the configuration and counts the inventory; never writes.
+    /// revision, categories, declared fields, and item counts. Reads the
+    /// configuration and counts the inventory; never writes. The local user
+    /// settings are reported by `waymark_config_read`.
     #[tool(
         name = "waymark_project_info",
         annotations(title = "Read the Waymark project summary")
@@ -113,8 +117,6 @@ fn project_data(project: &Project) -> Result<Value, WaymarkError> {
         "version": config.version.to_string(),
         "generation": config.version.generation,
         "revision": config.version.revision,
-        "timezone": config.timezone.name(),
-        "operator": config.operator,
         "categories": config
             .categories
             .iter()

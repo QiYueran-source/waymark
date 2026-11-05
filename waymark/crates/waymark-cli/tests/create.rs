@@ -73,9 +73,8 @@ required = false
 [fields.note]
 type = \"string\"
 required = false
-
-[cache]";
-    std::fs::write(&config_path, config.replace("[cache]", declarations))
+";
+    std::fs::write(&config_path, format!("{config}\n{declarations}"))
         .expect("the configuration is writable");
     (dir, root)
 }

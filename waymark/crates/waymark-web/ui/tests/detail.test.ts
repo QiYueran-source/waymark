@@ -47,6 +47,15 @@ describe('item detail', () => {
 		);
 	});
 
+	it('shows the created instant in the effective zone the server resolved', () => {
+		renderDetail();
+		// The zone travels with the values: the panel never guesses one, and the
+		// offset already carries the local context.
+		expect(textOf(screen.getByTestId('detail-created'))).toBe(
+			'2026-01-01T01:00:00+01:00 (Europe/Berlin)'
+		);
+	});
+
 	it('shows category, actual status, derived state, blocked reason, and owner', () => {
 		renderDetail();
 		const panel = screen.getByTestId('detail-panel');

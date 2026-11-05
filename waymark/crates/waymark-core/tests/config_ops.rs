@@ -69,70 +69,6 @@ fn a_fresh_configuration_has_no_findings() {
 }
 
 #[test]
-fn a_setting_writes_once_and_advances_the_revision_by_exactly_one() {
-    let (_dir, project) = fixtures::deterministic_project();
-    let outcome =
-        config::set_scalar(&project, Scalar::Operator, "frank", &options()).expect("it writes");
-    assert!(outcome.changed);
-    assert_eq!(outcome.previous_revision, 0);
-    assert_eq!(outcome.revision, 1);
-    assert_eq!(outcome.changed_keys, vec!["operator".to_owned()]);
-    assert_eq!(outcome.config.operator.as_deref(), Some("frank"));
-
-    let on_disk = config::show(&project).unwrap();
-    assert_eq!(on_disk, outcome.config);
-    assert_eq!(on_disk.version.revision, 1);
-    assert!(read_config(&project).contains("operator = \"frank\""));
-}
-
-#[test]
-fn a_no_op_setting_writes_nothing_and_does_not_advance_the_revision() {
-    let (_dir, project) = fixtures::deterministic_project();
-    let before = read_config(&project);
-    let outcome =
-        config::set_scalar(&project, Scalar::Timezone, "UTC", &options()).expect("it validates");
-    assert!(!outcome.changed);
-    assert_eq!(outcome.revision, outcome.previous_revision);
-    assert!(outcome.changed_keys.is_empty());
-    assert_eq!(read_config(&project), before);
-}
-
-#[test]
-fn each_documented_scalar_round_trips() {
-    let (_dir, project) = fixtures::deterministic_project();
-    for (scalar, value) in [
-        (Scalar::Timezone, "Asia/Shanghai"),
-        (Scalar::CacheEnabled, "false"),
-        (Scalar::CacheCapacity, "64"),
-    ] {
-        config::set_scalar(&project, scalar, value, &options()).expect("it writes");
-        let shown = config::show(&project).unwrap();
-        match scalar {
-            Scalar::Timezone => assert_eq!(shown.timezone.name(), value),
-            Scalar::CacheEnabled => assert!(!shown.cache.enabled),
-            Scalar::CacheCapacity => assert_eq!(shown.cache.capacity, 64),
-            Scalar::Operator => unreachable!(),
-        }
-    }
-    assert_eq!(config::show(&project).unwrap().version.revision, 3);
-}
-
-#[test]
-fn an_invalid_scalar_is_a_validation_error_and_writes_nothing() {
-    let (_dir, project) = fixtures::deterministic_project();
-    let before = read_config(&project);
-    for (scalar, value) in [
-        (Scalar::Timezone, "Mars/Olympus"),
-        (Scalar::CacheEnabled, "yes"),
-        (Scalar::CacheCapacity, "0"),
-    ] {
-        let error = config::set_scalar(&project, scalar, value, &options()).unwrap_err();
-        assert_eq!(error.code(), Code::ValidationError);
-        assert_eq!(read_config(&project), before);
-    }
-}
-
-#[test]
 fn a_stale_expected_fingerprint_is_a_write_conflict_instead_of_a_rebase() {
     let (_dir, project) = fixtures::deterministic_project();
     let original = Fingerprint::of(&std::fs::read(project.config_path()).expect("readable"));
@@ -143,10 +79,10 @@ fn a_stale_expected_fingerprint_is_a_write_conflict_instead_of_a_rebase() {
     std::fs::write(project.config_path(), &edited).expect("the configuration is writable");
     let edited_fingerprint = Fingerprint::of(edited.as_bytes());
 
-    let error = config::set_scalar(
+    let error = config::set_category_name(
         &project,
-        Scalar::Operator,
-        "frank",
+        &key("task"),
+        "Renamed",
         &options().with_expected_config_fingerprint(original.clone()),
     )
     .expect_err("the caller's expectation no longer holds");
@@ -167,15 +103,15 @@ fn a_stale_expected_fingerprint_is_a_write_conflict_instead_of_a_rebase() {
 
     // The current fingerprint is accepted: the option guards a concurrent edit,
     // it does not forbid writing at all.
-    let written = config::set_scalar(
+    let written = config::set_category_name(
         &project,
-        Scalar::Operator,
-        "frank",
+        &key("task"),
+        "Renamed",
         &options().with_expected_config_fingerprint(edited_fingerprint),
     )
     .expect("a current fingerprint writes");
     assert!(written.changed);
-    assert!(read_config(&project).contains("operator = \"frank\""));
+    assert!(read_config(&project).contains("name = \"Renamed\""));
 }
 
 #[test]
@@ -210,7 +146,8 @@ fn a_failed_configuration_write_rolls_back_the_category_directory() {
     let (_dir, project) = fixtures::deterministic_project();
     // Make sure the lock file and the ignore entry already exist: only the
     // configuration replacement may fail, not lock acquisition.
-    config::set_scalar(&project, Scalar::Operator, "frank", &options()).expect("the scalar writes");
+    config::set_category_name(&project, &key("task"), "Renamed", &options())
+        .expect("the shared write succeeds");
     let config_before = read_config(&project);
 
     let metadata_dir = project.root().join(".waymark");
@@ -481,7 +418,8 @@ fn every_configuration_write_leaves_work_item_files_byte_identical() {
     let before = item_state(&project);
 
     let scalar = |project: &Project, scalar, value: &str| {
-        config::set_scalar(project, scalar, value, &options()).expect("it writes")
+        waymark_core::ops::local_config::set_scalar(project, scalar, value, &options())
+            .expect("the local scalar writes")
     };
     scalar(&project, Scalar::Operator, "frank");
     scalar(&project, Scalar::Timezone, "Asia/Shanghai");
@@ -523,13 +461,14 @@ fn every_configuration_write_leaves_work_item_files_byte_identical() {
 #[test]
 fn a_hand_edited_document_is_seen_inside_the_lock_by_content() {
     let (_dir, project) = fixtures::deterministic_project();
-    let mut edited = config::show(&project).unwrap();
-    edited.operator = Some("hand".to_owned());
-    std::fs::write(project.config_path(), edited.to_toml_string()).unwrap();
+    // A hand edit that changes the bytes but leaves the counter alone: the
+    // content is what the engine re-reads inside the lock.
+    let text = read_config(&project).replace("name = \"Task\"", "name = \"Hand\"");
+    std::fs::write(project.config_path(), &text).unwrap();
 
-    let outcome =
-        config::set_scalar(&project, Scalar::CacheCapacity, "99", &options()).expect("it writes");
-    assert_eq!(outcome.config.operator.as_deref(), Some("hand"));
+    let outcome = config::set_category_name(&project, &key("task"), "Renamed", &options())
+        .expect("it writes");
+    assert_eq!(outcome.config.categories[&key("task")].name, "Renamed");
     assert_eq!(
         outcome.previous_revision, 0,
         "a hand edit does not move the counter"
@@ -542,7 +481,7 @@ fn a_dry_run_reports_the_change_without_writing() {
     let (_dir, project) = fixtures::deterministic_project();
     let before = read_config(&project);
     let outcome =
-        config::set_scalar(&project, Scalar::Operator, "frank", &options().dry_run()).unwrap();
+        config::set_category_name(&project, &key("task"), "Renamed", &options().dry_run()).unwrap();
     assert!(outcome.changed);
     assert_eq!(outcome.revision, 1);
     assert_eq!(read_config(&project), before);
@@ -699,21 +638,6 @@ fn a_symlinked_category_path_is_a_finding() {
 }
 
 #[test]
-fn an_empty_operator_value_clears_the_key() {
-    let (_dir, project) = fixtures::deterministic_project();
-    config::set_scalar(&project, Scalar::Operator, "frank", &options()).unwrap();
-    let cleared = config::set_scalar(&project, Scalar::Operator, "  ", &options())
-        .expect("clearing is a change");
-    assert!(cleared.changed);
-    assert_eq!(cleared.config.operator, None);
-    assert!(!read_config(&project).contains("operator ="));
-    assert_eq!(cleared.revision, 2);
-
-    let repeated = config::set_scalar(&project, Scalar::Operator, "", &options()).unwrap();
-    assert!(!repeated.changed, "clearing an absent operator is a no-op");
-}
-
-#[test]
 fn an_invalid_configuration_cannot_be_opened_as_a_project() {
     let (_dir, project) = fixtures::deterministic_project();
     std::fs::write(
@@ -752,9 +676,16 @@ fn init_builds_the_requested_configuration_in_core() {
 
     let config = project.config();
     assert_eq!(config.storage_root, "docs/work");
-    assert_eq!(config.operator.as_deref(), Some("frank"));
-    assert_eq!(config.timezone.name(), "Asia/Shanghai");
     assert_eq!(config.categories.len(), 1);
+    // The seeds are local, never shared.
+    let local = waymark_core::ops::local_config::load(&project)
+        .expect("the local document is readable")
+        .expect("the local document exists");
+    assert_eq!(local.operator.as_deref(), Some("frank"));
+    assert_eq!(
+        local.timezone.map(|zone| zone.name()),
+        Some("Asia/Shanghai")
+    );
     let bug = config.categories.get(&key("bug")).expect("bug is declared");
     assert_eq!(bug.path, "docs/work/bug");
     assert_eq!(bug.name, "Bug");
@@ -766,8 +697,6 @@ fn init_builds_the_requested_configuration_in_core() {
         config::init(&default_root, InitRequest::new(), false).expect("the default init succeeds");
     let config = project.config();
     assert_eq!(config.storage_root, "work");
-    assert_eq!(config.operator, None);
-    assert_eq!(config.timezone.name(), "UTC");
     assert_eq!(config.categories.len(), 1);
     let task = config
         .categories

@@ -163,9 +163,10 @@ pub struct ConfigUpdateFieldArgs {
 
 #[tool_router(router = config_router, vis = "pub(crate)")]
 impl WaymarkServer {
-    /// Read the effective configuration: the format generation and revision,
-    /// storage root, operator, time zone, categories, declared custom fields,
-    /// and cache settings. Reads the document from disk on every call.
+    /// Read both configuration documents and the values they resolve to: the
+    /// shared project configuration, the local user configuration, and the
+    /// effective operator, time zone, and cache settings with the source of
+    /// each. Reads both documents from disk on every call.
     #[tool(
         name = "waymark_config_read",
         annotations(title = "Read the effective configuration")
@@ -173,10 +174,10 @@ impl WaymarkServer {
     async fn waymark_config_read(&self) -> ToolResult {
         envelope::respond(|| {
             let project = self.project()?;
-            let config = config::show(&project)?;
+            let bundle = waymark_core::ops::local_config::bundle(&project)?;
             Ok(envelope::success(
-                json!({"config": waymark_core::view::config_json(&config)}),
-                Meta::direct_file_scoped(),
+                waymark_core::view::config_bundle_json(&bundle),
+                waymark_core::view::config_bundle_meta(&bundle),
             ))
         })
     }
@@ -192,9 +193,11 @@ impl WaymarkServer {
     async fn waymark_config_validate(&self) -> ToolResult {
         envelope::respond(|| {
             // Validation must work when the document cannot be opened as a
-            // project, so the file is located without parsing it.
+            // project, so the file is located without parsing it. Core decides
+            // which documents that path covers, so both documents are always
+            // reviewed together.
             let path = config::locate_config_path(self.start())?;
-            let findings = config::validate_config_path(&path);
+            let findings = config::validate_documents(&path);
             let meta = Meta::direct_file_scoped().with_diagnostics(findings.clone());
             Ok(envelope::success(
                 json!({"valid": findings.is_empty(), "findings": findings}),
@@ -224,9 +227,10 @@ impl WaymarkServer {
         envelope::respond(|| Ok(report_result(diagnose(self.start())?)))
     }
 
-    /// Set one configuration scalar: `operator`, `timezone`, `cache.enabled`,
-    /// or `cache.capacity`. Takes the shared write lock, bumps the revision,
-    /// and returns the updated configuration. An empty `operator` clears it.
+    /// Set one local user configuration scalar: `operator`, `timezone`,
+    /// `cache.enabled`, or `cache.capacity`. Takes the project write lock,
+    /// writes the local document only, and leaves the shared configuration —
+    /// and therefore its revision — untouched. An empty `operator` clears it.
     /// `dry_run` performs every check and writes nothing.
     ///
     /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
@@ -243,13 +247,13 @@ impl WaymarkServer {
         envelope::respond(|| {
             let scalar = Scalar::parse(&args.name)?;
             let project = self.project()?;
-            let outcome = config::set_scalar(
+            let outcome = waymark_core::ops::local_config::set_scalar(
                 &project,
                 scalar,
                 &args.value,
                 &params::options(args.dry_run, args.lock_timeout_ms),
             )?;
-            Ok(config_result(&outcome))
+            Ok(local_result(&outcome))
         })
     }
 
@@ -411,19 +415,25 @@ impl WaymarkServer {
     }
 }
 
+/// One local configuration write as a successful tool result.
+///
+/// The shape mirrors the CLI's `--json` outcome so both adapters report the same
+/// facts: the local document, what changed, and the shared revision, which a
+/// local write never moves.
+fn local_result(outcome: &waymark_core::ops::local_config::LocalOutcome) -> ToolResult {
+    envelope::success(
+        waymark_core::view::local_outcome_json(outcome),
+        Meta::direct_file_scoped(),
+    )
+}
+
 /// One configuration write as a successful tool result.
 ///
 /// The shape matches the CLI's `--json` outcome: the effective configuration
 /// plus what the write changed and the revision it moved from and to.
 fn config_result(outcome: &ConfigOutcome) -> ToolResult {
     envelope::success(
-        json!({
-            "config": waymark_core::view::config_json(&outcome.config),
-            "changed": outcome.changed,
-            "changed_keys": outcome.changed_keys,
-            "previous_revision": outcome.previous_revision,
-            "revision": outcome.revision,
-        }),
+        waymark_core::view::config_outcome_json(outcome),
         Meta::direct_file_scoped(),
     )
 }

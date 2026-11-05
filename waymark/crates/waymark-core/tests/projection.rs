@@ -355,13 +355,15 @@ fn a_cache_only_configuration_change_clears_the_cache_but_not_the_projection() {
 #[test]
 fn a_projection_loaded_with_a_configured_cache_uses_that_capacity() {
     let (_dir, project) = project();
-    let mut config = project.config().clone();
-    config.cache = CacheSettings {
-        enabled: true,
-        capacity: 1,
-    };
-    let mut project = project;
-    project.set_config(config);
+    // The cache size is a *local* setting now, so it is written to the local
+    // document rather than to the shared configuration.
+    waymark_core::ops::local_config::set_scalar(
+        &project,
+        waymark_core::ops::config::Scalar::CacheCapacity,
+        "1",
+        &options(),
+    )
+    .expect("the local cache capacity is written");
     make(&project, "one");
     let item = id(&make(&project, "two"));
 

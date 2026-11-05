@@ -13,7 +13,7 @@ use waymark_core::envelope::Warning;
 use waymark_core::error::Code;
 use waymark_core::lock::{with_project_lock, LockWait};
 use waymark_core::model::{FieldKey, FieldValue, WorkItem, FORMAT_GENERATION};
-use waymark_core::ops::config::{self, FieldAttribute, Scalar};
+use waymark_core::ops::config::{self, FieldAttribute};
 use waymark_core::ops::create::{self, CreateRequest};
 use waymark_core::ops::edit::{self, FieldChange, FieldChangeEntry};
 use waymark_core::ops::list::{self, Query};
@@ -144,8 +144,9 @@ fn the_configuration_carries_generation_and_revision_and_only_a_migration_moves_
     assert!(config_text(&project).contains("version = \"1.0\""));
 
     // An ordinary mediated configuration write moves the minor only.
-    let outcome = config::set_scalar(&project, Scalar::Operator, "frank", &options())
-        .expect("the operator is a mediated write");
+    let task = waymark_core::model::CategoryKey::parse("task").expect("a valid category key");
+    let outcome = config::set_category_name(&project, &task, "Task renamed", &options())
+        .expect("a display-name change is a mediated write");
     assert_eq!(outcome.previous_revision, 0);
     assert_eq!(outcome.revision, 1);
     assert_eq!(outcome.config.version.generation, FORMAT_GENERATION);
@@ -161,7 +162,7 @@ fn the_configuration_carries_generation_and_revision_and_only_a_migration_moves_
     assert!(config_text(&project).contains("version = \"1.3\""));
 
     // And a later ordinary write leaves it alone.
-    let outcome = config::set_scalar(&project, Scalar::Operator, "alice", &options())
+    let outcome = config::set_category_name(&project, &task, "Task again", &options())
         .expect("another mediated write");
     assert_eq!(outcome.config.version.generation, FORMAT_GENERATION);
     assert!(config_text(&project).contains("version = \"1.4\""));

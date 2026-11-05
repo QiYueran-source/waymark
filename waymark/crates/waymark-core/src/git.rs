@@ -125,6 +125,17 @@ impl GitProbe {
         }
     }
 
+    /// Probe a plain directory that may not be a project yet.
+    ///
+    /// Configuration resolution runs before or beside a project being opened,
+    /// so it needs the same environment a `Project` would report.
+    pub fn detect_at(root: &Utf8Path) -> Self {
+        Self {
+            repository: find_repository_at(root),
+            executable: find_executable(),
+        }
+    }
+
     /// An environment with neither a repository nor an executable.
     pub fn unavailable() -> Self {
         Self {
@@ -182,14 +193,22 @@ impl GitProbe {
 /// A `.git` **file** is accepted: that is how a linked worktree points at its
 /// private git directory.
 pub fn find_repository(project: &Project) -> Option<Repository> {
-    let start = absolute(project.root());
+    find_repository_at(project.root())
+}
+
+/// Find the repository root containing `root`, a plain directory.
+///
+/// The path form exists because local configuration resolution needs the
+/// repository for one identity lookup, not for a project: it runs before or
+/// alongside a project being opened.
+pub fn find_repository_at(root: &Utf8Path) -> Option<Repository> {
+    let start = absolute(root);
     let mut current: Option<&Utf8Path> = Some(start.as_path());
     for _ in 0..MAX_REPOSITORY_DEPTH {
         let directory = current?;
         let dot_git = directory.join(".git");
         if dot_git.is_dir() || dot_git.is_file() {
-            let project_prefix = project
-                .root()
+            let project_prefix = root
                 .strip_prefix(directory)
                 .map(|relative| relative.as_str().to_owned())
                 .unwrap_or_default();
@@ -202,6 +221,47 @@ pub fn find_repository(project: &Project) -> Option<Repository> {
         current = directory.parent();
     }
     None
+}
+
+/// The operator identity Git would attribute a commit to, when it is readable.
+///
+/// `None` covers every way the lookup can fail — no repository, no executable,
+/// an unset `user.name`, an unreadable value — because the operator is advisory:
+/// an unavailable identity degrades the fallback and never blocks a write.
+pub fn user_name(probe: &GitProbe) -> Option<String> {
+    let (executable, repository) = (probe.executable()?, probe.repository()?);
+    let output = Command::new(executable)
+        .current_dir(repository.root())
+        .args(["config", "--get", "user.name"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let name = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    (!name.is_empty()).then_some(name)
+}
+
+/// Whether Git's index tracks `path`.
+///
+/// `false` covers every way the answer can be unavailable — no repository, no
+/// executable, a path outside the repository, or a Git failure — because
+/// tracking is a repository fact Waymark reports, never a precondition for an
+/// ordinary read or write.
+pub fn tracks(probe: &GitProbe, path: &Utf8Path) -> bool {
+    let (Some(executable), Some(repository)) = (probe.executable(), probe.repository()) else {
+        return false;
+    };
+    let path = absolute(path);
+    let Some(relative) = repository.relative(&path) else {
+        return false;
+    };
+    let output = Command::new(executable)
+        .current_dir(repository.root())
+        .args(["ls-files", "--error-unmatch", "--"])
+        .arg(relative)
+        .output();
+    matches!(output, Ok(output) if output.status.success())
 }
 
 /// Find `git` on `PATH`.

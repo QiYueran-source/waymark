@@ -3157,3 +3157,210 @@ table so the hash needs no runtime decompressor.
 **What would change it:** if `serve` ever needs to refuse a mismatched tree, it can call the same
 function and choose its own failure; today it starts regardless.
 
+
+# Local user configuration (wm-qkssvky32ptz)
+
+## Two documents, one resolution boundary
+
+**Choice:** `.waymark/config.toml` keeps only the shared project facts — `version`, `storage_root`,
+`categories`, `fields`. The three per-collaborator settings (`operator`, `timezone`, `cache`) live in
+`.waymark/user.toml`, which carries no `version` and is listed in `.waymark/.gitignore`.
+`waymark_core::user_config` owns the document's shape, validation, and precedence;
+`waymark_core::ops::local_config` is the seam every adapter calls.
+
+**Why:** the shared document is committed and shared by every clone, so a per-collaborator identity and
+a machine-derived zone cannot live in it without producing a dirty tree after every checkout on a
+second machine. Splitting them keeps "the shared baseline is identical for everyone" true, and keeps
+the precedence in one place instead of in the CLI, the MCP server, and the Web view independently.
+
+## The shared schema rejects the local keys by name
+
+**Choice:** `config.rs` recognises `operator`, `timezone`, and `cache` as `LOCAL_ONLY_KEYS` and rejects
+each with "`<key>` belongs to the local user configuration and cannot be set in the shared project
+configuration". Any other unknown key keeps the generic message. There is no migration and no legacy
+fallback, because the project is pre-release.
+
+**Why:** an old-shaped repository is the one case a person will actually hit, and a generic "unknown
+field" would send them looking for a typo instead of moving the value. Naming the destination makes the
+repair obvious from the message alone. The other half is negative: silently accepting the keys would
+mean two documents claiming the same setting, with the resolution order deciding which one wins — the
+exact ambiguity the split exists to remove.
+
+## Reading never creates the local document
+
+**Choice:** `UserConfig::load_optional` returns `Ok(None)` when the file is absent, and
+`local_config::{load, effective, bundle}` only ever read. `init` is the only path that creates the
+document.
+
+**Why:** the document is optional by design — every setting has a fallback — so "absent" and "empty"
+would otherwise be indistinguishable from the user's point of view while producing a different tree.
+Making creation an explicit act also means a `git status` stays clean on a fresh clone of a project
+initialized elsewhere.
+
+## Resolution skips a fallback the document already answers
+
+**Choice:** `LocalEnvironment::detect_for(root, user)` runs the Git probe only when the local document
+does not state an operator, and machine-zone detection only when it does not state a zone.
+`EffectiveConfig::resolve` then applies local → fallback → built-in default. Cache has no environment
+fallback at all, and its two fields resolve independently, so a document pinning only the capacity
+still reports `built_in_default` for enablement.
+
+**Why:** the skip is what makes "an explicit local value never consults system detection" a structural
+property instead of an incidental one — a machine with an unreadable Git identity, a broken `TZ`, or a
+slow subprocess pays nothing for a value the collaborator already chose. Independent cache fields keep
+the source report honest: a single shared `cache` source would have to claim a written value for a
+field that is still defaulted.
+
+## A broken document fails reads that need it and never blocks a diagnosis
+
+**Choice:** `local_config::effective` propagates a `CONFIG_INVALID`; `local_config::effective_lenient`
+treats an unreadable document as absent and is what `validate`, `doctor`, projection cache sizing, and
+the advisory operator path call.
+
+**Why:** an operation that needs a value must not guess at it, but the command that reports the problem
+is the one that has to run — a `Project::open`-level failure would make `validate` unable to name the
+file it is complaining about. Two entry points with one shared `resolve` keep the precedence identical
+and isolate the difference to the error policy.
+
+## A local write does not move the shared revision
+
+**Choice:** `local_config::set_scalar` takes the same project lock, validates the whole document, and
+replaces it atomically, but reports `previous_revision == revision`: the shared document is never read
+for a value and never written. Clearing the operator writes `None`, and a document that would state
+nothing at all is deleted rather than written empty.
+
+**Why:** the revision counts mediated writes to the shared baseline, which is what a second clone can
+observe; a local identity change is invisible to everyone else and must not imply a shared change. An
+absent file is the canonical "no local settings" form, so deleting is both the smaller state and the
+one that matches what an ignored file should look like.
+
+## The UTC fallback warns instead of failing
+
+**Choice:** when no zone is stated and machine detection fails, the effective zone is UTC and the
+resolution carries a `TIME_ZONE_UNDETECTED` warning (severity `info`, no exit class).
+
+**Why:** the fallback is correct — an offset-less timestamp still has to mean something — but a
+surprising UTC offset in rendered output is worth explaining. Registering it as a finding-only code
+keeps it out of the exit-code table, so `validate --strict` and every ordinary operation stay
+successful.
+
+## `config show` prints the shared document verbatim on stdout
+
+**Choice:** human mode writes the shared `config.toml` bytes to stdout and the local document, the
+effective values, and their sources to stderr. `--json` returns `{project, local, effective}` in one
+envelope, with `local: null` when the document is absent and keys omitted rather than set to null.
+
+**Why:** `waymark config show > config.toml` is an existing habit, and it must keep producing a valid
+shared document; putting the local half on stdout would silently corrupt that file. The local settings
+are also the part a person is least likely to want to capture, since they are theirs, not the
+project's.
+
+## Initialization seeds the local document once and never rewrites it
+
+**Choice:** `Project::init` writes the local document only when the file does not already exist, and
+`ops::config::init` only resolves the seed when that is true — `--force` replaces the shared
+configuration but never the local one. The document is written with the effective Git `user.name`, the
+machine zone, and both cache values stated explicitly.
+
+**Why:** `--force` is about the project's shared layout, while the local document holds one
+collaborator's preferences; replacing the first must not silently discard the second. Writing the cache
+defaults out makes the first state a snapshot, so a later release that changes a default cannot change
+what an existing project does.
+
+## A tracked local document is reported, never repaired
+
+**Choice:** `git::tracks` asks `ls-files --error-unmatch`; `local_config::tracked` exposes it. `init`
+reports trackedness in its output (`local_config_tracked`, plus a human stderr warning) and leaves both
+the file and the index alone. A local write to a tracked document fails with `CONFIG_INVALID` located at
+the document and a message naming `git rm --cached .waymark/user.toml`.
+
+**Why:** ignore rules do not apply to an already tracked path, so the only safe repair is a deliberate
+human one — `Waymark` must not stage, unstage, or delete anything in the repository. `CONFIG_INVALID` is
+the registry's configuration-state failure, and the local document is configuration; the report is data
+about what initialization found, not a diagnostic about the data.
+
+## An unsafe ignore file stops init before any local settings exist
+
+**Choice:** `ensure_gitignore` refuses a symlink, a non-regular file, and a read-only file that would
+need an entry added, and it runs before either document is written. The lock's acquisition pass repairs
+both entries (`write.lock` and `user.toml`).
+
+**Why:** the replacement is a rename, which would quietly work around a read-only file's permissions;
+refusing is the only way "an unwritable ignore file stops the write" can be true. Repairing on every
+lock acquisition means a project cloned without the entry heals on its first mediated write instead of
+leaving preferences exposed until someone runs `init` again.
+
+## A local write guards its own document with the same fingerprint option
+
+**Choice:** `local_config::set_scalar` honours `OpOptions::expected_config_fingerprint` against the
+bytes of the local document, reporting `WRITE_CONFLICT` with `actual_fingerprint: "missing"` when the
+document is absent.
+
+**Why:** the option already means "the document I am about to write must still be the one I read", and
+the local document is the document a local write touches. Reusing it keeps one write contract instead
+of a second conflict vocabulary, and reporting `missing` (not a fabricated hash) keeps an absent file
+distinguishable from a changed one.
+
+## Local findings are located at their file, not at a bare key
+
+**Choice:** a local-document finding carries `Location::File` naming the local document, and its
+message names the offending key. Shared-document findings keep `Location::ConfigKey`.
+
+**Why:** a key alone does not say which of the two documents to open, and a person repairing a
+preference needs the file to open. The key stays in the message, where it reads as `timezone: …`, so
+the finding is still a named one. The two documents have different shapes and different authorities;
+making their findings distinguishable in the location is the cheapest honest way to say so.
+
+## The Web view renders timestamps in the machine's effective zone
+
+**Choice:** `view::item_display_times_json` produces `{timezone, created_at, updated_at, closed_at}`
+from the effective zone, and the Web item payload carries it beside the unchanged UTC fields, which it
+reads through `local_config::effective_lenient`.
+
+**Why:** the zone belongs to the person at that machine, and the Web server runs on it; resolving it
+through the one shared boundary is what keeps the browser from inventing a zone or copying a
+precedence. Persisted machine fields stay UTC, so the local context is presentation only. An
+undetectable machine zone degrades to the documented UTC fallback, and a project with no local document
+renders the same way as one that states nothing.
+
+## Values and provenance are separate structures, and warnings travel in the envelope
+
+**Choice:** `config show --json` and `waymark_config_read` return `{project, local, effective,
+sources}`: `effective` holds values only and `sources` holds the origin of each one. Resolution
+warnings are attached to `_meta.warnings` through `view::config_bundle_meta`.
+
+**Why:** the specification asks for separate effective and source structures, and a client that only
+wants a value should not have to unwrap an explanation object. The UTC fallback warning existed only in
+the human renderer, which means machine clients never saw it; building the metadata beside the
+renderer is what makes the warning part of the contract instead of a courtesy to one surface.
+
+## Every local scalar clears, and clearing means "restore the fallback"
+
+**Choice:** an empty value clears `operator`, `timezone`, `cache.enabled`, and `cache.capacity` alike.
+Clearing writes `None`, never a sentinel, and a document that would state nothing is deleted.
+
+**Why:** the setting that has a fallback is the setting that needs a way back to it; making only the
+operator clearable would leave the machine zone and the built-in cache defaults reachable only by hand
+editing. One rule for four settings is also one rule to explain.
+
+## The lock repair stays lock-only; a local write enforces the ignore file itself
+
+**Choice:** `lock::with_project_lock` repairs only the `write.lock` entry, as it always did. A local
+write calls `ensure_gitignore` with both entries inside its own write branch, after the dry-run check.
+
+**Why:** repairing the local entry at every lock acquisition made unrelated work-item writes rewrite a
+tracked ignore file and fail when that file was unusual — the specification scopes that refusal to a
+local settings write. Doing it in the write branch also keeps a dry run from writing anything, which
+is what makes "the dry run reports the change" true rather than approximate.
+
+## A value that will be persisted is resolved strictly
+
+**Choice:** `mediated::operator_to_record` resolves the creator default through the strict
+`local_config::bundle`, while the advisory owner check keeps the lenient path. Only `create` records a
+resolved local value.
+
+**Why:** provenance written into a document must not be invented from a Git fallback while the local
+document that should have supplied it is unreadable — that is the "explicit configuration error rather
+than silent fallback" the specification asks for. Advisory comparisons and performance knobs have no
+such consequence, so they keep degrading, which is what lets a broken preference file be reported by
+`validate` instead of blocking the command that reports it.

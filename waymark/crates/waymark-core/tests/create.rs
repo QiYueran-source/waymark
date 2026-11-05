@@ -185,7 +185,7 @@ fn creation_accepts_a_creator_distinct_from_the_owner() {
 
 #[test]
 fn creation_defaults_the_creator_to_the_acting_operator() {
-    let (_dir, mut project) = project();
+    let (_dir, project) = project();
 
     let anonymous = create::create(&project, request("Anonymous"), &options()).expect("creation");
     assert_eq!(anonymous.item.creator, None);
@@ -215,10 +215,15 @@ fn creation_defaults_the_creator_to_the_acting_operator() {
     .expect("creation");
     assert_eq!(defaulted.item.creator.as_deref(), Some("alice"));
 
-    // The configured operator is the acting operator when no override is given.
-    let mut config = project.config().clone();
-    config.operator = Some("carol".to_owned());
-    project.set_config(config);
+    // The configured local operator is the acting operator when no override is
+    // given.
+    waymark_core::ops::local_config::set_scalar(
+        &project,
+        waymark_core::ops::config::Scalar::Operator,
+        "carol",
+        &options(),
+    )
+    .expect("the local operator is recorded");
     let configured = create::create(&project, request("Configured"), &options()).expect("creation");
     assert_eq!(configured.item.creator.as_deref(), Some("carol"));
 }

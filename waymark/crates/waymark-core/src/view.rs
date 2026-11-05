@@ -175,6 +175,23 @@ pub fn item_fields(item: &WorkItem) -> Value {
     })
 }
 
+/// The human display forms of one item's persisted timestamps, in `zone`.
+///
+/// Persisted timestamps stay UTC in every machine field; this is the trio a
+/// human-facing surface renders. Producing it here keeps the zone choice and the
+/// format in one place, so no adapter can render a different local context. The
+/// zone travels with the values, so a reader can say which context produced
+/// them.
+pub fn item_display_times_json(item: &WorkItem, zone: chrono_tz::Tz) -> Value {
+    let render = |value: crate::time::Timestamp| crate::time::format_local(value.get(), zone);
+    json!({
+        "timezone": zone.name(),
+        "created_at": render(item.created_at),
+        "updated_at": render(item.updated_at),
+        "closed_at": item.closed_at.map(render),
+    })
+}
+
 /// The persisted fields plus the document path, for a read that names one file.
 pub fn item_json(item: &WorkItem, path: &Utf8Path) -> Value {
     let mut value = item_fields(item);
@@ -225,15 +242,13 @@ pub fn row_json(row: &ListedItem, projection: &Projection) -> Value {
     crate::query::projected_row(row, projection)
 }
 
-/// The machine form of one configuration document.
+/// The machine form of the shared project configuration document.
 pub fn config_json(config: &Config) -> Value {
     json!({
         "version": config.version.to_string(),
         "generation": config.version.generation,
         "revision": config.version.revision,
         "storage_root": config.storage_root,
-        "operator": config.operator,
-        "timezone": config.timezone.name(),
         "categories": config
             .categories
             .iter()
@@ -263,7 +278,117 @@ pub fn config_json(config: &Config) -> Value {
                 )
             })
             .collect::<Map<String, Value>>(),
-        "cache": {"enabled": config.cache.enabled, "capacity": config.cache.capacity},
+    })
+}
+
+/// The machine form of the local user configuration document.
+///
+/// `null` settings are omitted rather than rendered as `null`, so "the document
+/// does not state it" and "the document states a value" stay distinguishable in
+/// one glance.
+pub fn local_config_json(local: Option<&crate::user_config::UserConfig>) -> Value {
+    let Some(local) = local else {
+        return Value::Null;
+    };
+    let mut document = Map::new();
+    if let Some(operator) = &local.operator {
+        document.insert("operator".to_owned(), json!(operator));
+    }
+    if let Some(zone) = local.timezone {
+        document.insert("timezone".to_owned(), json!(zone.name()));
+    }
+    if !local.cache.is_absent() {
+        let mut cache = Map::new();
+        if let Some(enabled) = local.cache.enabled {
+            cache.insert("enabled".to_owned(), json!(enabled));
+        }
+        if let Some(capacity) = local.cache.capacity {
+            cache.insert("capacity".to_owned(), json!(capacity));
+        }
+        document.insert("cache".to_owned(), Value::Object(cache));
+    }
+    Value::Object(document)
+}
+
+/// The machine form of the effective values and the source of each.
+///
+/// One entry per setting, each naming the value and where it came from, so an
+/// adapter renders precedence instead of deciding it.
+pub fn effective_config_json(effective: &crate::user_config::EffectiveConfig) -> Value {
+    json!({
+        "operator": effective.operator,
+        "timezone": effective.timezone.name(),
+        "cache": {
+            "enabled": effective.cache.enabled,
+            "capacity": effective.cache.capacity,
+        },
+    })
+}
+
+/// Where each effective value came from, as its own structure.
+///
+/// The values and their provenance are separate objects on purpose: a client
+/// reads the values as configuration, and the sources as an explanation, and
+/// neither has to be unpacked from the other.
+pub fn effective_sources_json(effective: &crate::user_config::EffectiveConfig) -> Value {
+    json!({
+        "operator": effective.operator_source.as_str(),
+        "timezone": effective.timezone_source.as_str(),
+        "cache": {
+            "enabled": effective.cache_enabled_source.as_str(),
+            "capacity": effective.cache_capacity_source.as_str(),
+        },
+    })
+}
+
+/// The machine form of both documents plus the resolved values.
+///
+/// This is what `config show` prints in machine mode and what the MCP read tool
+/// returns, so the CLI and the MCP server cannot disagree about what "the
+/// configuration" is.
+pub fn config_bundle_json(bundle: &crate::ops::local_config::Bundle) -> Value {
+    json!({
+        "project": config_json(&bundle.project),
+        "local": local_config_json(bundle.local.as_ref()),
+        "effective": effective_config_json(&bundle.effective),
+        "sources": effective_sources_json(&bundle.effective),
+    })
+}
+
+/// The envelope metadata a configuration read carries.
+///
+/// Resolution can warn (an undetectable machine zone falls back to UTC), and a
+/// warning that only the human renderer shows is not reported at all, so the
+/// metadata is built here and both adapters pass it through.
+pub fn config_bundle_meta(bundle: &crate::ops::local_config::Bundle) -> crate::envelope::Meta {
+    crate::envelope::Meta::direct_file_scoped().with_warnings(bundle.effective.warnings.clone())
+}
+
+/// One shared-configuration write: the resulting document and its revision move.
+///
+/// Every adapter returns exactly this shape, so a config write cannot look
+/// different through the CLI and MCP.
+pub fn config_outcome_json(outcome: &crate::ops::config::ConfigOutcome) -> Value {
+    json!({
+        "config": config_json(&outcome.config),
+        "changed": outcome.changed,
+        "changed_keys": outcome.changed_keys,
+        "previous_revision": outcome.previous_revision,
+        "revision": outcome.revision,
+    })
+}
+
+/// One local-configuration write: the local document, never a revision move.
+///
+/// The shared revision is reported unchanged because a local write cannot move
+/// it; reporting it keeps the two write results one shape.
+pub fn local_outcome_json(outcome: &crate::ops::local_config::LocalOutcome) -> Value {
+    json!({
+        "local": local_config_json(Some(&outcome.local)),
+        "changed": outcome.changed,
+        "changed_keys": outcome.changed_keys,
+        "previous_revision": outcome.previous_revision,
+        "revision": outcome.revision,
     })
 }
 
@@ -677,7 +802,6 @@ mod tests {
     #[test]
     fn config_json_renders_the_document_the_adapters_publish() {
         let mut config = Config::fresh();
-        config.operator = Some("frank".to_owned());
         config.categories.insert(
             crate::model::CategoryKey::parse("bug").unwrap(),
             Category {
@@ -699,8 +823,9 @@ mod tests {
         assert_eq!(value["generation"], json!(1));
         assert_eq!(value["revision"], json!(config.version.revision));
         assert_eq!(value["storage_root"], json!("work"));
-        assert_eq!(value["operator"], json!("frank"));
-        assert_eq!(value["timezone"], json!("UTC"));
+        assert!(value.get("operator").is_none());
+        assert!(value.get("timezone").is_none());
+        assert!(value.get("cache").is_none());
         assert_eq!(value["categories"]["task"]["key"], json!("task"));
         assert_eq!(value["categories"]["task"]["path"], json!("work/task"));
         assert_eq!(value["categories"]["bug"]["name"], json!("Bugs"));
@@ -708,8 +833,70 @@ mod tests {
         assert_eq!(value["fields"]["effort"]["type"], json!("integer"));
         assert_eq!(value["fields"]["effort"]["required"], json!(true));
         assert_eq!(value["fields"]["effort"]["default"], json!(3));
-        assert_eq!(value["cache"]["enabled"], json!(true));
-        assert_eq!(value["cache"]["capacity"], json!(config.cache.capacity));
+    }
+
+    #[test]
+    fn local_and_effective_json_render_every_source() {
+        use crate::user_config::{EffectiveConfig, LocalEnvironment, UserConfig};
+
+        let mut user = UserConfig::empty();
+        user.operator = Some("frank".to_owned());
+        let environment = LocalEnvironment {
+            operator: Some("ignored".to_owned()),
+            timezone: Some(chrono_tz::Tz::Asia__Shanghai),
+        };
+        let effective = EffectiveConfig::resolve(Some(&user), &environment);
+
+        let local = local_config_json(Some(&user));
+        assert_eq!(local["operator"], json!("frank"));
+        assert!(local.get("timezone").is_none());
+
+        let resolved = effective_config_json(&effective);
+        assert_eq!(resolved["operator"], json!("frank"));
+        assert_eq!(resolved["timezone"], json!("Asia/Shanghai"));
+        assert_eq!(resolved["cache"]["capacity"], json!(512));
+
+        // Provenance is its own structure, so a client reads values as
+        // configuration and sources as the explanation.
+        let sources = effective_sources_json(&effective);
+        assert_eq!(sources["operator"], json!("local_document"));
+        assert_eq!(sources["timezone"], json!("system_time_zone"));
+        assert_eq!(sources["cache"]["enabled"], json!("built_in_default"));
+        assert_eq!(sources["cache"]["capacity"], json!("built_in_default"));
+        assert_eq!(local_config_json(None), Value::Null);
+    }
+
+    #[test]
+    fn a_bundle_carries_its_resolution_warnings_as_envelope_metadata() {
+        use crate::user_config::{EffectiveConfig, LocalEnvironment};
+
+        let effective = EffectiveConfig::resolve(None, &LocalEnvironment::isolated());
+        let bundle = crate::ops::local_config::Bundle {
+            project: crate::config::Config::fresh(),
+            local: None,
+            effective,
+        };
+        let meta = config_bundle_meta(&bundle);
+        assert_eq!(meta.warnings.len(), 1, "{:?}", meta.warnings);
+        assert_eq!(
+            meta.warnings[0].code,
+            crate::error::Code::TimeZoneUndetected
+        );
+
+        // A resolvable zone produces no warning at all.
+        let effective = EffectiveConfig::resolve(
+            None,
+            &LocalEnvironment {
+                operator: None,
+                timezone: Some(chrono_tz::Tz::UTC),
+            },
+        );
+        let bundle = crate::ops::local_config::Bundle {
+            project: crate::config::Config::fresh(),
+            local: None,
+            effective,
+        };
+        assert!(config_bundle_meta(&bundle).warnings.is_empty());
     }
 
     fn listing() -> Listing {

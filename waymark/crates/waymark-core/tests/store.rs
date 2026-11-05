@@ -7,6 +7,7 @@ use waymark_core::error::Code;
 use waymark_core::model::CategoryKey;
 use waymark_core::store::InitOptions;
 use waymark_core::testing::fixtures;
+use waymark_core::user_config::UserConfig;
 use waymark_core::{Config, Project};
 
 fn utf8(dir: &tempfile::TempDir) -> Utf8PathBuf {
@@ -49,20 +50,33 @@ fn init_is_safe_to_re_run() {
 }
 
 #[test]
-fn init_records_the_named_operator() {
+fn init_writes_the_seeded_local_operator_and_never_the_shared_document() {
     let dir = tempfile::tempdir().unwrap();
     let root = utf8(&dir);
-    let project = Project::init(
+    let mut local = UserConfig::empty();
+    local.operator = Some("frank".to_owned());
+    Project::init(
         &root,
         InitOptions {
-            operator: Some("frank".to_owned()),
+            local: Some(local),
             ..InitOptions::default()
         },
     )
     .unwrap();
-    assert_eq!(project.config().operator.as_deref(), Some("frank"));
     let reopened = Project::open(&root).unwrap();
-    assert_eq!(reopened.config().operator.as_deref(), Some("frank"));
+    assert_eq!(
+        UserConfig::load(&reopened.user_config_path())
+            .unwrap()
+            .operator
+            .as_deref(),
+        Some("frank")
+    );
+    // The shared document is byte-identical to a fresh one: no local value
+    // leaks into the shared baseline.
+    assert_eq!(
+        std::fs::read_to_string(reopened.config_path()).unwrap(),
+        Config::fresh().to_toml_string()
+    );
 }
 
 #[test]
@@ -97,20 +111,26 @@ fn opening_a_directory_without_a_project_is_project_not_found() {
 fn an_existing_project_is_loaded_rather_than_replaced() {
     let dir = tempfile::tempdir().unwrap();
     let root = utf8(&dir);
-    let mut config = Config::fresh();
-    config.operator = Some("someone".to_owned());
+    let mut local = UserConfig::empty();
+    local.operator = Some("someone".to_owned());
     Project::init(
         &root,
         InitOptions {
-            config: Some(config),
+            local: Some(local),
             ..InitOptions::default()
         },
     )
     .unwrap();
 
-    // A bare `init` must not clobber the operator that is already recorded.
+    // A bare `init` must not clobber the local document already written.
     let project = Project::init(&root, InitOptions::default()).unwrap();
-    assert_eq!(project.config().operator.as_deref(), Some("someone"));
+    assert_eq!(
+        UserConfig::load(&project.user_config_path())
+            .unwrap()
+            .operator
+            .as_deref(),
+        Some("someone")
+    );
 }
 
 #[test]
@@ -118,16 +138,24 @@ fn init_with_force_replaces_the_configuration() {
     let dir = tempfile::tempdir().unwrap();
     let root = utf8(&dir);
     Project::init(&root, InitOptions::default()).unwrap();
+    let mut local = UserConfig::empty();
+    local.operator = Some("someone".to_owned());
     let project = Project::init(
         &root,
         InitOptions {
             force: true,
-            operator: Some("someone".to_owned()),
+            local: Some(local),
             ..InitOptions::default()
         },
     )
     .unwrap();
-    assert_eq!(project.config().operator.as_deref(), Some("someone"));
+    assert_eq!(
+        UserConfig::load(&project.user_config_path())
+            .unwrap()
+            .operator
+            .as_deref(),
+        Some("someone")
+    );
 }
 
 #[test]

@@ -8,6 +8,7 @@
 use std::process::{Command, Output};
 
 use camino::Utf8PathBuf;
+use serde_json::json;
 
 fn waymark() -> Command {
     Command::new(env!("CARGO_BIN_EXE_waymark"))
@@ -120,18 +121,39 @@ fn config_show_prints_the_document_in_human_mode_and_json_in_machine_mode() {
         .arg("--project")
         .arg(&root));
     assert_eq!(machine.status(), 0);
-    let data = &machine.json()["data"]["config"];
-    assert_eq!(data["storage_root"], "work");
-    assert_eq!(data["timezone"], "UTC");
-    assert_eq!(data["revision"], 0);
-    assert_eq!(data["version"], "1.0");
-    assert_eq!(data["categories"]["task"]["path"], "work/task");
-    assert_eq!(data["cache"]["capacity"], 512);
+    let data = &machine.json()["data"];
+    assert_eq!(data["project"]["storage_root"], "work");
+    assert_eq!(data["project"]["revision"], 0);
+    assert_eq!(data["project"]["version"], "1.0");
+    assert_eq!(data["project"]["categories"]["task"]["path"], "work/task");
+    // The local settings live in their own document, and the effective block
+    // reports where each value came from.
+    assert!(
+        data["project"].get("timezone").is_none(),
+        "{}",
+        data["project"]
+    );
+    assert!(
+        data["project"].get("cache").is_none(),
+        "{}",
+        data["project"]
+    );
+    assert!(data["local"]["timezone"].is_string(), "{}", data["local"]);
+    assert_eq!(
+        data["sources"]["timezone"], "local_document",
+        "{}",
+        data["sources"]
+    );
+    // `init` writes the cache defaults explicitly, so they are stated facts
+    // rather than something inherited from a later release's defaults.
+    assert_eq!(data["effective"]["cache"]["capacity"], json!(512u64));
+    assert_eq!(data["sources"]["cache"]["capacity"], "local_document");
 }
 
 #[test]
 fn config_set_scalar_writes_once_and_reports_the_revision_in_json() {
     let (_dir, root) = project();
+    let before = config_bytes(&root);
     let run_result = run(waymark()
         .arg("--json")
         .arg("config")
@@ -144,10 +166,18 @@ fn config_set_scalar_writes_once_and_reports_the_revision_in_json() {
     let data = &run_result.json()["data"];
     assert_eq!(data["changed"], true);
     assert_eq!(data["previous_revision"], 0);
-    assert_eq!(data["revision"], 1);
-    assert_eq!(data["config"]["operator"], "frank");
-    assert_eq!(data["config"]["version"], "1.1");
-    assert!(config_bytes(&root).contains("operator = \"frank\""));
+    assert_eq!(
+        data["revision"],
+        json!(0),
+        "a local write never moves the shared revision"
+    );
+    assert_eq!(data["local"]["operator"], "frank");
+
+    // The shared document is untouched; the local document holds the value.
+    assert_eq!(config_bytes(&root), before);
+    assert!(!config_bytes(&root).contains("operator ="));
+    let local = std::fs::read_to_string(root.join(".waymark").join("user.toml")).unwrap();
+    assert!(local.contains("operator = \"frank\""), "{local}");
 }
 
 #[test]
@@ -336,7 +366,7 @@ fn validate_reports_configuration_scope_and_strict_exits_three_on_errors() {
     assert_eq!(clean.status(), 0, "stderr: {}", clean.stderr());
     assert_eq!(clean.json()["data"]["scope"][0], "configuration");
 
-    let document = config_bytes(&root).replace("timezone = \"UTC\"", "timezone = \"Nope/Nope\"");
+    let document = config_bytes(&root).replace("name = \"Task\"", "name = \"  \"");
     std::fs::write(root.join(".waymark").join("config.toml"), document).unwrap();
     let dirty = run(waymark()
         .arg("--json")
@@ -389,4 +419,225 @@ fn config_dry_run_reports_without_writing() {
     assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
     assert_eq!(result.json()["data"]["changed"], true);
     assert_eq!(config_bytes(&root), before);
+}
+
+#[test]
+fn config_show_keeps_the_local_half_off_stdout() {
+    let (_dir, root) = project();
+    config(&root, &["set", "operator", "frank"]);
+    let shown = config(&root, &["show"]);
+    assert_eq!(shown.status(), 0, "stderr: {}", shown.stderr());
+
+    // `config show > config.toml` must keep producing a valid shared document,
+    // so the local half is prose on stderr.
+    assert_eq!(shown.stdout(), config_bytes(&root));
+    assert!(!shown.stdout().contains("operator"), "{}", shown.stdout());
+    assert!(
+        shown.stderr().contains("local user.toml:"),
+        "{}",
+        shown.stderr()
+    );
+    assert!(
+        shown.stderr().contains("operator = \"frank\""),
+        "{}",
+        shown.stderr()
+    );
+    assert!(shown.stderr().contains("effective:"), "{}", shown.stderr());
+    assert!(
+        shown.stderr().contains("(local_document)"),
+        "every effective value names its source: {}",
+        shown.stderr()
+    );
+}
+
+#[test]
+fn config_validate_reports_a_local_document_finding() {
+    let (_dir, root) = project();
+    std::fs::write(
+        root.join(".waymark").join("user.toml"),
+        "timezone = \"Mars/Olympus\"\n",
+    )
+    .unwrap();
+
+    let result = run(waymark()
+        .arg("--json")
+        .arg("config")
+        .arg("validate")
+        .arg("--project")
+        .arg(&root));
+    // A configuration complaint has an exit class, so the run fails with it and
+    // the shared failure envelope carries the located message.
+    assert_eq!(result.status(), 3);
+    let error = &result.json()["error"];
+    assert_eq!(error["code"], "CONFIG_INVALID");
+    assert!(
+        error["details"]["issues"]
+            .as_array()
+            .expect("the issues list")
+            .iter()
+            .any(|issue| issue.as_str().unwrap_or_default().contains("timezone")),
+        "{error}"
+    );
+
+    // The human run names the document and the key.
+    let human = config(&root, &["validate"]);
+    assert_eq!(human.status(), 3);
+    assert!(human.stderr().contains("timezone"), "{}", human.stderr());
+}
+
+#[test]
+fn a_shared_document_carrying_a_local_setting_is_refused_by_name() {
+    let (_dir, root) = project();
+    let document = config_bytes(&root).replace(
+        "storage_root = \"work\"\n",
+        "storage_root = \"work\"\ntimezone = \"UTC\"\n",
+    );
+    std::fs::write(root.join(".waymark").join("config.toml"), document).unwrap();
+
+    let result = run(waymark()
+        .arg("--json")
+        .arg("config")
+        .arg("show")
+        .arg("--project")
+        .arg(&root));
+    assert_ne!(result.status(), 0);
+    let error = &result.json()["error"];
+    assert_eq!(error["code"], "CONFIG_INVALID");
+    assert!(
+        error["details"]["issues"]
+            .as_array()
+            .expect("the issues list")
+            .iter()
+            .any(|issue| issue
+                .as_str()
+                .unwrap_or_default()
+                .contains("local user configuration")),
+        "{error}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Local scalar routing
+// ---------------------------------------------------------------------------
+
+/// Run `git` in `root` with a fixed identity, panicking on failure.
+fn git(root: &Utf8PathBuf, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .current_dir(root)
+        .args([
+            "-c",
+            "user.name=Waymark Test",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(args)
+        .output()
+        .expect("the git binary runs");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+#[test]
+fn clearing_the_local_operator_restores_the_fallback() {
+    let (_dir, root) = project();
+    config(&root, &["set", "operator", "frank"]);
+    let shown = run(waymark()
+        .arg("--json")
+        .arg("config")
+        .arg("show")
+        .arg("--project")
+        .arg(&root));
+    assert_eq!(shown.status(), 0, "stderr: {}", shown.stderr());
+    assert_eq!(
+        shown.json()["data"]["sources"]["operator"],
+        json!("local_document")
+    );
+
+    let cleared = run(waymark()
+        .arg("--json")
+        .arg("config")
+        .arg("set")
+        .arg("operator")
+        .arg("")
+        .arg("--project")
+        .arg(&root));
+    assert_eq!(cleared.status(), 0, "stderr: {}", cleared.stderr());
+    let local = std::fs::read_to_string(root.join(".waymark").join("user.toml")).unwrap();
+    assert!(!local.contains("operator"), "{local}");
+
+    // Clearing is an override removal, not an opt-out: the fallback applies.
+    let shown = run(waymark()
+        .arg("--json")
+        .arg("config")
+        .arg("show")
+        .arg("--project")
+        .arg(&root));
+    assert_eq!(shown.status(), 0, "stderr: {}", shown.stderr());
+    assert_eq!(
+        shown.json()["data"]["sources"]["operator"],
+        json!("unset"),
+        "no Git identity outside a repository, so nothing supplies one"
+    );
+
+    // Every local setting clears the same way: the fallback takes over again.
+    config(&root, &["set", "timezone", "Europe/Berlin"]);
+    let cleared = config(&root, &["set", "timezone", ""]);
+    assert_eq!(cleared.status(), 0, "stderr: {}", cleared.stderr());
+    let shown = run(waymark()
+        .arg("--json")
+        .arg("config")
+        .arg("show")
+        .arg("--project")
+        .arg(&root));
+    assert_ne!(
+        shown.json()["data"]["sources"]["timezone"],
+        json!("local_document"),
+        "the explicit zone is gone: {}",
+        shown.stdout()
+    );
+}
+
+#[test]
+fn setting_a_tracked_local_document_fails_with_untracking_guidance() {
+    if waymark_core::git::find_executable().is_none() {
+        eprintln!("skipping: no `git` executable on PATH");
+        return;
+    }
+    let (_dir, root) = project();
+    git(&root, &["init", "--quiet"]);
+    git(&root, &["add", "--force", ".waymark/user.toml"]);
+    let before = std::fs::read_to_string(root.join(".waymark/user.toml")).expect("the document");
+
+    let result = config(&root, &["set", "operator", "someone"]);
+    assert_eq!(result.status(), 3, "stderr: {}", result.stderr());
+    assert!(
+        result.stderr().contains("untrack"),
+        "the refusal names the repair: {}",
+        result.stderr()
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join(".waymark/user.toml")).expect("the document"),
+        before
+    );
+}
+
+#[test]
+fn a_malformed_local_document_fails_the_write_rather_than_being_overwritten() {
+    let (_dir, root) = project();
+    let path = root.join(".waymark/user.toml");
+    std::fs::write(&path, "operator = \n").unwrap();
+
+    let result = config(&root, &["set", "operator", "frank"]);
+    assert_eq!(result.status(), 3, "stderr: {}", result.stderr());
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "operator = \n",
+        "the broken document is preserved for repair"
+    );
 }
