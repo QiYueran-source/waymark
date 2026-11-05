@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T00:52:29Z
+updated_at: 2026-11-05T00:53:37Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ## Destination
@@ -436,7 +436,7 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 
 ### Cross-platform planning
 
-- Determine the concrete platform adaptation contracts, safety guarantees, test and release gates, and required changes to the existing Windows specification.
+- The remaining platform adaptation contracts, safety guarantees, test and release gates, and specification reconciliation are tracked in [Waymark cross-platform adaptation](wm-4wbvzsv34g2p).
 
 
 ### Distribution
