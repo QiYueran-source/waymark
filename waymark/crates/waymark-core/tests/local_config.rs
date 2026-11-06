@@ -41,6 +41,39 @@ fn local_text(project: &Project) -> Option<String> {
     std::fs::read_to_string(project.user_config_path()).ok()
 }
 
+/// Make `path` read-only the way the platform spells it: mode `0444` on Unix,
+/// the read-only attribute on Windows.
+fn make_read_only(path: &Utf8Path) {
+    let mut permissions = std::fs::metadata(path)
+        .expect("the file exists before it is made read-only")
+        .permissions();
+    permissions.set_readonly(true);
+    std::fs::set_permissions(path, permissions).expect("the read-only state");
+}
+
+/// Restore `path` to a writable state before the temporary directory is dropped.
+// The lint warns that `set_readonly(false)` is world-writable on Unix; that
+// branch is not compiled there, and Windows has no other way to clear the bit.
+#[allow(clippy::permissions_set_readonly_false)]
+fn make_writable(path: &Utf8Path) {
+    // `Permissions::set_readonly(false)` turns on every write bit on Unix, so
+    // restore the ordinary `0644` there instead. Windows has only the attribute.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644))
+            .expect("the writable mode");
+    }
+    #[cfg(not(unix))]
+    {
+        let mut permissions = std::fs::metadata(path)
+            .expect("the file exists before it is made writable")
+            .permissions();
+        permissions.set_readonly(false);
+        std::fs::set_permissions(path, permissions).expect("the writable state");
+    }
+}
+
 fn git_available() -> bool {
     waymark_core::git::find_executable().is_some()
 }
@@ -816,23 +849,44 @@ fn an_unsafe_ignore_file_stops_initialization_before_any_local_settings_exist() 
 
     // A read-only ignore file that is missing the entry is refused rather than
     // replaced behind its permissions.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let path = metadata.join(".gitignore");
-        std::fs::write(&path, "write.lock\n").expect("a read-only ignore file");
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444))
-            .expect("the read-only mode");
-        let error = waymark_core::ops::config::init(&root, InitRequest::new(), false)
-            .expect_err("a read-only ignore file is refused");
-        assert_eq!(error.code(), Code::LockFailed);
-        assert!(
-            !metadata.join(USER_CONFIG_FILE).exists(),
-            "no local settings"
-        );
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
-            .expect("the mode is restorable");
-    }
+    let path = metadata.join(".gitignore");
+    std::fs::write(&path, "write.lock\n").expect("a read-only ignore file");
+    make_read_only(&path);
+    let error = waymark_core::ops::config::init(&root, InitRequest::new(), false)
+        .expect_err("a read-only ignore file is refused");
+    assert_eq!(error.code(), Code::LockFailed);
+    assert!(
+        !metadata.join(USER_CONFIG_FILE).exists(),
+        "no local settings"
+    );
+    make_writable(&path);
+}
+
+#[test]
+fn initialization_refuses_to_seed_the_local_document_beside_a_read_only_ignore_file() {
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let root = utf8(&dir);
+    let metadata = root.join(".waymark");
+    std::fs::create_dir_all(&metadata).expect("the metadata directory exists");
+    let ignore = metadata.join(".gitignore");
+    // Both entries are present; only the permissions are unsafe.
+    std::fs::write(&ignore, "write.lock\nuser.toml\n").expect("the ignore file");
+    make_read_only(&ignore);
+
+    let error =
+        waymark_core::ops::config::init(&root, InitRequest::new().with_operator("frank"), false)
+            .expect_err("an unwritable ignore file stops a local-document write");
+    assert_eq!(error.code(), Code::LockFailed);
+    assert!(
+        !metadata.join(USER_CONFIG_FILE).exists(),
+        "no local settings are seeded"
+    );
+    assert!(
+        !metadata.join("config.toml").exists(),
+        "the shared configuration is not written either"
+    );
+
+    make_writable(&ignore);
 }
 
 #[test]
@@ -1001,6 +1055,51 @@ fn an_unsafe_ignore_file_refuses_a_local_write_before_it_happens() {
         !project.user_config_path().exists(),
         "nothing is written before the ignore file is safe"
     );
+}
+
+#[test]
+fn a_read_only_ignore_file_refuses_a_local_write_even_when_the_entry_is_present() {
+    let (_dir, project) = fixtures::deterministic_project();
+    let ignore = project.metadata_dir().join(".gitignore");
+    let before = std::fs::read_to_string(&ignore).expect("the ignore file");
+    assert!(
+        before.lines().any(|line| line.trim() == USER_CONFIG_FILE),
+        "the entry is already present; only the permissions are unsafe: {before}"
+    );
+    make_read_only(&ignore);
+
+    let error = local_config::set_scalar(&project, Scalar::Operator, "frank", &options())
+        .expect_err("an unwritable ignore file stops the local write");
+    assert_eq!(error.code(), Code::LockFailed);
+    assert!(
+        !project.user_config_path().exists(),
+        "no local settings are written"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&ignore).expect("the ignore file"),
+        before,
+        "the ignore file is byte-identical after the refusal"
+    );
+
+    make_writable(&ignore);
+}
+
+#[test]
+fn a_read_only_ignore_file_does_not_block_a_work_item_write() {
+    let (_dir, project) = fixtures::deterministic_project();
+    let ignore = project.metadata_dir().join(".gitignore");
+    make_read_only(&ignore);
+
+    // The lock entry is already ignored, so the work-item write is unaffected;
+    // only a local-document write needs the ignore file itself writable.
+    create::create(
+        &project,
+        create::CreateRequest::new("t", "task", "f"),
+        &options(),
+    )
+    .expect("the work-item write succeeds");
+
+    make_writable(&ignore);
 }
 
 #[test]

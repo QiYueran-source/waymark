@@ -18,8 +18,8 @@ pub const LOCK_FILE: &str = "write.lock";
 /// Acquisition repairs a missing `.waymark/.gitignore` entry for the lock file
 /// itself. It does not touch the local user document's entry: a work-item write
 /// must neither rewrite an ignore file it does not use nor fail because that
-/// file is unusual. The local write path enforces both entries itself, and it
-/// skips everything for a dry run.
+/// file is unusual. The local write path enforces both entries and the file's
+/// writability itself, and it skips everything for a dry run.
 pub fn with_project_lock<T>(
     project: &Project,
     wait: LockWait,

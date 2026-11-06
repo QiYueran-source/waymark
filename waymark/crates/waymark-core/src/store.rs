@@ -220,16 +220,22 @@ impl Project {
         // Both documents are validated, and the ignore entry that keeps the
         // local document out of the shared baseline is repaired, before either
         // file is written: a project never ends up with a local document that no
-        // ignore rule covers.
+        // ignore rule covers. Seeding the local document is a local-document
+        // write, so it also needs the ignore file itself writable.
         let local = opts.local.unwrap_or_default();
         local.validate()?;
-        ensure_gitignore(&metadata, IGNORE_ENTRIES)?;
+        let local_path = metadata.join(crate::user_config::USER_CONFIG_FILE);
+        let seeds_local = !local.is_empty() && !local_path.exists();
+        if seeds_local {
+            ensure_local_gitignore(&metadata)?;
+        } else {
+            ensure_gitignore(&metadata, IGNORE_ENTRIES)?;
+        }
 
         // The local document is created once and then left alone. It holds one
         // collaborator's preferences, so neither a `--force` replacement of the
         // shared configuration nor a later set of seeds may rewrite it.
-        let local_path = metadata.join(crate::user_config::USER_CONFIG_FILE);
-        if !local.is_empty() && !local_path.exists() {
+        if seeds_local {
             crate::write::replace_unchecked(&local_path, local.to_toml_string().as_bytes())?;
         }
         crate::write::replace_unchecked(&config_path, config.to_toml_string().as_bytes())?;
@@ -579,7 +585,9 @@ impl Project {
 /// shared baseline, so it is treated defensively: a symlink is never written
 /// through, the file must be a regular file, and a read-only file is refused
 /// rather than replaced behind its permissions. An entry that is already present
-/// is never duplicated.
+/// is never duplicated. This is the lenient path: a read-only file whose entries
+/// are all present is left alone, so a work-item write that only needs the lock
+/// entry is never blocked by an unusual ignore file.
 pub fn ensure_gitignore(metadata_dir: &Utf8Path, entries: &[&str]) -> Result<(), WaymarkError> {
     let path = metadata_dir.join(".gitignore");
     if let Ok(metadata) = fs::symlink_metadata(&path) {
@@ -616,8 +624,9 @@ pub fn ensure_gitignore(metadata_dir: &Utf8Path, entries: &[&str]) -> Result<(),
     if changed {
         // Replacement happens by rename, which would silently work around a
         // read-only file. Refuse instead: the caller asked for a guarantee this
-        // file's permissions say it cannot keep.
-        if fs::metadata(&path).is_ok_and(|metadata| metadata.permissions().readonly()) {
+        // file's permissions say it cannot keep. A missing file is fine here:
+        // the replacement creates it.
+        if ignore_is_read_only(&path) {
             return Err(WaymarkError::lock_failed(
                 path.to_string(),
                 "the .gitignore is read-only and will not be overwritten",
@@ -626,6 +635,40 @@ pub fn ensure_gitignore(metadata_dir: &Utf8Path, entries: &[&str]) -> Result<(),
         crate::write::replace_unchecked(&path, contents.as_bytes())?;
     }
     Ok(())
+}
+
+/// Ensure `.waymark/.gitignore` is safe to write the local user document beside.
+///
+/// This is [`ensure_gitignore`] plus one stricter rule for the local-document
+/// write path: the ignore file must itself stay writable. An unwritable file is
+/// refused even when every entry is already present, because a local-document
+/// write must not leave a preferences file whose ignore rule the file's
+/// permissions say cannot be kept. A work-item write keeps the lenient path and
+/// is unaffected.
+pub fn ensure_local_gitignore(metadata_dir: &Utf8Path) -> Result<(), WaymarkError> {
+    ensure_gitignore(metadata_dir, IGNORE_ENTRIES)?;
+    let path = metadata_dir.join(".gitignore");
+    // The permission bits catch a `0444` file even for a privileged process; the
+    // write-open probe catches ownership, ACLs, the Windows read-only attribute,
+    // and a file that vanished after the entry check. The probe fails closed, so
+    // anything not demonstrably writable is refused.
+    let writable =
+        !ignore_is_read_only(&path) && fs::OpenOptions::new().write(true).open(&path).is_ok();
+    if !writable {
+        return Err(WaymarkError::lock_failed(
+            path.to_string(),
+            "the .gitignore is read-only and a local configuration write needs it writable",
+        ));
+    }
+    Ok(())
+}
+
+/// Whether the metadata ignore file exists and is read-only by its permission bits.
+///
+/// A missing file is not read-only: [`ensure_gitignore`] creates it when an entry
+/// has to be added, and [`ensure_local_gitignore`] checks writability separately.
+fn ignore_is_read_only(path: &Utf8Path) -> bool {
+    fs::metadata(path).is_ok_and(|metadata| metadata.permissions().readonly())
 }
 
 /// Resolve a possibly-relative path against the working directory without
