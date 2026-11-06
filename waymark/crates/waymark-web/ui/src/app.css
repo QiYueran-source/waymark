@@ -201,17 +201,135 @@ code {
 	font-size: 0.82rem;
 }
 
-/* Status section ----------------------------------------------------------- */
+/* Dashboard disclosure ----------------------------------------------------- */
 
 /*
- * The dashboard's status section sits between the toolbar and the tree layout
- * as a flex sibling, so its banner never disturbs the tree pane.
+ * The cache/status dashboard is a diagnostic aid, not page content: one small
+ * control in the header discloses it, and the control itself carries the
+ * warning when the projection is unreadable, incomplete, or stale. The panel
+ * stays mounted behind a hidden overlay, so its sections render once and never
+ * occupy the page.
  */
-.status-section {
+.header-actions {
+	display: flex;
 	flex: none;
+	align-items: center;
+	gap: 0.7rem;
+}
+
+.dashboard-button {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	min-height: 1.6rem;
+	padding: 0.18rem 0.55rem;
+	border: 1px solid var(--line-strong);
+	border-radius: 3px;
+	background: var(--panel-2);
+	color: var(--muted);
+	font-size: 0.78rem;
+	font-weight: 550;
+	white-space: nowrap;
+	transition:
+		color 130ms ease,
+		background-color 130ms ease,
+		border-color 130ms ease;
+}
+
+.dashboard-button:hover {
+	background: #fff;
+	color: var(--ink);
+}
+
+.dashboard-button[aria-expanded='true'] {
+	border-color: var(--accent);
+	color: var(--accent);
+}
+
+.dashboard-button.alert {
+	border-color: var(--alert);
+	background: var(--alert-bg);
+	color: var(--alert);
+}
+
+.dashboard-button-alert {
+	font-size: 0.72rem;
+	font-weight: 650;
+	letter-spacing: 0.01em;
+}
+
+.dashboard-overlay {
+	display: none;
+	position: fixed;
+	inset: 0;
+	z-index: 40;
+	background: rgba(26, 36, 32, 0.32);
+}
+
+.dashboard-overlay.open {
+	display: flex;
+	align-items: flex-start;
+	justify-content: flex-end;
+	padding: 0.9rem;
+	overflow: auto;
+}
+
+.dashboard-panel {
+	width: min(46rem, 100%);
+	max-height: 100%;
+	overflow: auto;
+	background: var(--panel);
+	border: 1px solid var(--line-strong);
+	border-radius: 6px;
+	box-shadow: 0 1.2rem 3rem rgba(26, 36, 32, 0.28);
+}
+
+.dashboard-panel-header {
+	position: sticky;
+	top: 0;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
 	padding: 0.6rem 1.1rem;
 	background: var(--panel);
 	border-bottom: 1px solid var(--line);
+}
+
+.dashboard-panel-title {
+	font-size: 0.92rem;
+	font-weight: 650;
+	color: var(--ink);
+}
+
+.dashboard-close {
+	min-height: 1.6rem;
+	padding: 0 0.5rem;
+	border: 1px solid var(--line);
+	border-radius: 3px;
+	background: transparent;
+	color: var(--muted);
+	font-size: 1rem;
+	line-height: 1;
+}
+
+.dashboard-close:hover {
+	background: var(--panel-2);
+	color: var(--ink);
+}
+
+.dashboard-panel-body {
+	padding-bottom: 0.6rem;
+}
+
+/* Status section ----------------------------------------------------------- */
+
+/*
+ * The status section lives inside the dashboard panel; the panel supplies the
+ * frame, so the section only spaces its content.
+ */
+.status-section {
+	padding: 0.6rem 1.1rem;
 }
 
 .status-section h2 {
@@ -256,14 +374,12 @@ code {
 /* Active-item index -------------------------------------------------------- */
 
 /*
- * The dashboard's active-item index sits between the toolbar and the tree
- * layout as a flex sibling, so its banner never disturbs the tree pane.
+ * The active-item index lives inside the dashboard panel; the panel supplies the
+ * frame and the section's own table scrolls with it.
  */
 .index-section {
-	flex: none;
-	padding: 0.6rem 1.1rem;
-	background: var(--panel);
-	border-bottom: 1px solid var(--line);
+	padding: 0.6rem 1.1rem 0;
+	border-top: 1px solid var(--line);
 }
 
 .index-section h2 {

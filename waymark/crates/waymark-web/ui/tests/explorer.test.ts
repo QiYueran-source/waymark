@@ -55,6 +55,15 @@ function checked(label: string): boolean {
 	return (screen.getByLabelText(label) as HTMLInputElement).checked;
 }
 
+/**
+ * The dashboard is disclosed, not page content: open it before asserting on its
+ * sections. Its two sections stay mounted while the panel is closed, so opening
+ * it changes focus and visibility only, never the number of reads.
+ */
+async function openDashboard(): Promise<void> {
+	await fireEvent.click(screen.getByTestId('dashboard-open'));
+}
+
 describe('loading and project identity', () => {
 	it('shows the normalized project root from /api/health', async () => {
 		const { urls } = await renderLoaded({ trees: { combined: combinedTree } });
@@ -745,6 +754,7 @@ describe('status section', () => {
 	it('shows the status counts and no banner for a healthy projection', async () => {
 		const api = makeFetch({ trees: { combined: combinedTree }, status: healthyStatus });
 		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await openDashboard();
 		await screen.findByTestId('node-wm-bug-login');
 		await screen.findByTestId('status-completeness');
 
@@ -763,6 +773,7 @@ describe('status section', () => {
 	it('shows the prominent banner with diagnostics for a stale projection', async () => {
 		const api = makeFetch({ trees: { combined: combinedTree }, status: staleStatus });
 		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await openDashboard();
 		await screen.findByTestId('node-wm-bug-login');
 		await screen.findByTestId('status-banner');
 
@@ -779,6 +790,7 @@ describe('status section', () => {
 	it('shows the banner for a never-loaded projection', async () => {
 		const api = makeFetch({ trees: { combined: combinedTree }, status: neverLoadedStatus });
 		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await openDashboard();
 		await screen.findByTestId('node-wm-bug-login');
 		await screen.findByTestId('status-banner');
 
@@ -805,6 +817,7 @@ describe('status section', () => {
 			}
 		});
 		render(Explorer, { fetchImpl: incomplete.fetchImpl, storage: localStorage });
+		await openDashboard();
 		await screen.findByTestId('node-wm-bug-login');
 		await screen.findByTestId('status-banner');
 
@@ -822,6 +835,7 @@ describe('status section', () => {
 			statusFailure: failure('NETWORK_ERROR', 'the Web service could not be reached')
 		});
 		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await openDashboard();
 
 		// The tree still loads and renders, so the page is not failed.
 		await screen.findByTestId('node-wm-bug-login');
@@ -834,6 +848,7 @@ describe('status section', () => {
 	it('loads status exactly once and never polls', async () => {
 		const api = makeFetch({ trees: { combined: combinedTree, grouped: groupedTree } });
 		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await openDashboard();
 		await screen.findByTestId('node-wm-bug-login');
 		// Wait until the status read has settled so the count is final.
 		await screen.findByTestId('status-completeness');
@@ -920,6 +935,7 @@ describe('active-item index section', () => {
 			indexes: { 1: healthyIndex }
 		});
 		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await openDashboard();
 		await screen.findByTestId('node-wm-bug-login');
 		await screen.findByTestId('index-table');
 
@@ -947,6 +963,7 @@ describe('active-item index section', () => {
 			indexes: { 1: healthyIndex, 2: lastIndexPage }
 		});
 		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await openDashboard();
 		await screen.findByTestId('index-table');
 		await fireEvent.click(screen.getByTestId('index-next'));
 		await screen.findByText('Fifty-first task');
@@ -971,6 +988,7 @@ describe('active-item index section', () => {
 			indexes: { 1: staleIndex }
 		});
 		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await openDashboard();
 		await screen.findByTestId('node-wm-bug-login');
 		await screen.findByTestId('index-banner');
 
@@ -995,6 +1013,7 @@ describe('active-item index section', () => {
 			indexes: { 1: neverLoadedIndex }
 		});
 		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await openDashboard();
 		await screen.findByTestId('node-wm-bug-login');
 		await screen.findByTestId('index-banner');
 
@@ -1016,6 +1035,7 @@ describe('active-item index section', () => {
 			indexFailure: failure('NETWORK_ERROR', 'the Web service could not be reached')
 		});
 		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await openDashboard();
 
 		// The tree still loads and renders, so the page is not failed.
 		await screen.findByTestId('node-wm-bug-login');
@@ -1031,6 +1051,7 @@ describe('active-item index section', () => {
 			indexes: { 1: healthyIndex }
 		});
 		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await openDashboard();
 		await screen.findByTestId('node-wm-bug-login');
 		// Wait until the index read has settled so the count is final.
 		await screen.findByTestId('index-table');
@@ -1042,5 +1063,103 @@ describe('active-item index section', () => {
 		await screen.findByTestId('group-bug');
 		expect(api.urls.filter((url) => url === '/api/index?page=1')).toHaveLength(1);
 		expect(screen.queryByTestId('index-loading')).toBeNull();
+	});
+});
+
+describe('dashboard disclosure', () => {
+	it('starts closed and opens on the header control', async () => {
+		const api = makeFetch({ trees: { combined: combinedTree } });
+		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await screen.findByTestId('node-wm-bug-login');
+
+		expect(screen.getByTestId('dashboard-overlay').className).not.toContain('open');
+		expect(screen.getByTestId('dashboard-open').getAttribute('aria-expanded')).toBe('false');
+
+		await openDashboard();
+
+		expect(screen.getByTestId('dashboard-overlay').className).toContain('open');
+		expect(screen.getByTestId('dashboard-open').getAttribute('aria-expanded')).toBe('true');
+		await waitFor(() =>
+			expect(document.activeElement).toBe(screen.getByTestId('dashboard-panel'))
+		);
+	});
+
+	it('closes on Escape and returns focus to the control', async () => {
+		const api = makeFetch({ trees: { combined: combinedTree } });
+		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await screen.findByTestId('node-wm-bug-login');
+		await openDashboard();
+		await waitFor(() =>
+			expect(document.activeElement).toBe(screen.getByTestId('dashboard-panel'))
+		);
+
+		await fireEvent.keyDown(screen.getByTestId('dashboard-panel'), { key: 'Escape' });
+
+		expect(screen.getByTestId('dashboard-overlay').className).not.toContain('open');
+		await waitFor(() =>
+			expect(document.activeElement).toBe(screen.getByTestId('dashboard-open'))
+		);
+	});
+
+	it('closes from its close control', async () => {
+		const api = makeFetch({ trees: { combined: combinedTree } });
+		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await screen.findByTestId('node-wm-bug-login');
+		await openDashboard();
+
+		await fireEvent.click(screen.getByTestId('dashboard-close'));
+
+		expect(screen.getByTestId('dashboard-overlay').className).not.toContain('open');
+	});
+
+	it('marks the control when the projection is incomplete or stale', async () => {
+		const api = makeFetch({ trees: { combined: combinedTree }, status: staleStatus });
+		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await screen.findByTestId('node-wm-bug-login');
+
+		await waitFor(() =>
+			expect(screen.getByTestId('dashboard-open').className).toContain('alert')
+		);
+		expect(screen.getByTestId('dashboard-alert').textContent).toContain('Needs attention');
+	});
+
+	it('marks the control when the status read itself fails', async () => {
+		const api = makeFetch({
+			trees: { combined: combinedTree },
+			statusFailure: failure('NETWORK_ERROR', 'the Web service could not be reached')
+		});
+		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await screen.findByTestId('node-wm-bug-login');
+
+		await waitFor(() =>
+			expect(screen.getByTestId('dashboard-open').className).toContain('alert')
+		);
+	});
+
+	it('leaves the control unmarked for a healthy projection', async () => {
+		const api = makeFetch({ trees: { combined: combinedTree }, status: healthyStatus });
+		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await screen.findByTestId('node-wm-bug-login');
+		await screen.findByTestId('status-completeness');
+
+		expect(screen.getByTestId('dashboard-open').className).not.toContain('alert');
+		expect(screen.queryByTestId('dashboard-alert')).toBeNull();
+	});
+
+	it('opens without reading the dashboard twice', async () => {
+		const api = makeFetch({
+			trees: { combined: combinedTree },
+			indexes: { 1: healthyIndex }
+		});
+		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await screen.findByTestId('node-wm-bug-login');
+		await screen.findByTestId('index-table');
+
+		await openDashboard();
+		await openDashboard();
+		await openDashboard();
+
+		expect(api.urls.filter((url) => url === '/api/status')).toHaveLength(1);
+		expect(api.urls.filter((url) => url === '/api/index?page=1')).toHaveLength(1);
 	});
 });

@@ -75,6 +75,17 @@
 	let status = $state<StatusData | null>(null);
 	let statusFailure = $state<Failure | null>(null);
 	let loadingStatus = $state(true);
+	/**
+	 * Whether the cache/status dashboard is open.
+	 *
+	 * The dashboard is a diagnostic aid, not page content: it starts closed and a
+	 * small header control discloses it. Its two sections stay mounted behind a
+	 * hidden overlay, so the one status and index read per page load still
+	 * happens exactly once whether or not the reader opens the panel.
+	 */
+	let dashboardOpen = $state(false);
+	let dashboardButton: HTMLButtonElement | undefined = $state();
+	let dashboardPanel: HTMLElement | undefined = $state();
 	let expanded = $state<string[]>([]);
 	let dependenciesVisible = $state(false);
 	let selectedId = $state<string | null>(null);
@@ -129,6 +140,18 @@
 	const groups: CategoryGroup[] = $derived(scopedGroups.groups);
 	const contextIds: ReadonlySet<string> = $derived(scopedGroups.contextIds);
 	const unresolved = $derived(treeData?.unresolved ?? []);
+	/**
+	 * The projection is unreadable, incomplete, or stale.
+	 *
+	 * The dashboard control is the one always-visible place this state can
+	 * surface, so it carries the warning while the panel itself stays closed.
+	 */
+	const dashboardConcerning = $derived(
+		statusFailure !== null ||
+			(status !== null &&
+				(status.projection.completeness !== 'complete' ||
+					status.projection.freshness !== 'fresh'))
+	);
 	/** The payload holds work, before any category filtering. */
 	const hasWork = $derived(
 		treeData !== null &&
@@ -517,6 +540,37 @@
 		});
 	}
 
+	/**
+	 * Open the dashboard, moving focus into the panel.
+	 *
+	 * The panel is a dialog: focus enters it on open and returns to the control on
+	 * close, so a keyboard reader never loses their place.
+	 */
+	function openDashboard(): void {
+		dashboardOpen = true;
+		void tick().then(() => dashboardPanel?.focus());
+	}
+
+	/** Close the dashboard and return focus to the control that opened it. */
+	function closeDashboard(): void {
+		dashboardOpen = false;
+		void tick().then(() => {
+			if (dashboardButton?.isConnected) dashboardButton.focus();
+		});
+	}
+
+	function toggleDashboard(): void {
+		if (dashboardOpen) closeDashboard();
+		else openDashboard();
+	}
+
+	/** Escape closes the dashboard from anywhere inside it. */
+	function handleDashboardKeydown(event: KeyboardEvent): void {
+		if (event.key !== 'Escape') return;
+		event.stopPropagation();
+		closeDashboard();
+	}
+
 	function handleScroll(): void {
 		if (!treePane) return;
 		const offset = treePane.scrollTop;
@@ -570,7 +624,29 @@
 				</p>
 			</div>
 		</div>
-		<span class="read-only">Read-only</span>
+		<div class="header-actions">
+			<!-- The dashboard is a diagnostic aid: one small control discloses it,
+			     and it carries the warning when the projection is not healthy. -->
+			<button
+				type="button"
+				class="dashboard-button"
+				class:alert={dashboardConcerning}
+				data-testid="dashboard-open"
+				aria-haspopup="dialog"
+				aria-expanded={dashboardOpen}
+				aria-controls="dashboard-panel"
+				bind:this={dashboardButton}
+				onclick={toggleDashboard}
+			>
+				Cache &amp; status
+				{#if dashboardConcerning}
+					<span class="dashboard-button-alert" data-testid="dashboard-alert"
+						>Needs attention</span
+					>
+				{/if}
+			</button>
+			<span class="read-only">Read-only</span>
+		</div>
 	</header>
 
 	{#if persistenceNotice}
@@ -704,10 +780,43 @@
 		</div>
 	</div>
 
-	<!-- The status section sits between the toolbar and the tree layout, a flex
-	     sibling above it, so the banner never disturbs the tree pane. -->
-	<StatusSection {status} loading={loadingStatus} failure={statusFailure} />
-	<IndexSection {fetchImpl} />
+	<!-- The cache/status dashboard is disclosed, not page content: the panel
+	     below stays mounted behind a hidden overlay, so its one status and index
+	     read per page load happens exactly once and it never occupies the page. -->
+	<div
+		class="dashboard-overlay"
+		class:open={dashboardOpen}
+		data-testid="dashboard-overlay"
+	>
+		<div
+			id="dashboard-panel"
+			class="dashboard-panel"
+			role="dialog"
+			aria-modal="true"
+			aria-label="Status and index"
+			tabindex="-1"
+			data-testid="dashboard-panel"
+			bind:this={dashboardPanel}
+			onkeydown={handleDashboardKeydown}
+		>
+			<header class="dashboard-panel-header">
+				<span class="dashboard-panel-title">Status &amp; index</span>
+				<button
+					type="button"
+					class="dashboard-close"
+					data-testid="dashboard-close"
+					aria-label="Close dashboard"
+					onclick={closeDashboard}
+				>
+					×
+				</button>
+			</header>
+			<div class="dashboard-panel-body">
+				<StatusSection {status} loading={loadingStatus} failure={statusFailure} />
+				<IndexSection {fetchImpl} />
+			</div>
+		</div>
+	</div>
 
 	<main class="layout">
 		<section

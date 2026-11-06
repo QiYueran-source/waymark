@@ -1273,6 +1273,24 @@ it never produces an empty "healthy" dashboard.
 **Why:** a broken launch or a project that becomes invalid is a diagnosis, not an empty project; one
 clear failure beats a dashboard that silently implies there is no work.
 
+## Dashboard disclosure and warning placement
+
+**Choice:** the cache/status dashboard is disclosed by one small control in the header
+(“Cache & status”), not rendered as page content. The control opens a dialog holding the two
+sections unchanged; the panel starts closed and never occupies the tree's area. The sections
+stay mounted behind a hidden overlay, so the one status and index read per page load still
+happens exactly once whether or not the panel is opened. The control carries the warning when
+the projection is unreadable, incomplete, or stale — a red label plus “Needs attention” — and
+the panel keeps its own in-section banner. There is no page-level banner.
+
+**Why:** the dashboard is a diagnostic aid used occasionally; as always-on page content its
+fifty-row table pushed the tree below the fold and added continuous noise. A disclosed panel
+keeps the tree first while keeping the state one click away. Moving the warning from a
+page-level banner onto the control is the deliberate trade-off: the state stays visible on the
+control that leads to the detail, and the full banner appears the moment the panel opens. The
+specification's “prominent banner” requirement is met by the warning state of that control
+plus the panel's own banner, not by a persistent strip above the tree.
+
 ## What phase 2 (SvelteKit) must know
 
 - Build the frontend into `crates/waymark-web/ui/build` (the default) or pass `--assets` elsewhere.
