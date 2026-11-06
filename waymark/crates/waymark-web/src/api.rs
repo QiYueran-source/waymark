@@ -25,6 +25,7 @@ use waymark_core::error::WaymarkError;
 use waymark_core::model::{CategoryKey, WorkItem};
 use waymark_core::ops::list::complete_meta;
 use waymark_core::ops::tree::{self, HierarchyTree, TreeNode, UnresolvedItem};
+use waymark_core::projection::{CacheClassCounts, Projection};
 use waymark_core::readiness::{Graph, Readiness};
 use waymark_core::store::Project;
 use waymark_core::view::{blocked_reason, display_state};
@@ -49,6 +50,109 @@ pub struct CategoryView {
     pub name: String,
     /// The stable shape index into [`SHAPES`].
     pub shape: usize,
+}
+
+/// `GET /api/status`: the projection and derived-cache state, always answered.
+///
+/// Unlike the business reads, the status route never fails for a stale or
+/// missing snapshot: it reports exactly that state (with the retained snapshot's
+/// aggregates when there is one) so the dashboard stays useful for diagnosis.
+/// The only failure mode is malformed server state, and there is none: the
+/// response is always the full payload below. The read performs no cache lookup
+/// and never changes the counters.
+pub(crate) async fn status(State(state): State<AppState>) -> Response {
+    state.shared.sync().await;
+    let snapshot = state.shared.snapshot_unchecked().await;
+    let meta = state.shared.status_meta(snapshot.as_deref()).await;
+    respond::success(status_json(&state.shared, snapshot.as_deref()).await, meta)
+}
+
+/// The `data` half of the status payload.
+///
+/// All the projection facts come from the snapshot's own [`Projection::status`]
+/// summary (completeness, freshness, shortfall counts, diagnostics, cache
+/// enabled/capacity/total/per-class counts, and the lifetime counters), and the
+/// lifecycle fields (`loaded`, `last_success`, and the stale override for
+/// `freshness`) come from the shared state. When the snapshot is missing
+/// (startup failed and no refresh has succeeded), the projection block reports
+/// `loaded: false` with `freshness: "unknown"` while the cache and counters
+/// still carry whatever the shared state knows — the configured values when the
+/// snapshot exists, zero when it never loaded.
+async fn status_json(
+    shared: &crate::shared::SharedProjection,
+    snapshot: Option<&Projection>,
+) -> Value {
+    let loaded = snapshot.is_some();
+    let last_success = shared.last_success().await;
+    let stale = shared.is_stale().await;
+    let (
+        completeness,
+        freshness,
+        unreadable_documents,
+        uncertain_paths,
+        diagnostics,
+        cache_enabled,
+        cache_capacity,
+        cache_total,
+        by_class,
+        counters,
+    ) = match snapshot {
+        Some(projection) => {
+            let status = projection.status();
+            (
+                status.completeness.as_str(),
+                // The lifecycle freshness wins: a stale snapshot reports stale
+                // even though its own freshness (verified when built) says fresh.
+                if stale {
+                    "stale"
+                } else {
+                    status.freshness.as_str()
+                },
+                status.shortfall.unreadable_documents,
+                status.shortfall.uncertain_paths,
+                json!(status.diagnostics),
+                status.cache_enabled,
+                status.cache_capacity,
+                status.cache_len,
+                json!(status.cache_by_class),
+                json!(status.stats),
+            )
+        }
+        None => (
+            "scoped",
+            "unknown",
+            0usize,
+            0usize,
+            json!([]),
+            false,
+            0usize,
+            0usize,
+            json!(CacheClassCounts::default()),
+            json!({
+                "cache_hits": 0,
+                "cache_misses": 0,
+                "cache_evictions": 0,
+            }),
+        ),
+    };
+    json!({
+        "projection": {
+            "completeness": completeness,
+            "freshness": freshness,
+            "unreadable_documents": unreadable_documents,
+            "uncertain_paths": uncertain_paths,
+            "diagnostics": diagnostics,
+            "loaded": loaded,
+            "last_success": last_success,
+        },
+        "cache": {
+            "enabled": cache_enabled,
+            "capacity": cache_capacity,
+            "total": cache_total,
+            "by_class": by_class,
+        },
+        "counters": counters,
+    })
 }
 
 /// The tree view selected by `?view=`.

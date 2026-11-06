@@ -15,10 +15,13 @@ import {
 	finding,
 	groupedTree,
 	groupedTreeWithEmptyCategory,
+	healthyStatus,
 	incompleteProjectionSummary,
 	inventoryUncertaintyFinding,
 	makeFetch,
+	neverLoadedStatus,
 	parseErrorFinding,
+	staleStatus,
 	unresolvedTree,
 	validationFinding
 } from './fixtures';
@@ -58,7 +61,9 @@ describe('loading and project identity', () => {
 
 	it('reads the combined view by default', async () => {
 		const { urls } = await renderLoaded({ trees: { combined: combinedTree } });
-		expect(urls).toEqual(['/api/health', '/api/tree?view=combined']);
+		expect(urls[0]).toBe('/api/health');
+		expect(urls).toContain('/api/tree?view=combined');
+		expect(urls).toContain('/api/status');
 		expect(screen.getByTestId('node-wm-task-child')).not.toBeNull();
 	});
 
@@ -727,6 +732,113 @@ describe('category selection', () => {
 		expect(screen.getByTestId('persistence-notice').textContent).toContain(
 			'Preferences could not be saved'
 		);
+	});
+});
+
+describe('status section', () => {
+	it('shows the status counts and no banner for a healthy projection', async () => {
+		const api = makeFetch({ trees: { combined: combinedTree }, status: healthyStatus });
+		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await screen.findByTestId('node-wm-bug-login');
+		await screen.findByTestId('status-completeness');
+
+		expect(api.urls).toContain('/api/status');
+		expect(screen.getByTestId('status-completeness').textContent).toBe('Complete');
+		expect(screen.getByTestId('status-freshness').textContent).toBe('Fresh');
+		expect(screen.getByTestId('status-cache-total').textContent).toBe('0');
+		expect(screen.getByTestId('status-cache-by-class').textContent).toBe('0 / 0 / 0');
+		expect(screen.getByTestId('status-counters').textContent).toBe('0 / 0 / 0');
+		expect(screen.getByTestId('status-cache-enabled').textContent).toBe('enabled');
+		expect(screen.getByTestId('status-cache-capacity').textContent).toBe('512');
+		// A complete, fresh projection must not raise the banner.
+		expect(screen.queryByTestId('status-banner')).toBeNull();
+	});
+
+	it('shows the prominent banner with diagnostics for a stale projection', async () => {
+		const api = makeFetch({ trees: { combined: combinedTree }, status: staleStatus });
+		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await screen.findByTestId('node-wm-bug-login');
+		await screen.findByTestId('status-banner');
+
+		const banner = screen.getByTestId('status-banner');
+		expect(banner.getAttribute('role')).toBe('alert');
+		expect(banner.textContent).toContain('stale');
+		expect(screen.getByTestId('status-banner-counts').textContent).toContain('1 document(s)');
+		expect(screen.getByTestId('status-banner-diagnostics').textContent).toContain(
+			'work/bugs/wm-broken.md'
+		);
+		expect(screen.getByTestId('status-freshness').textContent).toBe('Stale');
+	});
+
+	it('shows the banner for a never-loaded projection', async () => {
+		const api = makeFetch({ trees: { combined: combinedTree }, status: neverLoadedStatus });
+		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await screen.findByTestId('node-wm-bug-login');
+		await screen.findByTestId('status-banner');
+
+		const banner = screen.getByTestId('status-banner');
+		expect(banner.getAttribute('role')).toBe('alert');
+		expect(banner.textContent).toContain('unknown');
+		expect(screen.getByTestId('status-last-success').textContent).toBe('never loaded');
+		expect(screen.getByTestId('status-completeness').textContent).toBe('Incomplete');
+	});
+
+	it('shows the banner when the projection is merely incomplete', async () => {
+		const incomplete = makeFetch({
+			trees: { combined: combinedTree },
+			status: {
+				...healthyStatus,
+				projection: {
+					...healthyStatus.projection,
+					completeness: 'scoped',
+					freshness: 'fresh',
+					unreadable_documents: 2,
+					uncertain_paths: 0,
+					diagnostics: [incompleteProjectionSummary({ documents: 2 })]
+				}
+			}
+		});
+		render(Explorer, { fetchImpl: incomplete.fetchImpl, storage: localStorage });
+		await screen.findByTestId('node-wm-bug-login');
+		await screen.findByTestId('status-banner');
+
+		const banner = screen.getByTestId('status-banner');
+		expect(banner.getAttribute('role')).toBe('alert');
+		expect(banner.textContent).toContain('incomplete');
+		expect(screen.getByTestId('status-banner-counts').textContent).toContain('2 document(s)');
+		// The summary finding is not a document cause, so it is not listed as one.
+		expect(screen.queryByTestId('status-banner-diagnostics')).toBeNull();
+	});
+
+	it('does not fail the page when the status read itself fails', async () => {
+		const api = makeFetch({
+			trees: { combined: combinedTree },
+			statusFailure: failure('NETWORK_ERROR', 'the Web service could not be reached')
+		});
+		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+
+		// The tree still loads and renders, so the page is not failed.
+		await screen.findByTestId('node-wm-bug-login');
+		const statusFailure = await screen.findByTestId('status-failure');
+		expect(statusFailure.textContent).toContain('NETWORK_ERROR');
+		expect(statusFailure.textContent).toContain('tree view still works');
+		expect(screen.queryByTestId('status-banner')).toBeNull();
+	});
+
+	it('loads status exactly once and never polls', async () => {
+		const api = makeFetch({ trees: { combined: combinedTree, grouped: groupedTree } });
+		render(Explorer, { fetchImpl: api.fetchImpl, storage: localStorage });
+		await screen.findByTestId('node-wm-bug-login');
+		// Wait until the status read has settled so the count is final.
+		await screen.findByTestId('status-completeness');
+		const statusReads = api.urls.filter((url) => url === '/api/status');
+		expect(statusReads).toHaveLength(1);
+
+		// Interacting with the tree must not trigger another status read.
+		await fireEvent.click(screen.getByLabelText('By category'));
+		await screen.findByTestId('group-bug');
+		expect(api.urls.filter((url) => url === '/api/status')).toHaveLength(1);
+		expect(screen.queryByTestId('status-loading')).toBeNull();
 	});
 });
 

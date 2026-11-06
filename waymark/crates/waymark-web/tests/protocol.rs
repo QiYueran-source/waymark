@@ -23,6 +23,7 @@ async fn every_non_get_or_head_method_is_405() {
     for method in ["POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE"] {
         for path in [
             "/api/tree",
+            "/api/status",
             "/api/item/wm-000000000001",
             "/api/health",
             "/",
@@ -69,6 +70,7 @@ async fn reads_and_rejected_writes_leave_the_project_byte_identical() {
         "/",
         "/assets/_app/app.js",
         "/api/health",
+        "/api/status",
         "/api/tree",
         "/api/tree?view=grouped",
         "/api/item/wm-000000000001",

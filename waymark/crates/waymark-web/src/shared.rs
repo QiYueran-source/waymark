@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use tokio::sync::{Mutex, Notify, RwLock};
 
-use waymark_core::envelope::{Completeness, Freshness};
+use waymark_core::envelope::{Completeness, Freshness, Meta, Source};
 use waymark_core::error::{Code, WaymarkError};
 use waymark_core::projection::Projection;
 use waymark_core::store::Project;
@@ -38,6 +38,11 @@ pub(crate) struct SharedProjection {
     in_flight: Mutex<Option<Arc<Notify>>>,
     /// Set when the last refresh failed; the retained snapshot is stale.
     stale: RwLock<bool>,
+    /// When the last successful load happened, in RFC 3339 UTC text, or `None`
+    /// before the first success. Set on every successful startup load and every
+    /// successful refresh; never cleared on failure (the stale snapshot still
+    /// has a last-success instant worth reporting).
+    last_success: Mutex<Option<String>>,
 }
 
 impl SharedProjection {
@@ -50,6 +55,7 @@ impl SharedProjection {
             refresh: Mutex::new(()),
             in_flight: Mutex::new(None),
             stale: RwLock::new(false),
+            last_success: Mutex::new(None),
         };
         match tokio::task::spawn_blocking({
             let project = this.project.clone();
@@ -59,6 +65,7 @@ impl SharedProjection {
         {
             Ok(Ok(projection)) => {
                 *this.current.write().await = Some(Arc::new(projection));
+                *this.last_success.lock().await = Some(now_rfc3339());
             }
             Ok(Err(_)) => {
                 // No snapshot yet; the first request's sync retries the load.
@@ -153,8 +160,58 @@ impl SharedProjection {
         // 4. Publish atomically; a successful scan clears the stale marker.
         *self.current.write().await = Some(Arc::new(loaded));
         *self.stale.write().await = false;
+        *self.last_success.lock().await = Some(now_rfc3339());
         self.finish_refresh(&ticket).await;
         Ok(())
+    }
+
+    /// The atomically published snapshot, without the business-read gate.
+    ///
+    /// The status route uses this directly after [`SharedProjection::sync`]:
+    /// it wants to report the retained snapshot even when it is stale or the
+    /// project has never loaded, so it deliberately skips the stale/missing
+    /// rejection [`SharedProjection::snapshot`] applies to tree and item reads.
+    pub(crate) async fn snapshot_unchecked(&self) -> Option<Arc<Projection>> {
+        self.current.read().await.clone()
+    }
+
+    /// Whether the last refresh failed; the retained snapshot is stale.
+    pub(crate) async fn is_stale(&self) -> bool {
+        *self.stale.read().await
+    }
+
+    /// When the last successful load happened, in RFC 3339 UTC text, or `None`
+    /// before the first success.
+    pub(crate) async fn last_success(&self) -> Option<String> {
+        self.last_success.lock().await.clone()
+    }
+
+    /// The standard `_meta` the dashboard attaches: the memory projection as
+    /// source, and the *lifecycle* completeness/freshness — the stale flag and
+    /// the missing snapshot override the retained projection's own (still
+    /// `Fresh`) freshness, exactly as the status payload reports it.
+    pub(crate) async fn status_meta(&self, snapshot: Option<&Projection>) -> Meta {
+        let (completeness, freshness, diagnostics) = match snapshot {
+            Some(projection) => {
+                let (completeness, freshness) = if self.is_stale().await {
+                    // A failed refresh: the retained snapshot is stale no matter
+                    // what its own freshness says.
+                    (projection.completeness(), Freshness::Stale)
+                } else {
+                    (projection.completeness(), projection.freshness())
+                };
+                (completeness, freshness, projection.diagnostics())
+            }
+            // Never loaded: there is no projection to describe.
+            None => (Completeness::Scoped, Freshness::Unknown, Vec::new()),
+        };
+        Meta {
+            source: Source::MemoryProjection,
+            completeness,
+            freshness,
+            diagnostics,
+            warnings: Vec::new(),
+        }
     }
 
     /// The lightweight source check: path, size, modified time, and inventory
@@ -251,4 +308,10 @@ fn projection_diagnostics(projection: &Projection) -> Vec<serde_json::Value> {
         .iter()
         .filter_map(|finding| serde_json::to_value(finding).ok())
         .collect()
+}
+
+/// The current instant in the canonical persisted form (RFC 3339 UTC, second
+/// precision, `Z` suffix), reused for `last_success`.
+fn now_rfc3339() -> String {
+    waymark_core::time::format_utc(chrono::Utc::now())
 }

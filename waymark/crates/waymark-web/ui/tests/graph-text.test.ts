@@ -92,7 +92,8 @@ describe('the structured text alternative control', () => {
 		await screen.findByTestId('graph-text');
 		expect(screen.queryByTestId('graph')).toBeNull();
 		expect((screen.getByLabelText('Structured list') as HTMLInputElement).checked).toBe(true);
-		expect(second.urls).toEqual(['/api/health', '/api/tree?view=combined']);
+		expect(second.urls).toContain('/api/tree?view=combined');
+		expect(second.urls).toContain('/api/status');
 		second.unmount();
 
 		// Another project sharing the origin starts on the drawing.

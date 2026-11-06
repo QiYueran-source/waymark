@@ -16,9 +16,10 @@
 	import GraphView from './GraphView.svelte';
 	import PaneState from './PaneState.svelte';
 	import ReadFailure from './ReadFailure.svelte';
+	import StatusSection from './StatusSection.svelte';
 	import TreeView from './TreeView.svelte';
 	import UnresolvedList from './UnresolvedList.svelte';
-	import { ApiFailure, fetchHealth, fetchItem, fetchTree } from '$lib/api';
+	import { ApiFailure, fetchHealth, fetchItem, fetchStatus, fetchTree } from '$lib/api';
 	import type { Failure } from '$lib/failure';
 	import { buildGraph, collapseGraph, graphOutline } from '$lib/graph';
 	import type { GraphDirection, GraphViewport } from '$lib/graph';
@@ -38,6 +39,7 @@
 		CategoryGroup,
 		ItemDetail,
 		PresentationName,
+		StatusData,
 		TreeData,
 		ViewName
 	} from '$lib/types';
@@ -65,6 +67,13 @@
 	let treeData = $state<TreeData | null>(null);
 	let readFailure = $state<Failure | null>(null);
 	let loadingTree = $state(true);
+	/**
+	 * The status section's own read: it loads exactly once, alongside health,
+	 * and its failure never fails the page — the section degrades on its own.
+	 */
+	let status = $state<StatusData | null>(null);
+	let statusFailure = $state<Failure | null>(null);
+	let loadingStatus = $state(true);
 	let expanded = $state<string[]>([]);
 	let dependenciesVisible = $state(false);
 	let selectedId = $state<string | null>(null);
@@ -298,6 +307,27 @@
 		} catch (error) {
 			readFailure = toFailure(error);
 			loadingTree = false;
+		}
+		// The status read is independent of the tree: it loads once, after the
+		// service is reachable, and a failure only degrades the status section.
+		await loadStatus();
+	}
+
+	/**
+	 * The one status read per page load. There is no polling, watcher, or
+	 * refresh control: the dashboard refreshes only on a full-page reload.
+	 * A rejected status read is caught here into the section's own failure
+	 * state, so the tree that already loaded stays on screen.
+	 */
+	async function loadStatus(): Promise<void> {
+		loadingStatus = true;
+		statusFailure = null;
+		try {
+			status = await fetchStatus(fetchImpl);
+		} catch (error) {
+			statusFailure = toFailure(error);
+		} finally {
+			loadingStatus = false;
 		}
 	}
 
@@ -672,6 +702,10 @@
 			</label>
 		</div>
 	</div>
+
+	<!-- The status section sits between the toolbar and the tree layout, a flex
+	     sibling above it, so the banner never disturbs the tree pane. -->
+	<StatusSection {status} loading={loadingStatus} failure={statusFailure} />
 
 	<main class="layout">
 		<section

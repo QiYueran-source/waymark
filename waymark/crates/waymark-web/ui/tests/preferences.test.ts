@@ -727,7 +727,9 @@ describe('read-only traffic', () => {
 		expect(requests.every((request) => request.method === 'GET')).toBe(true);
 		for (const request of requests) {
 			const url = new URL(request.url, 'http://localhost:7331');
-			expect(['/api/health', '/api/tree', '/api/item/wm-bug-login']).toContain(url.pathname);
+			expect(['/api/health', '/api/status', '/api/tree', '/api/item/wm-bug-login']).toContain(
+				url.pathname
+			);
 			assertNoStateInRequest(request.url);
 		}
 		// The one detail read is the selection; everything else is a tree read.

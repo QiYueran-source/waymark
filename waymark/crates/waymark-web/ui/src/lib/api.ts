@@ -10,7 +10,7 @@
  * takes a method or a body: the read-only Web view has no write path at all.
  */
 
-import type { Health, ItemDetail, TreeData, ViewName } from './types';
+import type { Health, ItemDetail, StatusData, TreeData, ViewName } from './types';
 
 /** A structured read failure, from the API envelope or the network. */
 export class ApiFailure extends Error {
@@ -107,6 +107,17 @@ async function getJson<T>(fetchImpl: typeof fetch, url: string): Promise<T> {
 /** `GET /api/health`: liveness and the project root used for local isolation. */
 export function fetchHealth(fetchImpl: typeof fetch = globalThis.fetch): Promise<Health> {
 	return getJson<Health>(fetchImpl, '/api/health');
+}
+
+/**
+ * `GET /api/status`: the projection and derived-cache state.
+ *
+ * The route always answers (even for a stale or never-loaded snapshot), so a
+ * rejection here is a transport failure or malformed payload, never the
+ * projection's own state — that is reported in the payload instead.
+ */
+export function fetchStatus(fetchImpl: typeof fetch = globalThis.fetch): Promise<StatusData> {
+	return getJson<StatusData>(fetchImpl, '/api/status');
 }
 
 /** `GET /api/tree?view=…`. */

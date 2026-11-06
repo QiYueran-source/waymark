@@ -255,11 +255,10 @@ describe('the graph node detail', () => {
 		// Opening and closing a detail stores no graph state of its own.
 		expect(localStorage.getItem(preferenceKey(projectIdFor(ROOT_A), 'expanded'))).toBeNull();
 		expect(rendered.requests.every((request) => request.method === 'GET')).toBe(true);
-		expect(rendered.requests.map((request) => request.url)).toEqual([
-			'/api/health',
-			'/api/tree?view=combined',
-			'/api/item/wm-bug-login'
-		]);
+		// The one detail read plus health, the tree read, and the status read.
+		expect(rendered.requests.filter((request) => request.url === '/api/item/wm-bug-login')).toHaveLength(1);
+		expect(rendered.requests.filter((request) => request.url === '/api/tree?view=combined')).toHaveLength(1);
+		expect(rendered.requests.filter((request) => request.url === '/api/status')).toHaveLength(1);
 	});
 
 	it('is operable by keyboard alone, with an ordered tab run of real buttons and a visible focus ring', async () => {
