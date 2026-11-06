@@ -61,7 +61,7 @@ test -f crates/waymark-web/ui/build/index.html
 test -f crates/waymark-web/ui/assets-manifest.json
 ```
 
-## Rust job (`ubuntu-latest` and `macos-latest`)
+## Rust job (`ubuntu-latest`, `macos-latest`, and `windows-latest`)
 
 From `waymark/`:
 
@@ -140,7 +140,7 @@ leg uses the default feature set, so it needs no frontend tree.
 
 ## What only runs in CI
 
-- The Rust matrix's `macos-latest` leg.
+- The Rust matrix's `macos-latest` and `windows-latest` legs.
 - The Rust 1.85.0 toolchain leg.
 - Artifact transfer between jobs: locally the frontend tree already sits where
   the build script expects it; `actions/upload-artifact` and

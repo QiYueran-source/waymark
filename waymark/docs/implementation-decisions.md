@@ -3482,4 +3482,6 @@ the exclusion is visible in the source. The current list:
 - `#[cfg(not(windows))]` on the two case-variant projection tests, which need a case-sensitive
   filesystem to have two documents that differ only in case.
 
-The GNU leg and the Windows release matrix remain out of scope; the platform effort owns both.
+The Windows release matrix is now implemented: `.github/workflows/release.yml` builds the MSVC leg and
+`scripts/release/` packages `waymark-v<version>-windows-x86_64.zip` and its Web counterpart. The GNU
+leg remains out of scope and publishes nothing.

@@ -105,9 +105,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    defaults:
+      run:
+        # Git Bash exists on all three runners, so the gate commands are the
+        # same POSIX lines CI runs, not a per-platform PowerShell translation.
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - name: Restore the release frontend tree
@@ -193,6 +198,10 @@ jobs:
             target: x86_64-apple-darwin
             artifact_os: macos
             artifact_arch: x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_os: windows
+            artifact_arch: x86_64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -214,6 +223,7 @@ jobs:
         with:
           workspaces: waymark
       - name: Build and package both variants
+        shell: bash
         run: |
           scripts/release/package.sh \
             --version "${{ needs.version-gate.outputs.version }}" \
@@ -223,17 +233,11 @@ jobs:
             --arch "${{ matrix.artifact_arch }}" \
             --licences licences/THIRD_PARTY_LICENSES.txt \
             --out dist
-      - name: Verify the packaged Web provenance
-        run: |
-          set -euo pipefail
-          mkdir -p verify
-          tar -xzf "dist/waymark-web-v${{ needs.version-gate.outputs.version }}-${{ matrix.artifact_os }}-${{ matrix.artifact_arch }}.tar.gz" -C verify
-          scripts/release/verify-web-provenance.sh \
-            --binary verify/waymark \
-            --version "${{ needs.version-gate.outputs.version }}" \
-            --git-sha "$GITHUB_SHA" \
-            --manifest waymark/crates/waymark-web/ui/assets-manifest.json
+      # check-artifacts runs the packaged Web binary's `serve --port 0`
+      # provenance check on this native runner, so no separate extraction step
+      # needs to know which platforms ship .zip instead of .tar.gz.
       - name: Check the packaged artifacts
+        shell: bash
         run: |
           scripts/release/check-artifacts.sh \
             --dir dist \
@@ -248,8 +252,12 @@ jobs:
           path: |
             dist/waymark-v*.tar.gz
             dist/waymark-v*.tar.gz.sha256
+            dist/waymark-v*.zip
+            dist/waymark-v*.zip.sha256
             dist/waymark-web-v*.tar.gz
             dist/waymark-web-v*.tar.gz.sha256
+            dist/waymark-web-v*.zip
+            dist/waymark-web-v*.zip.sha256
           if-no-files-found: error
           retention-days: 7
 
@@ -348,8 +356,12 @@ jobs:
           files: |
             dist/waymark-v*.tar.gz
             dist/waymark-v*.tar.gz.sha256
+            dist/waymark-v*.zip
+            dist/waymark-v*.zip.sha256
             dist/waymark-web-v*.tar.gz
             dist/waymark-web-v*.tar.gz.sha256
+            dist/waymark-web-v*.zip
+            dist/waymark-web-v*.zip.sha256
             dist/waymark-src-v*.tar.gz
             dist/waymark-src-v*.tar.gz.sha256
         env:

@@ -19,6 +19,7 @@
 set -euo pipefail
 # shellcheck source=lib.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+PYTHON="$(python_cmd)"
 
 binary=""
 version=""
@@ -42,7 +43,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$binary" ]] || fail "--binary is required"
-[[ -x "$binary" ]] || fail "the Web binary is not executable: $binary"
+# A Windows binary is waymark.exe: the extension decides execution, not a POSIX
+# permission bit. Execution itself reports a missing or unusable binary.
+[[ -f "$binary" ]] || fail "the Web binary is missing: $binary"
 version="${version:-$(workspace_version)}"
 git_sha="${git_sha:-$(git_sha_for HEAD)}"
 [[ -n "$git_sha" ]] || fail "a release provenance check needs --git-sha / WAYMARK_GIT_SHA"
@@ -66,7 +69,7 @@ trap cleanup EXIT
 
 # Read and check the version, commit, capability, and index.html entry. The
 # Python exits 1 with an ASSETS_VERSION_MISMATCH line on any disagreement.
-python3 - "$tmp/version.json" "$version" "$git_sha" "$tmp/index.sha" <<'PY' || exit 1
+"$PYTHON" - "$tmp/version.json" "$version" "$git_sha" "$tmp/index.sha" <<'PY' || exit 1
 import json
 import sys
 
@@ -115,7 +118,7 @@ PY
 # that tree and that the tree still hashes to the manifest's index entry.
 if [[ -n "$manifest" ]]; then
     [[ -f "$manifest" ]] || fail "the manifest to compare is missing: $manifest"
-    python3 - "$manifest" "$tmp/version.json" "$version" "$git_sha" <<'PY' || exit 1
+    "$PYTHON" - "$manifest" "$tmp/version.json" "$version" "$git_sha" <<'PY' || exit 1
 import hashlib
 import json
 import sys

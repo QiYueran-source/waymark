@@ -21,7 +21,8 @@ a regression test with its fix, not another checklist item.
 - [ ] `README.md`'s Install table and archive names still match the artifacts
       this version produces.
 - [ ] The macOS Gatekeeper note still says the binaries are unsigned and not
-      notarized.
+      notarized, and the Windows note still says they are unsigned and may
+      trigger SmartScreen.
 - [ ] `docs/mcp-clients.md` still describes the shipped `waymark-mcp` binary.
 
 Run the same gate the workflow will run, on the tagged commit:
@@ -62,22 +63,24 @@ scripts/release/check-artifacts.sh --dir dist --require-platforms  # after all l
       after the fact; delete the tag and re-tag the correct commit.
 - [ ] `web-dist` installs from the frontend lockfile, runs `npm run check` and
       `npm run build`, generates `assets-manifest.json`, and packs the tree.
-- [ ] `gates` is green on `ubuntu-latest` and `macos-latest` (`fmt`, `clippy`
-      with `-D warnings`, tests with and without all features).
+- [ ] `gates` is green on `ubuntu-latest`, `macos-latest`, and
+      `windows-latest` (`fmt`, `clippy` with `-D warnings`, tests with and
+      without all features).
 - [ ] `msrv` is green on a real Rust 1.85 toolchain, including
       `cargo metadata --locked`.
 - [ ] `licences` produced a non-empty `THIRD_PARTY_LICENSES.txt` from
       cargo-about. A dependency with an unreviewed licence fails here; review it
       and update `scripts/release/about.toml` only with the licence text read.
-- [ ] `build` is green for all three legs: `linux-x86_64`, `macos-aarch64`,
-      `macos-x86_64`. Each leg runs the packaged Web `serve --port 0` provenance
-      check before uploading; an `ASSETS_VERSION_MISMATCH` stops the release.
+- [ ] `build` is green for all four legs: `linux-x86_64`, `macos-aarch64`,
+      `macos-x86_64`, and `windows-x86_64` (MSVC, `.zip`). Each leg runs the
+      packaged Web `serve --port 0` provenance check before uploading; an
+      `ASSETS_VERSION_MISMATCH` stops the release.
 - [ ] `source` produced `waymark-src-v<version>.tar.gz` with the built frontend
       tree and the same manifest.
 - [ ] `verify` ran `check-artifacts.sh` on `ubuntu-latest` against the
-      downloaded archives. Linux binaries were executed; macOS archives were
-      checked for checksum and contents there and executed on their own build
-      legs.
+      downloaded archives. Linux binaries were executed; macOS and Windows
+      archives were checked for checksum and contents there and executed on
+      their own build legs.
 - [ ] `release` created a **draft**; it did not publish.
 
 If any job fails, stop. Fix the cause, delete the draft and the tag, and re-tag
@@ -90,9 +93,11 @@ only after the gates are green.
       `waymark-v<version>-linux-x86_64.tar.gz`,
       `waymark-v<version>-macos-aarch64.tar.gz`,
       `waymark-v<version>-macos-x86_64.tar.gz`,
+      `waymark-v<version>-windows-x86_64.zip`,
       `waymark-web-v<version>-linux-x86_64.tar.gz`,
       `waymark-web-v<version>-macos-aarch64.tar.gz`,
       `waymark-web-v<version>-macos-x86_64.tar.gz`,
+      `waymark-web-v<version>-windows-x86_64.zip`,
       `waymark-src-v<version>.tar.gz`, and a `.sha256` for each.
       The intermediate `waymark-web-dist-*` archive is not a release asset.
 - [ ] Reconcile the generated notes with `CHANGELOG.md`: replace the generated
@@ -114,17 +119,19 @@ scripts/release/check-artifacts.sh \
 ```
 
 `check-artifacts.sh` skips executing foreign-platform binaries on the host and
-says so; run it on Linux for the Linux archives and on macOS for the macOS ones
-when you want every binary executed locally. The build jobs already did that.
+says so; run it on Linux for the Linux archives, on macOS for the macOS ones, and
+on Windows for the `.zip` ones when you want every binary executed locally. The
+build jobs already did that.
 
 ## Packaged smoke checks
 
 Use the extracted archive, not the checkout.
 
 - [ ] `sha256sum --check waymark-v<version>-linux-x86_64.tar.gz.sha256` (macOS:
-      `shasum -a 256 -c ...`) prints `OK`.
+      `shasum -a 256 -c ...`; Windows: compare `Get-FileHash` with the sidecar)
+      prints `OK` or matches.
 - [ ] `./waymark version` prints `waymark <version> (cli, mcp)` from the basic
-      package.
+      package (`.\waymark.exe version` on Windows).
 - [ ] `./waymark version` prints `waymark <version> (cli, mcp, web)` from the
       Web package.
 - [ ] `./waymark-mcp --version` prints `waymark-mcp <version>`.
@@ -140,6 +147,8 @@ Use the extracted archive, not the checkout.
       equals `sha256sum` of the file the server returns.
 - [ ] On macOS, confirm the documented Gatekeeper approval still applies to the
       unsigned binary.
+- [ ] On Windows, confirm the unsigned `.exe` binaries still launch through
+      SmartScreen's “More info → Run anyway” path.
 
 ## Publish
 
