@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-11-04
+## [0.1.0] - 2026-11-06
 
 The first public release of Waymark.
 
@@ -29,10 +29,14 @@ The first public release of Waymark.
   same project operations to agents.
 - Two prebuilt variants from one tag: the basic package (`waymark` and
   `waymark-mcp`) and the Web package with the read-only Web view.
-- Prebuilt archives for Linux x86_64, macOS Apple silicon, and macOS Intel,
-  named `waymark-v<version>-<os>-<arch>.tar.gz` and
-  `waymark-web-v<version>-<os>-<arch>.tar.gz`, each with a `.sha256` sidecar,
-  a README, both licence files, and `THIRD_PARTY_LICENSES.txt`.
+- Prebuilt archives for Linux x86_64, macOS Apple silicon, macOS Intel, and
+  Windows x86_64 (MSVC), named `waymark-v<version>-<os>-<arch>.tar.gz` and
+  `waymark-web-v<version>-<os>-<arch>.tar.gz`, or the matching `.zip` on
+  Windows, each with a `.sha256` sidecar, a README, both licence files, and
+  `THIRD_PARTY_LICENSES.txt`.
+- The Web view's cache and index status dashboard, opened from the header
+  instead of occupying the page: projection completeness and freshness,
+  lifetime cache counters, and a paged active-item index.
 - `waymark serve`, available in both builds: the Web package serves the
   read-only view on loopback at port 7331 by default, with `--port` and
   `--open`; the basic package reports `WEB_NOT_INCLUDED` without downloading
@@ -44,11 +48,18 @@ The first public release of Waymark.
   commit, build id, and per-file SHA-256 hashes, and the release checks compare
   it with the served `index.html`.
 - Installation documentation with per-platform archives, checksum
-  verification, first commands, the macOS Gatekeeper note for unsigned
-  binaries, and the basic-to-Web upgrade path.
+  verification, first commands, the macOS Gatekeeper note, the Windows
+  SmartScreen note for unsigned binaries, and the basic-to-Web upgrade path.
 - `docs/mcp-clients.md` with stdio configuration examples for Claude Code,
   DSH, and a generic JSON client.
 - Dual licensing under MIT or Apache-2.0.
+
+### Fixed
+
+- A read-only `.waymark/.gitignore` now stops `waymark init` seeding and
+  `waymark config set` with `LOCK_FAILED`; previously a local `user.toml` could
+  be written even though the ignore file that should have tracked it could not
+  be updated.
 
 ### Security
 
@@ -58,7 +69,9 @@ The first public release of Waymark.
   binding.
 - The binaries do not download or install anything at run time.
 - macOS binaries are unsigned and not notarized; Gatekeeper therefore requires
-  explicit approval on first launch, as documented in the README.
+  explicit approval on first launch, as documented in the README. Windows
+  binaries are unsigned too, so SmartScreen may require the same explicit
+  approval.
 
 [Unreleased]: https://github.com/QiYueran-source/waymark/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/QiYueran-source/waymark/releases/tag/v0.1.0

@@ -29,11 +29,13 @@ The archive names are:
 | Linux x86_64 | `waymark-v<version>-linux-x86_64.tar.gz` |
 | macOS, Apple silicon | `waymark-v<version>-macos-aarch64.tar.gz` |
 | macOS, Intel | `waymark-v<version>-macos-x86_64.tar.gz` |
+| Windows x86_64 | `waymark-v<version>-windows-x86_64.zip` |
 
-Each archive contains no top-level directory: it holds `waymark`,
+Each Unix archive contains no top-level directory: it holds `waymark`,
 `waymark-mcp`, `README.md`, `LICENSE-MIT`, `LICENSE-APACHE`, and
-`THIRD_PARTY_LICENSES.txt` at its root. `THIRD_PARTY_LICENSES.txt` is the
-dependency-licence inventory for that build.
+`THIRD_PARTY_LICENSES.txt` at its root. The Windows archive holds the same files
+with the binaries named `waymark.exe` and `waymark-mcp.exe`.
+`THIRD_PARTY_LICENSES.txt` is the dependency-licence inventory for that build.
 
 The examples below use version `0.1.0`. Set `VERSION` to the release you are
 installing.
@@ -89,6 +91,36 @@ mkdir -p "$HOME/.local/waymark"
 tar -xzf "${ARCHIVE}" -C "$HOME/.local/waymark"
 export PATH="$HOME/.local/waymark:$PATH"
 ```
+
+### Windows x86_64
+
+The Windows archives are `.zip` files built with the MSVC toolchain. In
+PowerShell:
+
+```powershell
+$Version = "0.1.0"
+$Archive = "waymark-v$Version-windows-x86_64.zip"
+$Base = "https://github.com/QiYueran-source/waymark/releases/download/v$Version"
+
+Invoke-WebRequest "$Base/$Archive" -OutFile $Archive
+Invoke-WebRequest "$Base/$Archive.sha256" -OutFile "$Archive.sha256"
+
+$Expected = (Get-Content "$Archive.sha256") -split '\s+' | Select-Object -First 1
+$Actual = (Get-FileHash $Archive -Algorithm SHA256).Hash.ToLower()
+if ($Actual -ne $Expected) { throw "checksum mismatch for $Archive" }
+
+Expand-Archive $Archive -DestinationPath "$HOME\waymark"
+$env:Path = "$HOME\waymark;$env:Path"
+```
+
+`Get-FileHash` must match the first field of the `.sha256` file; a mismatch
+means the download is corrupt or not the published file, so do not run it. The
+`$env:Path` change lasts for the current session; add the directory through
+**System Properties → Environment Variables** to keep it.
+
+The Windows binaries are **not code-signed**. SmartScreen may show “Windows
+protected your PC” on the first launch; after the checksum matched, choose
+**More info → Run anyway**. Do not disable SmartScreen globally to run Waymark.
 
 ### macOS: Gatekeeper and an unsigned binary
 
@@ -183,6 +215,7 @@ Download the Web archive for your platform from the same release:
 - `waymark-web-v<version>-linux-x86_64.tar.gz`
 - `waymark-web-v<version>-macos-aarch64.tar.gz`
 - `waymark-web-v<version>-macos-x86_64.tar.gz`
+- `waymark-web-v<version>-windows-x86_64.zip`
 
 Verify its `.sha256` file the same way as the basic archive, then extract it
 over the directory that already holds the basic installation:
@@ -197,6 +230,11 @@ tar -xzf "${WEB_ARCHIVE}" -C "$HOME/.local/waymark"
 waymark version
 # waymark 0.1.0 (cli, mcp, web)
 ```
+
+On Windows, download `waymark-web-v<version>-windows-x86_64.zip` and its
+`.sha256`, verify it with the same `Get-FileHash` comparison shown above, then
+run `Expand-Archive $WEB_ARCHIVE -DestinationPath "$HOME\waymark" -Force` over
+the basic installation.
 
 The Web archive replaces the executables in the installation directory; no
 project file is touched. The project's `.waymark/` directory and every

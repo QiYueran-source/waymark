@@ -59,6 +59,20 @@ sha256_file() {
     fi
 }
 
+# The Python 3 interpreter to use. The Windows runner's Git Bash does not
+# reliably expose `python3`, so a script that needs Python asks for the name to
+# use instead of assuming the Unix one.
+python_cmd() {
+    if command -v python3 >/dev/null 2>&1; then
+        printf 'python3\n'
+    elif command -v python >/dev/null 2>&1 \
+        && python -c 'import sys; raise SystemExit(0 if sys.version_info[0] == 3 else 1)' 2>/dev/null; then
+        printf 'python\n'
+    else
+        fail "a Python 3 interpreter is required (neither python3 nor python is available)"
+    fi
+}
+
 # Write <archive>.sha256 containing "<hash>  <basename>", the format
 # `sha256sum --check` expects on Linux and `shasum -a 256 --check` on macOS.
 record_sha256() {
@@ -82,13 +96,16 @@ verify_sha256() {
         || fail "checksum mismatch for $(basename "$file"): expected $expected, got $actual"
 }
 
-# The release artifact platform for this host, e.g. linux-x86_64.
+# The release artifact platform for this host, e.g. linux-x86_64. Git Bash
+# reports `MINGW64_NT-…` (and MSYS/Cygwin report their own uname strings), so the
+# Windows runner is recognised by the environment it is, not by the shell name.
 host_platform() {
     local os arch
     os="$(uname -s | tr '[:upper:]' '[:lower:]')"
     case "$os" in
         darwin) os="macos" ;;
         linux) os="linux" ;;
+        mingw*|msys*|cygwin*|windows*) os="windows" ;;
         *) fail "unsupported host operating system: $os" ;;
     esac
     arch="$(uname -m)"
@@ -100,11 +117,23 @@ host_platform() {
     printf '%s-%s\n' "$os" "$arch"
 }
 
-# Normalise an OS name supplied by a caller (CI passes linux/macos explicitly).
+# Normalise an OS name supplied by a caller (CI passes linux/macos/windows
+# explicitly).
 normalise_os() {
     case "$1" in
         linux|Linux) printf 'linux\n' ;;
         darwin|macos|macOS|MacOS) printf 'macos\n' ;;
+        windows|Windows|win|Win) printf 'windows\n' ;;
+        *) fail "unsupported release OS: $1" ;;
+    esac
+}
+
+# The archive extension a release platform uses. Windows ships .zip, because
+# that is what Windows users and tools expect; Unix ships .tar.gz.
+archive_ext_for_os() {
+    case "$1" in
+        windows) printf 'zip\n' ;;
+        linux|macos) printf 'tar.gz\n' ;;
         *) fail "unsupported release OS: $1" ;;
     esac
 }
@@ -123,6 +152,7 @@ archive_platform() {
     local name base rest
     name="$(basename "$1")"
     base="${name%.tar.gz}"
+    base="${base%.zip}"
     base="${base%.tar}"
     case "$base" in
         waymark-src-*) fail "the source tarball has no platform: $name" ;;
@@ -138,6 +168,7 @@ archive_version() {
     local name base rest
     name="$(basename "$1")"
     base="${name%.tar.gz}"
+    base="${base%.zip}"
     case "$base" in
         waymark-src-v*) rest="${base#waymark-src-v}" ;;
         waymark-web-v*) rest="${base#waymark-web-v}" ;;
@@ -145,5 +176,96 @@ archive_version() {
         *) fail "cannot determine the version of archive '$name'" ;;
     esac
     printf '%s\n' "${rest%-*-*}"
+}
+
+# The name a binary has inside a release archive for this platform.
+binary_name() {
+    local stem="$1" os="$2"
+    case "$os" in
+        windows) printf '%s.exe\n' "$stem" ;;
+        linux|macos) printf '%s\n' "$stem" ;;
+        *) fail "unsupported release OS: $os" ;;
+    esac
+}
+
+# Extract a release archive (either format) into an existing directory.
+extract_archive() {
+    local archive="$1" dest="$2"
+    case "$archive" in
+        *.zip) extract_zip "$archive" "$dest" ;;
+        *.tar.gz) tar -xzf "$archive" -C "$dest" ;;
+        *) fail "unsupported archive format: $archive" ;;
+    esac
+}
+
+# Extract a .zip with whichever tool the host has. `unzip` is the same binary on
+# every Unix; the Windows runner may not ship it, so PowerShell is the native
+# fallback there, and python3 is the last resort on either.
+extract_zip() {
+    local archive="$1" dest="$2"
+    mkdir -p "$dest"
+    if command -v unzip >/dev/null 2>&1; then
+        unzip -q "$archive" -d "$dest" || fail "unzip failed for $archive"
+        return
+    fi
+    if command -v powershell.exe >/dev/null 2>&1; then
+        local archive_win dest_win
+        command -v cygpath >/dev/null 2>&1 || fail "cygpath is required for the PowerShell zip fallback"
+        archive_win="$(cygpath -w "$archive")"
+        dest_win="$(cygpath -w "$dest")"
+        powershell.exe -NoProfile -NonInteractive -Command \
+            "Expand-Archive -LiteralPath '$archive_win' -DestinationPath '$dest_win' -Force" \
+            || fail "Expand-Archive failed for $archive"
+        return
+    fi
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -m zipfile -e "$archive" "$dest" || fail "python3 zipfile failed for $archive"
+        return
+    fi
+    if py="$(python_cmd 2>/dev/null)"; then
+        "$py" -m zipfile -e "$archive" "$dest" || fail "python zipfile failed for $archive"
+        return
+    fi
+    fail "no unzip, PowerShell, or python3 is available to read $archive"
+}
+
+# Create a .zip holding exactly the named files at the archive root.
+create_zip() {
+    local out="$1" dir="$2"
+    shift 2
+    [[ $# -gt 0 ]] || fail "create_zip needs at least one file"
+    local out_abs dir_abs
+    out_abs="$(cd "$(dirname "$out")" && pwd)/$(basename "$out")"
+    dir_abs="$(cd "$dir" && pwd)"
+
+    if command -v zip >/dev/null 2>&1; then
+        ( cd "$dir_abs" && zip -q -X "$out_abs" "$@" ) || fail "zip failed for $out"
+        return
+    fi
+    if command -v powershell.exe >/dev/null 2>&1; then
+        command -v cygpath >/dev/null 2>&1 || fail "cygpath is required for the PowerShell zip fallback"
+        local out_win dir_win joined="" file
+        out_win="$(cygpath -w "$out_abs")"
+        dir_win="$(cygpath -w "$dir_abs")"
+        for file in "$@"; do
+            joined+="'$dir_win\\$file',"
+        done
+        joined="${joined%,}"
+        powershell.exe -NoProfile -NonInteractive -Command \
+            "Compress-Archive -Path $joined -DestinationPath '$out_win' -Force" \
+            || fail "Compress-Archive failed for $out"
+        return
+    fi
+    if command -v python3 >/dev/null 2>&1; then
+        ( cd "$dir_abs" && python3 -m zipfile -c "$out_abs" "$@" ) \
+            || fail "python3 zipfile failed for $out"
+        return
+    fi
+    if py="$(python_cmd 2>/dev/null)"; then
+        ( cd "$dir_abs" && "$py" -m zipfile -c "$out_abs" "$@" ) \
+            || fail "python zipfile failed for $out"
+        return
+    fi
+    fail "no zip, PowerShell, or python3 is available to create $out"
 }
 
