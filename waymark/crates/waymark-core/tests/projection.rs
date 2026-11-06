@@ -16,7 +16,7 @@ use waymark_core::error::Code;
 use waymark_core::ops::create::CreateRequest;
 use waymark_core::ops::parent::set_parent;
 use waymark_core::ops::{create, read, OpOptions};
-use waymark_core::projection::{CacheKey, LoadOptions, Projection};
+use waymark_core::projection::{CacheClassCounts, CacheKey, LoadOptions, Projection, Shortfall};
 use waymark_core::testing::fixtures;
 use waymark_core::{Project, WorkItemId};
 
@@ -506,4 +506,287 @@ fn a_stray_readme_is_inventory_noise_not_an_incomplete_projection() {
     let listing =
         waymark_core::ops::list::list(&project, &waymark_core::query::Query::new()).unwrap();
     assert_eq!(listing.len(), 1, "the real document is still listed");
+}
+
+#[test]
+fn per_class_cache_counts_reflect_the_entries_in_each_class_and_sum_to_the_total() {
+    let (_dir, project) = project();
+    let first = make(&project, "first");
+    let second = make(&project, "second");
+    let mut projection = Projection::load(&project).unwrap();
+
+    let stamp = projection.stamp();
+    let body_key = CacheKey::body(
+        &id(&first),
+        &projection.fingerprint_of(&id(&first)).unwrap().clone(),
+    );
+    let detail_key = CacheKey::detail(
+        &id(&second),
+        &projection.fingerprint_of(&id(&second)).unwrap().clone(),
+    );
+    let query_key = CacheKey::query("list:all", &stamp);
+
+    assert_eq!(
+        projection.cache_len_by_class(),
+        CacheClassCounts {
+            body: 0,
+            detail: 0,
+            query: 0,
+        },
+        "a cold cache counts zero in every class"
+    );
+    assert_eq!(projection.cache_len_by_class().total(), 0);
+
+    projection.cache_put(body_key.clone(), "body of first".to_owned());
+    projection.cache_put(detail_key.clone(), "detail of second".to_owned());
+    projection.cache_put(query_key.clone(), "[]".to_owned());
+
+    assert_eq!(
+        projection.cache_len_by_class(),
+        CacheClassCounts {
+            body: 1,
+            detail: 1,
+            query: 1,
+        }
+    );
+    assert_eq!(
+        projection.cache_len_by_class().total(),
+        projection.cache_len()
+    );
+}
+
+#[test]
+fn per_class_counts_survive_evictions_and_a_cache_only_reconfiguration() {
+    let (_dir, project) = project();
+    let first = make(&project, "first");
+    let second = make(&project, "second");
+    let third = make(&project, "third");
+    let mut projection = Projection::load(&project).unwrap();
+    projection.reconfigure_cache(CacheSettings {
+        enabled: true,
+        capacity: 2,
+    });
+
+    let body_key = |subject: &str| {
+        CacheKey::body(
+            &id(subject),
+            &projection.fingerprint_of(&id(subject)).unwrap().clone(),
+        )
+    };
+    let first_key = body_key(&first);
+    let second_key = body_key(&second);
+    let third_key = body_key(&third);
+    projection.cache_put(first_key, "first".to_owned());
+    projection.cache_put(second_key, "second".to_owned());
+    projection.cache_put(third_key, "third".to_owned());
+
+    assert_eq!(
+        projection.cache_len_by_class(),
+        CacheClassCounts {
+            body: 2,
+            detail: 0,
+            query: 0,
+        },
+        "eviction drops the oldest entry within its class"
+    );
+    assert_eq!(
+        projection.cache_len_by_class().total(),
+        projection.cache_len()
+    );
+
+    projection.reconfigure_cache(CacheSettings {
+        enabled: true,
+        capacity: 64,
+    });
+    assert_eq!(projection.cache_len_by_class().total(), 0);
+
+    projection.reconfigure_cache(CacheSettings {
+        enabled: false,
+        capacity: 64,
+    });
+    assert_eq!(
+        projection.cache_len_by_class(),
+        CacheClassCounts {
+            body: 0,
+            detail: 0,
+            query: 0,
+        },
+        "a disabled cache holds no entries in any class"
+    );
+}
+
+#[test]
+fn a_disabled_cache_has_zero_per_class_counts_even_after_put_calls() {
+    let (_dir, project) = project();
+    let item = make(&project, "one");
+    let mut projection = Projection::load(&project).unwrap();
+    projection.reconfigure_cache(CacheSettings {
+        enabled: false,
+        capacity: 8,
+    });
+
+    let fingerprint = projection.fingerprint_of(&id(&item)).unwrap().clone();
+    projection.cache_put(CacheKey::body(&id(&item), &fingerprint), "body".to_owned());
+    projection.cache_put(
+        CacheKey::detail(&id(&item), &fingerprint),
+        "detail".to_owned(),
+    );
+    projection.cache_put(
+        CacheKey::query("list:all", &projection.stamp()),
+        "[]".to_owned(),
+    );
+
+    assert_eq!(
+        projection.cache_len_by_class(),
+        CacheClassCounts {
+            body: 0,
+            detail: 0,
+            query: 0,
+        }
+    );
+    assert_eq!(
+        projection.cache_len_by_class().total(),
+        projection.cache_len()
+    );
+}
+
+#[test]
+fn the_status_summary_carries_the_projection_and_cache_state() {
+    let (_dir, project) = project();
+    let item = make(&project, "one");
+    let mut projection = Projection::load(&project).unwrap();
+    projection.reconfigure_cache(CacheSettings {
+        enabled: true,
+        capacity: 4,
+    });
+
+    let fingerprint = projection.fingerprint_of(&id(&item)).unwrap().clone();
+    projection.cache_put(CacheKey::body(&id(&item), &fingerprint), "body".to_owned());
+    projection.cache_put(
+        CacheKey::query("list:all", &projection.stamp()),
+        "[]".to_owned(),
+    );
+    assert_eq!(projection.cache_len(), 2);
+
+    let status = projection.status();
+
+    assert_eq!(status.completeness, Completeness::Complete);
+    assert_eq!(status.freshness, Freshness::Fresh);
+    assert_eq!(
+        status.shortfall,
+        Shortfall::from_counts(0, 0),
+        "a complete projection has no shortfall"
+    );
+    assert!(status.diagnostics.is_empty());
+    assert!(status.cache_enabled);
+    assert_eq!(status.cache_capacity, 4);
+    assert_eq!(status.cache_len, 2);
+    assert_eq!(
+        status.cache_by_class,
+        CacheClassCounts {
+            body: 1,
+            detail: 0,
+            query: 1,
+        }
+    );
+    assert_eq!(status.stats.parse_count, 1);
+}
+
+#[test]
+fn an_incomplete_projection_status_names_the_shortfall_and_diagnostics() {
+    let (_dir, project) = project();
+    make(&project, "good");
+    let broken = make(&project, "broken");
+    break_document(&project, &broken);
+
+    let projection = Projection::load(&project).unwrap();
+    assert_eq!(projection.completeness(), Completeness::Scoped);
+
+    let status = projection.status();
+    assert_eq!(status.completeness, Completeness::Scoped);
+    assert_eq!(status.freshness, Freshness::Fresh);
+    assert_eq!(
+        status.shortfall,
+        Shortfall::from_counts(1, 0),
+        "the status names the failure shortfall"
+    );
+    assert!(!status.diagnostics.is_empty());
+}
+
+#[test]
+fn a_status_read_never_performs_a_cache_lookup_or_changes_the_counters() {
+    let (_dir, project) = project();
+    let item = make(&project, "one");
+    let mut projection = Projection::load(&project).unwrap();
+    projection.reconfigure_cache(CacheSettings {
+        enabled: true,
+        capacity: 16,
+    });
+
+    let fingerprint = projection.fingerprint_of(&id(&item)).unwrap().clone();
+    let key = CacheKey::body(&id(&item), &fingerprint);
+    projection.cache_put(key.clone(), "body".to_owned());
+    assert_eq!(projection.cache_get(&key), Some("body"));
+    projection.cache_put(
+        CacheKey::query("list:all", &projection.stamp()),
+        "[]".to_owned(),
+    );
+
+    let warm = *projection.stats();
+    let warm_len = projection.cache_len();
+    assert!(warm.cache_hits >= 1);
+
+    let status = projection.status();
+    assert_eq!(status.cache_len, warm_len);
+
+    assert_eq!(
+        projection.stats(),
+        &warm,
+        "reading the status must not touch the lifetime counters"
+    );
+    assert_eq!(projection.cache_len(), warm_len);
+
+    // The status aggregation is a pure read of existing accessors, so a repeat
+    // read is byte-identical and still changes nothing.
+    let first = serde_json::to_string(&projection.status()).unwrap();
+    let second = serde_json::to_string(&projection.status()).unwrap();
+    assert_eq!(first, second);
+    assert_eq!(projection.stats(), &warm);
+}
+
+#[test]
+fn counters_are_cumulative_across_refresh_and_preserved_by_cache_reconfiguration() {
+    let (_dir, project) = project();
+    let item = make(&project, "one");
+    let path = task_path(&project, &item);
+    let mut projection = Projection::load(&project).unwrap();
+
+    let fingerprint = projection.fingerprint_of(&id(&item)).unwrap().clone();
+    let key = CacheKey::detail(&id(&item), &fingerprint);
+    projection.cache_put(key.clone(), "detail".to_owned());
+    projection.cache_get(&key);
+    assert_eq!(projection.stats().cache_hits, 1);
+    assert_eq!(projection.stats().cache_evictions, 0);
+    let parse_after_load = projection.stats().parse_count;
+
+    // A cache-only reconfiguration clears entries but preserves every counter.
+    projection.reconfigure_cache(CacheSettings {
+        enabled: true,
+        capacity: 8,
+    });
+    assert_eq!(projection.cache_len(), 0);
+    assert_eq!(projection.stats().cache_hits, 1);
+    assert_eq!(projection.stats().parse_count, parse_after_load);
+
+    // A content change forces a re-parse, and the refresh merges the new
+    // counters into the projection's lifetime totals.
+    let changed = fixtures::work_item(&item, "task", "renamed").build();
+    std::fs::write(&path, waymark_core::serialize::to_document(&changed)).unwrap();
+    projection.refresh(&project).unwrap();
+    assert_eq!(
+        projection.stats().parse_count,
+        parse_after_load + 1,
+        "a refresh merges its counts into the lifetime totals"
+    );
+    assert_eq!(projection.stats().cache_hits, 1, "counters persist");
 }
