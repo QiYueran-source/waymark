@@ -329,18 +329,6 @@ export function statusLabel(status: WorkStatus): string {
 	}
 }
 
-/** Human-readable lifecycle freshness, for the index banner and elsewhere. */
-export function freshnessLabel(freshness: IndexState['freshness']): string {
-	switch (freshness) {
-		case 'fresh':
-			return 'Fresh';
-		case 'stale':
-			return 'Stale';
-		case 'unknown':
-			return 'Unknown';
-	}
-}
-
 /** Human-readable derived state. */
 export function stateLabel(state: WorkState): string {
 	switch (state) {

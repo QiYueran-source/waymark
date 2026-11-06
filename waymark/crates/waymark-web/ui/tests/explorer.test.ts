@@ -56,14 +56,16 @@ describe('loading and project identity', () => {
 		const { urls } = await renderLoaded({ trees: { combined: combinedTree } });
 		expect(screen.getByTestId('project-root').textContent).toBe(ROOT_A);
 		expect(checked('Combined')).toBe(true);
-		expect(urls[0]).toBe('/api/health');
+		expect(urls).toContain('/api/health');
 	});
 
 	it('reads the combined view by default', async () => {
 		const { urls } = await renderLoaded({ trees: { combined: combinedTree } });
-		expect(urls[0]).toBe('/api/health');
+		expect(urls).toContain('/api/health');
 		expect(urls).toContain('/api/tree?view=combined');
 		expect(urls).toContain('/api/status');
+		// The index section reads its first page on mount, exactly once.
+		expect(urls.filter((url) => url === '/api/index?page=1')).toHaveLength(1);
 		expect(screen.getByTestId('node-wm-task-child')).not.toBeNull();
 	});
 

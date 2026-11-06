@@ -124,10 +124,12 @@ describe('dependency toggle in the Explorer', () => {
 		expect(screen.queryAllByTestId('dependency-edge')).toHaveLength(0);
 
 		// One health read, one combined tree read, and one status read; the
-		// overlay is local state.
-		expect(urls[0]).toBe('/api/health');
+		// overlay is local state. The index section also reads its first page
+		// exactly once on mount.
+		expect(urls).toContain('/api/health');
 		expect(urls).toContain('/api/tree?view=combined');
 		expect(urls).toContain('/api/status');
+		expect(urls.filter((url) => url === '/api/index?page=1')).toHaveLength(1);
 		expect(urls.filter((url) => url === '/api/tree')).toHaveLength(0);
 	});
 
