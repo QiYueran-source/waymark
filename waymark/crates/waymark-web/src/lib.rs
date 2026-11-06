@@ -48,6 +48,7 @@ pub mod manifest;
 mod render;
 mod respond;
 mod server;
+mod shared;
 
 pub use api::{CategoryView, SHAPES};
 pub use manifest::{AssetFile, AssetManifest, AssetMismatch};

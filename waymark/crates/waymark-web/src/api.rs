@@ -1,15 +1,17 @@
 //! The read model behind the JSON API.
 //!
-//! Everything here is derived from one core read per request:
+//! Everything here is derived from the one shared projection the service holds
+//! for its whole lifetime:
 //!
 //! - `GET /api/health` touches nothing.
-//! - `GET /api/tree` loads one [`Graph`] and builds the hierarchy from it, so the
-//!   tree shape and every node's readiness come from the same scan.
-//! - `GET /api/item/:id` reads one document and also loads the graph for
-//!   readiness and relationships. A graph that cannot be built is reported as a
-//!   read failure, never as a detail with made-up readiness.
+//! - `GET /api/tree` takes the shared snapshot, builds the hierarchy from its
+//!   graph, and rejects an incomplete or stale projection rather than serving a
+//!   partial tree.
+//! - `GET /api/item/:id` takes the shared snapshot and scoped-reads one item
+//!   from it. The scoped read answers while the projection is incomplete; the
+//!   snapshot still refuses to answer from a stale or missing projection.
 //!
-//! Archived items never appear in the tree, because [`Graph::from_project`] puts
+//! Archived items never appear in the tree, because [`Graph::from_items`] puts
 //! them aside. The item route still answers for an archived ID (the flag says
 //! so); there is no archive browser and no list route.
 
@@ -22,7 +24,6 @@ use waymark_core::envelope::Meta;
 use waymark_core::error::WaymarkError;
 use waymark_core::model::{CategoryKey, WorkItem};
 use waymark_core::ops::list::complete_meta;
-use waymark_core::ops::read;
 use waymark_core::ops::tree::{self, HierarchyTree, TreeNode, UnresolvedItem};
 use waymark_core::readiness::{Graph, Readiness};
 use waymark_core::store::Project;
@@ -106,7 +107,7 @@ pub(crate) async fn tree(State(state): State<AppState>, RawQuery(raw): RawQuery)
         Ok(view) => view,
         Err(message) => return respond::bad_request("INVALID_QUERY", message),
     };
-    match tree_data(&state.project, view) {
+    match tree_data(&state, view).await {
         Ok((data, meta)) => respond::success(data, meta),
         Err(error) => respond::domain_error(&error),
     }
@@ -114,7 +115,7 @@ pub(crate) async fn tree(State(state): State<AppState>, RawQuery(raw): RawQuery)
 
 /// `GET /api/item/:id`.
 pub(crate) async fn item(State(state): State<AppState>, Path(id): Path<String>) -> Response {
-    match item_data(&state.project, &id) {
+    match item_data(&state, &id).await {
         Ok(data) => respond::success(data, Meta::direct_file_scoped()),
         Err(error) => respond::domain_error(&error),
     }
@@ -153,12 +154,14 @@ fn tree_view(raw: Option<&str>) -> Result<TreeView, String> {
 }
 
 /// One tree read: a complete snapshot or an error with diagnostics.
-fn tree_data(project: &Project, view: TreeView) -> Result<(Value, Meta), WaymarkError> {
-    // One scan: the same graph answers both shape and readiness. A damaged
-    // document fails the scan and therefore the request — never a partial tree.
-    let graph = Graph::from_project(project)?;
+async fn tree_data(state: &AppState, view: TreeView) -> Result<(Value, Meta), WaymarkError> {
+    // The shared snapshot refuses a stale or missing projection; a complete
+    // projection yields the graph that answers both shape and readiness. A
+    // damaged document fails the read — never a partial tree.
+    let projection = state.shared.snapshot().await?;
+    let graph = Graph::from_projection(&projection)?;
     let hierarchy = tree::hierarchy_from_graph(&graph, None);
-    let categories = category_views(project);
+    let categories = category_views(&state.project);
     let unresolved: Vec<Value> = hierarchy
         .unresolved
         .iter()
@@ -266,20 +269,29 @@ fn node_json(node: &TreeNode, graph: &Graph, categories: &[CategoryView]) -> Val
     })
 }
 
-fn item_data(project: &Project, id: &str) -> Result<Value, WaymarkError> {
-    let read = read::read(project, id)?;
-    // Detail needs readiness and relationships, which are whole-project facts.
-    let graph = Graph::from_project(project)?;
+/// One item read: the shared snapshot's scoped read of the document.
+///
+/// The scoped read carries readiness and relationships when the projection is
+/// complete, and still answers (with `completeness: scoped`) while it is
+/// incomplete. The snapshot refuses a stale or missing projection, so a detail
+/// never answers from old data.
+async fn item_data(state: &AppState, id: &str) -> Result<Value, WaymarkError> {
+    let projection = state.shared.snapshot().await?;
+    let read = projection.scoped_read(
+        &waymark_core::id::WorkItemId::parse(id.trim())
+            .map_err(|error| WaymarkError::invalid_id(id.trim(), &error).at_field("id"))?,
+    )?;
     let item = read.item;
-    let readiness = graph.readiness_any(&item.id);
-    let child_ids = graph.children(&item.id);
-    let dependent_ids = graph.dependents(&item.id);
+    let readiness = read.readiness;
+    // The blocked reason names the blocker's state, which is a whole-project
+    // fact: the same graph the scoped read used for relationships answers it.
+    let graph = projection.graph();
     let custom_fields = serde_json::to_value(&item.custom_fields).unwrap_or_else(|_| json!({}));
     Ok(json!({
         "id": item.id.as_str(),
         "title": item.title,
         "body_html": render::markdown_to_html(&item.body),
-        "category": category_view(&item.category, &category_views(project)),
+        "category": category_view(&item.category, &category_views(&state.project)),
         "status": item.status.as_str(),
         "state": item_state(&item, readiness.as_ref()),
         "ready": readiness.as_ref().is_some_and(|readiness| readiness.ready),
@@ -297,15 +309,15 @@ fn item_data(project: &Project, id: &str) -> Result<Value, WaymarkError> {
         // resolves it, and this adapter only carries the result.
         "display_times": waymark_core::view::item_display_times_json(
             &item,
-            waymark_core::ops::local_config::effective_lenient(project).timezone,
+            waymark_core::ops::local_config::effective_lenient(&state.project).timezone,
         ),
         "archived": item.is_archived(),
         "custom_fields": custom_fields,
         "relationships": {
             "parent": item.parent.as_ref().map(|parent| parent.as_str()),
-            "children": id_list(&child_ids),
+            "children": id_list(&read.children),
             "dependencies": id_list(&item.dependencies),
-            "dependents": id_list(&dependent_ids),
+            "dependents": id_list(&read.dependents),
             "soft_links": id_list(&item.soft_links),
         },
     }))
