@@ -3359,16 +3359,29 @@ human one — `Waymark` must not stage, unstage, or delete anything in the repos
 the registry's configuration-state failure, and the local document is configuration; the report is data
 about what initialization found, not a diagnostic about the data.
 
-## An unsafe ignore file stops init before any local settings exist
+## An unsafe ignore file stops a local-document write, even when the entries are present
 
-**Choice:** `ensure_gitignore` refuses a symlink, a non-regular file, and a read-only file that would
-need an entry added, and it runs before either document is written. The lock's acquisition pass repairs
-both entries (`write.lock` and `user.toml`).
+**Choice:** `ensure_gitignore` refuses a symlink and a non-regular file always, and a read-only file
+that would need an entry added. `ensure_local_gitignore` — the local-document write path, used by init
+seeding and by every `local_config::set_scalar` write, clearing included — additionally refuses a file
+that is not demonstrably writable even when every entry is already present. Writability is checked two
+ways: the permission bits (so a privileged process still refuses a `0444` file) and a write-open probe
+(so ownership, ACLs, the Windows read-only attribute, and a file that vanished after the entry check all
+fail closed). One rule covers clearing too, so behaviour never depends on what the document happens to
+contain. The lock's acquisition pass repairs only the `write.lock` entry; the local entry is repaired by
+`ensure_local_gitignore` before a local-document write, which is the specification's second repair
+point. The lock-only half is recorded again under "The lock repair stays lock-only" below; keep the two
+consistent.
 
-**Why:** the replacement is a rename, which would quietly work around a read-only file's permissions;
-refusing is the only way "an unwritable ignore file stops the write" can be true. Repairing on every
-lock acquisition means a project cloned without the entry heals on its first mediated write instead of
-leaving preferences exposed until someone runs `init` again.
+**Why:** the specification says an invalid, unwritable, or symlinked ignore file stops a local-document
+write. Checking writability only when an entry was missing left a gap: after `init`, both entries are
+present, so a `0444` ignore file let `config set operator` create `user.toml` beside it. The local write
+must refuse instead, so its safety guarantee never depends on the entries happening to be complete. The
+lenient path stays for work-item writes: they only need the lock entry, and they must not fail because
+the ignore file is unusual. Refusing rather than renaming over a read-only file is still the rule when an
+entry really must be added, because the replacement would otherwise quietly work around the permissions.
+Repairing the lock entry on every acquisition means a project cloned without it heals on its first
+mediated write instead of leaving the lock file exposed until someone runs `init` again.
 
 ## A local write guards its own document with the same fingerprint option
 
@@ -3426,7 +3439,8 @@ editing. One rule for four settings is also one rule to explain.
 ## The lock repair stays lock-only; a local write enforces the ignore file itself
 
 **Choice:** `lock::with_project_lock` repairs only the `write.lock` entry, as it always did. A local
-write calls `ensure_gitignore` with both entries inside its own write branch, after the dry-run check.
+write calls `ensure_local_gitignore` inside its own write branch, after the dry-run check. The
+writability rule itself is recorded under "An unsafe ignore file stops a local-document write" above.
 
 **Why:** repairing the local entry at every lock acquisition made unrelated work-item writes rewrite a
 tracked ignore file and fail when that file was unusual — the specification scopes that refusal to a

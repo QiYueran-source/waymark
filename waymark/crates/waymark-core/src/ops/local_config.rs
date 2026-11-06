@@ -216,8 +216,12 @@ pub fn set_scalar(
         if !options.dry_run {
             // The ignore entry is enforced here rather than at lock acquisition:
             // it is this write that must not leave an unignored preferences
-            // file, and a dry run must not touch the ignore file at all.
-            crate::store::ensure_gitignore(&project.metadata_dir(), crate::store::IGNORE_ENTRIES)?;
+            // file, and a dry run must not touch the ignore file at all. Every
+            // local write, including a clearing one, also needs the ignore file
+            // writable, even when every entry is already present: one rule is
+            // easier to predict than one that depends on what the document
+            // happens to contain.
+            crate::store::ensure_local_gitignore(&project.metadata_dir())?;
             if next.is_empty() {
                 remove_if_present(&path)?;
             } else {
