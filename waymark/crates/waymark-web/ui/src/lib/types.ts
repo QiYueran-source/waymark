@@ -104,6 +104,90 @@ export interface Health {
 	project: { root: string };
 }
 
+/**
+ * A diagnostic finding, as `waymark_core::envelope::Finding` serializes it:
+ * `{severity, code, location?, message, fixable}`. `location` is absent when
+ * the finding names no place.
+ */
+export interface Finding {
+	severity: 'error' | 'warning' | 'info';
+	code: string;
+	location?: Record<string, unknown>;
+	message: string;
+	fixable: boolean;
+}
+
+/** The derived-cache entry counts by class, always summing to `total`. */
+export interface CacheClassCounts {
+	body: number;
+	detail: number;
+	query: number;
+}
+
+/** The derived-cache summary the status endpoint reports. */
+export interface CacheStatus {
+	/** Whether the derived-data cache accepts entries. */
+	enabled: boolean;
+	/** The configured entry budget. */
+	capacity: number;
+	/** The current total number of derived cache entries. */
+	total: number;
+	/** The per-class entry counts, always summing to `total`. */
+	by_class: CacheClassCounts;
+}
+
+/** The lifetime hit/miss/eviction counters of the shared projection's cache. */
+export interface CacheCounters {
+	hits: number;
+	misses: number;
+	evictions: number;
+}
+
+/** The projection half of the status payload. */
+export interface ProjectionStatus {
+	/** How much of the project the projection covers. */
+	completeness: 'complete' | 'scoped';
+	/**
+	 * How current the answer is. The lifecycle wins: a stale snapshot reports
+	 * `stale`, a never-loaded one `unknown`.
+	 */
+	freshness: 'fresh' | 'stale' | 'unknown';
+	/** Documents that could not be read or parsed. */
+	unreadable_documents: number;
+	/** Item-shaped inventory paths that could not be classified. */
+	uncertain_paths: number;
+	/** The findings that explain an incomplete projection. */
+	diagnostics: Finding[];
+	/** Whether a snapshot exists (startup or a refresh succeeded). */
+	loaded: boolean;
+	/** Last successful load, RFC 3339 UTC, or `null` before the first one. */
+	last_success: string | null;
+}
+
+/** `GET /api/status` data: the projection and cache state, aggregates only. */
+export interface StatusData {
+	projection: ProjectionStatus;
+	cache: CacheStatus;
+	counters: CacheCounters;
+}
+
+/** Human-readable projection completeness. */
+export function completenessLabel(completeness: ProjectionStatus['completeness']): string {
+	return completeness === 'complete' ? 'Complete' : 'Incomplete';
+}
+
+/** Human-readable projection freshness. */
+export function freshnessLabel(freshness: ProjectionStatus['freshness']): string {
+	switch (freshness) {
+		case 'fresh':
+			return 'Fresh';
+		case 'stale':
+			return 'Stale';
+		case 'unknown':
+			return 'Unknown';
+	}
+}
+
 /** One item's read-only detail. */
 export interface ItemRelationships {
 	parent: string | null;

@@ -727,12 +727,9 @@ describe('read-only traffic', () => {
 		expect(requests.every((request) => request.method === 'GET')).toBe(true);
 		for (const request of requests) {
 			const url = new URL(request.url, 'http://localhost:7331');
-			expect([
-				'/api/health',
-				'/api/tree',
-				'/api/item/wm-bug-login',
-				'/api/index'
-			]).toContain(url.pathname);
+			expect(['/api/health', '/api/status', '/api/tree', '/api/item/wm-bug-login']).toContain(
+				url.pathname
+			);
 			assertNoStateInRequest(request.url);
 		}
 		// The one detail read is the selection; everything else is a tree read.
@@ -743,8 +740,6 @@ describe('read-only traffic', () => {
 				return view === 'combined' || view === 'grouped';
 			})
 		).toBe(true);
-		// The index section adds exactly one read, page 1.
-		expect(requests.filter((request) => request.url.startsWith('/api/index'))).toHaveLength(1);
 	});
 
 	it('sends nothing at all while a preference is changed', async () => {
@@ -767,7 +762,7 @@ describe('read-only traffic', () => {
 function assertNoStateInRequest(raw: string): void {
 	const url = new URL(raw, 'http://localhost:7331');
 	for (const key of url.searchParams.keys()) {
-		expect(['view', 'page']).toContain(key);
+		expect(['view']).toContain(key);
 	}
 	expect(url.hash).toBe('');
 	// No preference name or value rides in the URL, whatever the control did.

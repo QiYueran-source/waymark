@@ -254,6 +254,7 @@ pub(crate) fn router(state: AppState) -> Router {
         // default paths.
         .route("/_app/{*path}", get(assets::app_asset))
         .route("/api/health", get(api::health))
+        .route("/api/status", get(api::status))
         .route("/api/tree", get(api::tree))
         .route("/api/index", get(api::index))
         .route("/api/item/{id}", get(api::item))

@@ -201,6 +201,60 @@ code {
 	font-size: 0.82rem;
 }
 
+/* Status section ----------------------------------------------------------- */
+
+/*
+ * The dashboard's status section sits between the toolbar and the tree layout
+ * as a flex sibling, so its banner never disturbs the tree pane.
+ */
+.status-section {
+	flex: none;
+	padding: 0.6rem 1.1rem;
+	background: var(--panel);
+	border-bottom: 1px solid var(--line);
+}
+
+.status-section h2 {
+	margin: 0 0 0.4rem;
+	font-size: 0.86rem;
+	font-weight: 650;
+	color: var(--ink);
+}
+
+.status-section .status {
+	padding: 0.25rem 0;
+}
+
+/*
+ * The prominent state banner: the projection is incomplete or not current. It
+ * reuses the notice palette but is deliberately stronger — its own background
+ * and border — so it reads as a state, not as a passing warning.
+ */
+.status-banner {
+	margin: 0 0 0.5rem;
+	padding: 0.55rem 0.8rem;
+	border: 1px solid var(--notice-line);
+	border-radius: 4px;
+	background: var(--notice-bg);
+}
+
+.status-banner-title {
+	margin: 0;
+	font-weight: 650;
+}
+
+.status-banner-counts,
+.status-banner-diagnostics {
+	margin: 0.3rem 0 0;
+}
+
+.status-section .status-facts {
+	margin: 0;
+	font-size: 0.82rem;
+}
+
+/* Active-item index -------------------------------------------------------- */
+
 /*
  * The dashboard's active-item index sits between the toolbar and the tree
  * layout as a flex sibling, so its banner never disturbs the tree pane.

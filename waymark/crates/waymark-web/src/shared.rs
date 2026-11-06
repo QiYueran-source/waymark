@@ -211,8 +211,58 @@ impl SharedProjection {
         // 4. Publish atomically; a successful scan clears the stale marker.
         *self.current.write().await = Some(Arc::new(loaded));
         *self.stale.write().await = false;
+        *self.last_success.lock().await = Some(now_rfc3339());
         self.finish_refresh(&ticket).await;
         Ok(())
+    }
+
+    /// The atomically published snapshot, without the business-read gate.
+    ///
+    /// The status route uses this directly after [`SharedProjection::sync`]:
+    /// it wants to report the retained snapshot even when it is stale or the
+    /// project has never loaded, so it deliberately skips the stale/missing
+    /// rejection [`SharedProjection::snapshot`] applies to tree and item reads.
+    pub(crate) async fn snapshot_unchecked(&self) -> Option<Arc<Projection>> {
+        self.current.read().await.clone()
+    }
+
+    /// Whether the last refresh failed; the retained snapshot is stale.
+    pub(crate) async fn is_stale(&self) -> bool {
+        *self.stale.read().await
+    }
+
+    /// When the last successful load happened, in RFC 3339 UTC text, or `None`
+    /// before the first success.
+    pub(crate) async fn last_success(&self) -> Option<String> {
+        self.last_success.lock().await.clone()
+    }
+
+    /// The standard `_meta` the dashboard attaches: the memory projection as
+    /// source, and the *lifecycle* completeness/freshness — the stale flag and
+    /// the missing snapshot override the retained projection's own (still
+    /// `Fresh`) freshness, exactly as the status payload reports it.
+    pub(crate) async fn status_meta(&self, snapshot: Option<&Projection>) -> Meta {
+        let (completeness, freshness, diagnostics) = match snapshot {
+            Some(projection) => {
+                let (completeness, freshness) = if self.is_stale().await {
+                    // A failed refresh: the retained snapshot is stale no matter
+                    // what its own freshness says.
+                    (projection.completeness(), Freshness::Stale)
+                } else {
+                    (projection.completeness(), projection.freshness())
+                };
+                (completeness, freshness, projection.diagnostics())
+            }
+            // Never loaded: there is no projection to describe.
+            None => (Completeness::Scoped, Freshness::Unknown, Vec::new()),
+        };
+        Meta {
+            source: Source::MemoryProjection,
+            completeness,
+            freshness,
+            diagnostics,
+            warnings: Vec::new(),
+        }
     }
 
     /// The lightweight source check: path, size, modified time, and inventory

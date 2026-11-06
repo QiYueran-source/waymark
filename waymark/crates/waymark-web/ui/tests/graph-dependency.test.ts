@@ -220,11 +220,11 @@ describe('dependency edges in the graph', () => {
 		await waitFor(() => expect(edges('dependency')).toHaveLength(2));
 
 		expect(requests.every((request) => request.method === 'GET')).toBe(true);
-		expect(requests.map((request) => request.url)).toContain('/api/health');
-		expect(requests.map((request) => request.url)).toContain('/api/tree?view=combined');
-		expect(
-			requests.filter((request) => request.url === '/api/index?page=1')
-		).toHaveLength(1);
+		// Toggling the overlay is local: the tree and status reads stay at one each.
+		expect(requests.filter((request) => request.url === '/api/tree?view=combined')).toHaveLength(
+			1
+		);
+		expect(requests.filter((request) => request.url === '/api/status')).toHaveLength(1);
 		unmount();
 	});
 });
