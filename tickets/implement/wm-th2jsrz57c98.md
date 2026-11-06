@@ -3,11 +3,12 @@ schema: 1
 id: wm-th2jsrz57c98
 title: Add the Web active-item index list API and page
 category: implement
-status: open
+status: closed
 owner: Frank
 creator: Frank
 created_at: 2026-11-06T08:40:44Z
-updated_at: 2026-11-06T08:41:56Z
+updated_at: 2026-11-06T14:44:04Z
+closed_at: 2026-11-06T14:44:04Z
 parent: wm-xm4zx172qpd2
 dependencies:
   - wm-j0hcw5wzzhjc
