@@ -14,6 +14,7 @@
 	import DetailPanel from './DetailPanel.svelte';
 	import GraphText from './GraphText.svelte';
 	import GraphView from './GraphView.svelte';
+	import IndexSection from './IndexSection.svelte';
 	import PaneState from './PaneState.svelte';
 	import ReadFailure from './ReadFailure.svelte';
 	import TreeView from './TreeView.svelte';
@@ -672,6 +673,8 @@
 			</label>
 		</div>
 	</div>
+
+	<IndexSection {fetchImpl} />
 
 	<main class="layout">
 		<section

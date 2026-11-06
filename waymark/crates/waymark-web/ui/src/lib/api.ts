@@ -10,7 +10,7 @@
  * takes a method or a body: the read-only Web view has no write path at all.
  */
 
-import type { Health, ItemDetail, TreeData, ViewName } from './types';
+import type { Health, IndexData, ItemDetail, TreeData, ViewName } from './types';
 
 /** A structured read failure, from the API envelope or the network. */
 export class ApiFailure extends Error {
@@ -127,6 +127,19 @@ export function fetchItem(
 	fetchImpl: typeof fetch = globalThis.fetch
 ): Promise<ItemDetail> {
 	return getJson<ItemDetail>(fetchImpl, `/api/item/${encodeURIComponent(id)}`);
+}
+
+/**
+ * `GET /api/index?page=N`: one page of active items.
+ *
+ * The server enforces the page window and returns `has_previous`/`has_next`
+ * with every page, so the caller only ever asks for an explicit page number.
+ */
+export function fetchIndex(
+	page: number,
+	fetchImpl: typeof fetch = globalThis.fetch
+): Promise<IndexData> {
+	return getJson<IndexData>(fetchImpl, `/api/index?page=${page}`);
 }
 
 /**

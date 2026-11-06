@@ -201,6 +201,99 @@ code {
 	font-size: 0.82rem;
 }
 
+/*
+ * The dashboard's active-item index sits between the toolbar and the tree
+ * layout as a flex sibling, so its banner never disturbs the tree pane.
+ */
+.index-section {
+	flex: none;
+	padding: 0.6rem 1.1rem;
+	background: var(--panel);
+	border-bottom: 1px solid var(--line);
+}
+
+.index-section h2 {
+	margin: 0 0 0.4rem;
+	font-size: 0.86rem;
+	font-weight: 650;
+	color: var(--ink);
+}
+
+.index-section .status {
+	padding: 0.25rem 0;
+}
+
+/*
+ * The prominent state banner: the rows are not a complete/current index. It
+ * reuses the notice palette but is deliberately stronger — its own background
+ * and border — so it reads as a state, not as a passing warning.
+ */
+.index-banner {
+	margin: 0 0 0.5rem;
+	padding: 0.55rem 0.8rem;
+	border: 1px solid var(--notice-line);
+	border-radius: 4px;
+	background: var(--notice-bg);
+}
+
+.index-banner-title {
+	margin: 0;
+	font-weight: 650;
+}
+
+.index-banner-counts,
+.index-banner-diagnostics,
+.index-banner-notice {
+	margin: 0.3rem 0 0;
+}
+
+.index-table {
+	margin: 0.4rem 0;
+	border-collapse: collapse;
+	width: 100%;
+	font-size: 0.82rem;
+}
+
+.index-table th,
+.index-table td {
+	padding: 0.3rem 0.55rem;
+	border-bottom: 1px solid var(--line);
+	text-align: left;
+	vertical-align: top;
+}
+
+.index-table th {
+	font-weight: 650;
+	color: var(--ink);
+}
+
+.index-nav {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	margin-top: 0.5rem;
+}
+
+.index-nav button {
+	padding: 0.3rem 0.75rem;
+	border: 1px solid var(--line);
+	border-radius: 4px;
+	background: var(--sheet);
+	color: var(--ink);
+	font-size: 0.82rem;
+	cursor: pointer;
+}
+
+.index-nav button:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+
+.index-page {
+	font-size: 0.82rem;
+	color: var(--ink);
+}
+
 /* Toolbar ----------------------------------------------------------------- */
 
 .toolbar {

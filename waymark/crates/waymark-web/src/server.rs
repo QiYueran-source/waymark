@@ -255,6 +255,7 @@ pub(crate) fn router(state: AppState) -> Router {
         .route("/_app/{*path}", get(assets::app_asset))
         .route("/api/health", get(api::health))
         .route("/api/tree", get(api::tree))
+        .route("/api/index", get(api::index))
         .route("/api/item/{id}", get(api::item))
         .fallback(not_found)
         .layer(middleware::from_fn_with_state(

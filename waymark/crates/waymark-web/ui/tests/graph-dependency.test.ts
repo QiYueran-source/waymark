@@ -220,10 +220,11 @@ describe('dependency edges in the graph', () => {
 		await waitFor(() => expect(edges('dependency')).toHaveLength(2));
 
 		expect(requests.every((request) => request.method === 'GET')).toBe(true);
-		expect(requests.map((request) => request.url)).toEqual([
-			'/api/health',
-			'/api/tree?view=combined'
-		]);
+		expect(requests.map((request) => request.url)).toContain('/api/health');
+		expect(requests.map((request) => request.url)).toContain('/api/tree?view=combined');
+		expect(
+			requests.filter((request) => request.url === '/api/index?page=1')
+		).toHaveLength(1);
 		unmount();
 	});
 });

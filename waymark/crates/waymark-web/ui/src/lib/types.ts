@@ -178,6 +178,61 @@ export function shapeFor(category: Category): ShapeName {
 	return SHAPES[index % SHAPES.length];
 }
 
+/** A diagnostic finding, as `waymark_core::envelope::Finding` reports it. */
+export interface Finding {
+	severity: 'error' | 'warning' | 'info';
+	code: string;
+	location?: Record<string, unknown>;
+	message: string;
+	fixable: boolean;
+}
+
+/** One row of the active-item index, exactly as `/api/index` returns it. */
+export interface IndexRow {
+	id: string;
+	title: string;
+	category: Category;
+	status: WorkStatus;
+	/** The document path relative to the project root, `/` separators. */
+	path: string;
+}
+
+/**
+ * The state label the index payload carries. When `complete` or `current` is
+ * `false`, the rows are a diagnosis only: the banner states they are not a
+ * complete/current index.
+ */
+export interface IndexState {
+	/** Whether the projection behind the rows is complete. */
+	complete: boolean;
+	/** Whether the rows are a complete, current index. */
+	current: boolean;
+	/** The lifecycle freshness: `stale` wins over the retained snapshot's own. */
+	freshness: 'fresh' | 'stale' | 'unknown';
+	/** Documents the projection could not read or parse. */
+	unreadable_documents: number;
+	/** Item-shaped inventory paths it could not classify. */
+	uncertain_paths: number;
+	/** The findings that explain the label. */
+	diagnostics: Finding[];
+	/** When the last successful load happened, or `null` before the first one. */
+	last_success: string | null;
+	/** The notice the banner shows when the rows are not a current index. */
+	notice: string;
+}
+
+/** `GET /api/index?page=N` data. */
+export interface IndexData {
+	page: number;
+	page_size: number;
+	/** Active items only: archived items are excluded from rows and counts. */
+	total: number;
+	has_previous: boolean;
+	has_next: boolean;
+	rows: IndexRow[];
+	state: IndexState;
+}
+
 /** Human-readable actual status; derived state is shown separately. */
 export function statusLabel(status: WorkStatus): string {
 	switch (status) {
@@ -187,6 +242,18 @@ export function statusLabel(status: WorkStatus): string {
 			return 'In progress';
 		case 'closed':
 			return 'Closed';
+	}
+}
+
+/** Human-readable lifecycle freshness, for the index banner and elsewhere. */
+export function freshnessLabel(freshness: IndexState['freshness']): string {
+	switch (freshness) {
+		case 'fresh':
+			return 'Fresh';
+		case 'stale':
+			return 'Stale';
+		case 'unknown':
+			return 'Unknown';
 	}
 }
 

@@ -68,10 +68,11 @@ describe('the presentation control', () => {
 		const { requests, unmount } = await openGraph({ trees: { combined: combinedTree } });
 
 		expect(requests.every((request) => request.method === 'GET')).toBe(true);
-		expect(requests.map((request) => request.url)).toEqual([
-			'/api/health',
-			'/api/tree?view=combined'
-		]);
+		expect(requests.map((request) => request.url)).toContain('/api/health');
+		expect(requests.map((request) => request.url)).toContain('/api/tree?view=combined');
+		expect(
+			requests.filter((request) => request.url === '/api/index?page=1')
+		).toHaveLength(1);
 		unmount();
 	});
 

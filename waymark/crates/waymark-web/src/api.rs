@@ -20,11 +20,12 @@ use axum::response::Response;
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use waymark_core::envelope::Meta;
+use waymark_core::envelope::{Freshness, Meta};
 use waymark_core::error::WaymarkError;
 use waymark_core::model::{CategoryKey, WorkItem};
 use waymark_core::ops::list::complete_meta;
 use waymark_core::ops::tree::{self, HierarchyTree, TreeNode, UnresolvedItem};
+use waymark_core::projection::{ProjectedEntry, Projection};
 use waymark_core::readiness::{Graph, Readiness};
 use waymark_core::store::Project;
 use waymark_core::view::{blocked_reason, display_state};
@@ -39,6 +40,10 @@ use crate::server::AppState;
 /// this list's length. Adding a shape at the end never changes earlier
 /// assignments; inserting or reordering does, so the list is a contract.
 pub const SHAPES: [&str; 6] = ["circle", "square", "triangle", "diamond", "hexagon", "star"];
+
+/// The one page size of the active-item index. The API enforces it: a client
+/// can never ask for a different window.
+pub const INDEX_PAGE_SIZE: usize = 50;
 
 /// One category as the API exposes it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -99,6 +104,181 @@ fn project_root(project: &Project) -> String {
         .ok()
         .and_then(|path| path.to_str().map(str::to_owned))
         .unwrap_or_else(|| project.root().to_string())
+}
+
+/// `GET /api/index?page=N`: the active items the shared projection holds.
+///
+/// The index is a diagnostic list, not a business read: it answers in every
+/// state the snapshot can be in — healthy, incomplete, stale after a failed
+/// refresh, or never loaded — because the dashboard must still say what the
+/// service holds. Incomplete or stale snapshots supply whatever rows parsed,
+/// labeled by a `state` block stating the rows are not a complete/current
+/// index; a never-loaded snapshot answers empty rows with the same block. The
+/// page is enforced by the API: `INDEX_PAGE_SIZE` rows per page, and a page
+/// beyond the last one is an empty window with correct navigation, never an
+/// error. Only a non-positive or non-numeric `page` is a `400 INVALID_QUERY`.
+pub(crate) async fn index(State(state): State<AppState>, RawQuery(raw): RawQuery) -> Response {
+    let page = match index_page(raw.as_deref()) {
+        Ok(page) => page,
+        Err(message) => return respond::bad_request("INVALID_QUERY", message),
+    };
+    state.shared.sync().await;
+    let snapshot = state.shared.snapshot_unchecked().await;
+    let stale = state.shared.is_stale().await;
+    let last_success = state.shared.last_success().await;
+    let meta = state.shared.status_meta(snapshot.as_deref()).await;
+    respond::success(
+        index_json(&state, page, snapshot.as_deref(), stale, last_success),
+        meta,
+    )
+}
+
+/// The `data` half of the index payload.
+///
+/// The rows come from the snapshot's own entries — never from
+/// [`Graph::from_projection`], which would refuse an incomplete or stale
+/// snapshot — filtered to active items, sorted by stable ID ascending, and
+/// windowed to `page`. `total` counts the same active population, so rows and
+/// counts can never disagree, and archived items are excluded from both. When
+/// the snapshot is missing (startup failed and no refresh has succeeded), the
+/// rows are empty; an incomplete or stale snapshot still supplies its parseable
+/// rows behind the `state` block.
+fn index_json(
+    state: &AppState,
+    page: usize,
+    snapshot: Option<&Projection>,
+    stale: bool,
+    last_success: Option<String>,
+) -> Value {
+    let mut active: Vec<&ProjectedEntry> = snapshot
+        .into_iter()
+        .flat_map(Projection::entries)
+        .filter(|entry| !entry.item.is_archived())
+        .collect();
+    active.sort_by(|left, right| left.id.cmp(&right.id));
+    let total = active.len();
+    let start = page
+        .saturating_sub(1)
+        .saturating_mul(INDEX_PAGE_SIZE)
+        .min(total);
+    let end = start.saturating_add(INDEX_PAGE_SIZE).min(total);
+    let window = &active[start..end];
+    let rows: Vec<Value> = window.iter().map(|entry| index_row(state, entry)).collect();
+
+    json!({
+        "page": page,
+        "page_size": INDEX_PAGE_SIZE,
+        "total": total,
+        "has_previous": page > 1 && total > 0,
+        "has_next": end < total,
+        "rows": rows,
+        "state": index_state(snapshot, stale, last_success),
+    })
+}
+
+/// One row of the index: ID, title, category, status, and a project-relative
+/// path — nothing else.
+fn index_row(state: &AppState, entry: &ProjectedEntry) -> Value {
+    let item = &entry.item;
+    json!({
+        "id": item.id.as_str(),
+        "title": item.title,
+        "category": category_view(&item.category, &category_views(&state.project)),
+        "status": item.status.as_str(),
+        "path": relative_path(state, entry),
+    })
+}
+
+/// The project-relative document path (`work/bugs/wm-….md`), computed from the
+/// absolute path the inventory recorded by stripping the project root.
+fn relative_path(state: &AppState, entry: &ProjectedEntry) -> String {
+    entry
+        .path
+        .strip_prefix(state.project.root())
+        .map(|path| path.to_string())
+        .unwrap_or_else(|_| entry.path.to_string())
+}
+
+/// The `state` block every index payload carries.
+///
+/// The retained projection's `is_complete()` decides the label; the lifecycle
+/// `stale` flag overrides only the reported freshness (the retained snapshot
+/// was built fresh, but the refresh that should have replaced it failed). A
+/// complete, fresh snapshot gets `complete: true, current: true` with an empty
+/// notice; anything else labels the rows and the notice states they are not a
+/// complete/current index. When the snapshot is missing (startup failed and no
+/// refresh has succeeded), `freshness` is `unknown` and the notice says
+/// nothing has loaded.
+fn index_state(snapshot: Option<&Projection>, stale: bool, last_success: Option<String>) -> Value {
+    let Some(projection) = snapshot else {
+        return json!({
+            "complete": false,
+            "current": false,
+            "freshness": Freshness::Unknown.as_str(),
+            "unreadable_documents": 0,
+            "uncertain_paths": 0,
+            "diagnostics": [],
+            "notice": "no projection has loaded yet: these rows are not a complete, current index",
+        });
+    };
+    let current = projection.is_complete() && !stale;
+    let (unreadable_documents, uncertain_paths) = projection.shortfall_counts();
+    let diagnostics: Vec<Value> = projection
+        .diagnostics()
+        .iter()
+        .filter_map(|finding| serde_json::to_value(finding).ok())
+        .collect();
+    json!({
+        "complete": current,
+        "current": current,
+        "freshness": if stale {
+            Freshness::Stale.as_str()
+        } else {
+            projection.freshness().as_str()
+        },
+        "unreadable_documents": unreadable_documents,
+        "uncertain_paths": uncertain_paths,
+        "diagnostics": diagnostics,
+        "last_success": last_success,
+        "notice": if current { "" } else { "these rows are not a complete, current index" },
+    })
+}
+
+/// Parse the `page` query parameter: 1-based, defaulting to 1.
+///
+/// Unknown parameters are ignored (they let a caller add a cache-buster); a
+/// repeated or non-numeric `page`, or one below 1, is a `400`. Hand parsing
+/// keeps the rejection a JSON envelope instead of axum's plain-text extractor
+/// rejection, exactly like `tree_view`.
+fn index_page(raw: Option<&str>) -> Result<usize, String> {
+    let Some(raw) = raw else {
+        return Ok(1);
+    };
+    let mut selected = None;
+    for pair in raw.split('&') {
+        if pair.is_empty() {
+            continue;
+        }
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        let key = percent_decode(key).ok_or("the query string is not valid UTF-8")?;
+        let value = percent_decode(value).ok_or("the query string is not valid UTF-8")?;
+        if key != "page" {
+            continue;
+        }
+        if selected.is_some() {
+            return Err("page is given more than once".to_owned());
+        }
+        selected = Some(value);
+    }
+    match selected {
+        None => Ok(1),
+        Some(value) if value.is_empty() => Ok(1),
+        Some(value) => value
+            .parse::<usize>()
+            .ok()
+            .filter(|page| *page >= 1)
+            .ok_or_else(|| format!("page must be a positive integer, found {value:?}")),
+    }
 }
 
 /// `GET /api/tree?view=combined|grouped`.
