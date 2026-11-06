@@ -11,6 +11,8 @@ import type {
 	CombinedTree,
 	GroupedTree,
 	Health,
+	IndexData,
+	IndexRow,
 	ItemDetail,
 	StatusData,
 	TreeNode,
@@ -21,6 +23,87 @@ export const BUG: Category = { key: 'bug', name: 'Bugs', shape: 0 };
 export const TASK: Category = { key: 'task', name: 'Tasks', shape: 1 };
 /** Configured, but no active work item in it: the control must still offer it. */
 export const DOCS: Category = { key: 'docs', name: 'Docs', shape: 2 };
+
+/** One active-item row, exactly as `/api/index` returns it. */
+export function indexRow(overrides: Partial<IndexRow> & { id: string; title: string }): IndexRow {
+	return {
+		category: BUG,
+		status: 'open',
+		path: `work/bugs/${overrides.id}.md`,
+		...overrides
+	};
+}
+
+/** A complete, fresh index payload: no banner, both navigation edges live. */
+export const healthyIndex: IndexData = {
+	page: 1,
+	page_size: 50,
+	total: 2,
+	has_previous: false,
+	has_next: true,
+	rows: [
+		indexRow({ id: 'wm-000000000001', title: 'First bug' }),
+		indexRow({ id: 'wm-000000000002', title: 'Second task', category: TASK, status: 'in_progress' })
+	],
+	state: {
+		complete: true,
+		current: true,
+		freshness: 'fresh',
+		unreadable_documents: 0,
+		uncertain_paths: 0,
+		diagnostics: [],
+		notice: ''
+	}
+};
+
+/** The last page of the same project: next is disabled, previous live. */
+export const lastIndexPage: IndexData = {
+	...healthyIndex,
+	page: 2,
+	total: 52,
+	has_previous: true,
+	has_next: false,
+	rows: [
+		indexRow({ id: 'wm-000000000051', title: 'Fifty-first task', category: TASK }),
+		indexRow({ id: 'wm-000000000052', title: 'Fifty-second bug' })
+	]
+};
+
+/** A stale index: the banner must show with the diagnostic summary. */
+export const staleIndex: IndexData = {
+	...healthyIndex,
+	state: {
+		complete: false,
+		current: false,
+		freshness: 'stale',
+		unreadable_documents: 1,
+		uncertain_paths: 0,
+		diagnostics: [
+			incompleteProjectionSummary({ documents: 1 }),
+			parseErrorFinding('work/bugs/wm-broken.md', 'missing field `status`')
+		],
+		notice: 'these rows are not a complete, current index'
+	}
+};
+
+/** A never-loaded index: empty rows with the state block. */
+export const neverLoadedIndex: IndexData = {
+	page: 1,
+	page_size: 50,
+	total: 0,
+	has_previous: false,
+	has_next: false,
+	rows: [],
+	state: {
+		complete: false,
+		current: false,
+		freshness: 'unknown',
+		unreadable_documents: 0,
+		uncertain_paths: 0,
+		diagnostics: [],
+		notice: 'no projection has loaded yet: these rows are not a complete, current index'
+	}
+};
 
 export const ROOT_A = '/projects/alpha';
 export const ROOT_B = '/projects/beta';
@@ -643,6 +726,10 @@ export interface FetchOptions {
 	status?: StatusData;
 	/** When set, the status read returns this failure envelope. */
 	statusFailure?: Record<string, unknown>;
+	/** Index payloads by page; a missing page fails the read. */
+	indexes?: Record<number, IndexData>;
+	/** When set, every index read returns this failure envelope. */
+	indexFailure?: Record<string, unknown>;
 }
 
 /** One request the UI made, method and URL, so tests can prove read-only. */
@@ -674,6 +761,15 @@ export function makeFetch(options: FetchOptions): {
 		if (url.pathname === '/api/status') {
 			if (options.statusFailure) return jsonResponse(options.statusFailure, 500);
 			return jsonResponse(success(options.status ?? healthyStatus));
+		}
+		if (url.pathname === '/api/index') {
+			if (options.indexFailure) return jsonResponse(options.indexFailure, 500);
+			const page = Number(url.searchParams.get('page') ?? '1');
+			const index = options.indexes?.[page];
+			if (!index) {
+				return jsonResponse(failure('NOT_FOUND', `no fixture for index page ${page}`), 404);
+			}
+			return jsonResponse(success(index));
 		}
 		if (url.pathname === '/api/tree') {
 			if (options.treeFailure) return jsonResponse(options.treeFailure, 500);

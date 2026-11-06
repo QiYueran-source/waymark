@@ -765,6 +765,15 @@ impl Projection {
         &self.stats
     }
 
+    /// Merge another projection's lifetime counters into this one.
+    ///
+    /// The shared Web projection keeps one lifetime history: a refresh builds a
+    /// fresh snapshot and merges the retained counters into it, so the counters
+    /// describe the shared Projection rather than the latest scan.
+    pub fn merge_stats(&mut self, other: &ProjectionStats) {
+        self.stats.merge(other);
+    }
+
     /// Look up a derived cache entry.
     ///
     /// The key's fingerprint must still be current: a `Body`/`Detail` key is

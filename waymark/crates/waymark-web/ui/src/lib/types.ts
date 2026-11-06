@@ -299,8 +299,6 @@ export interface IndexState {
 	uncertain_paths: number;
 	/** The findings that explain the label. */
 	diagnostics: Finding[];
-	/** When the last successful load happened, or `null` before the first one. */
-	last_success: string | null;
 	/** The notice the banner shows when the rows are not a current index. */
 	notice: string;
 }

@@ -37,16 +37,23 @@ fn assert_cache_invariants(body: &serde_json::Value) {
     // The read itself must never have performed a lookup: the counters are
     // present and, in v1, no handler ever populates the cache, so they are
     // truthfully zero here (asserted as the invariant, not as a fixed value).
+    // The wire carries exactly the three lifetime counters: the projection's
+    // internal witnesses (parse_count, inventory_passes, retries) stay internal.
     let counters = &body["data"]["counters"];
-    for (wire, field) in [
-        ("hits", "cache_hits"),
-        ("misses", "cache_misses"),
-        ("evictions", "cache_evictions"),
-    ] {
-        assert!(
-            counters[field].is_number(),
-            "counter {wire} is present (field {field})"
-        );
+    let mut keys: Vec<&str> = counters
+        .as_object()
+        .expect("counters is an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        ["evictions", "hits", "misses"],
+        "the wire carries exactly the three lifetime counters"
+    );
+    for field in ["hits", "misses", "evictions"] {
+        assert!(counters[field].is_number(), "counter {field} is a number");
     }
 }
 
@@ -178,6 +185,22 @@ async fn status_reports_a_failed_startup_and_the_server_still_serves() {
         serde_json::Value::Null
     );
     assert!(body["data"]["projection"]["diagnostics"].is_array());
+    // A never-loaded snapshot must not fabricate cache facts: the configured
+    // enabled state and capacity are reported truthfully, while entries and
+    // counters stay zero (nothing has been cached).
+    let configured = waymark_core::ops::local_config::effective_lenient(&fixture.project).cache;
+    assert_eq!(
+        body["data"]["cache"]["enabled"], configured.enabled,
+        "the configured enabled state is reported, not a fabricated false"
+    );
+    assert_eq!(
+        body["data"]["cache"]["capacity"], configured.capacity as u64,
+        "the configured capacity is reported, not a fabricated zero"
+    );
+    assert_eq!(body["data"]["cache"]["total"], 0);
+    assert_eq!(body["data"]["counters"]["hits"], 0);
+    assert_eq!(body["data"]["counters"]["misses"], 0);
+    assert_eq!(body["data"]["counters"]["evictions"], 0);
     // The cache and counter fields are still present (zero counts in v1).
     assert_cache_invariants(&body);
 

@@ -72,6 +72,44 @@ async fn an_edited_document_is_visible_to_the_next_request() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn counters_accumulate_across_a_successful_refresh() {
+    let fixture = seeded();
+    let assets = assets();
+    let running = start(&fixture, assets.path()).await;
+
+    // Warm the dashboard counters, then make a source change that forces the
+    // next request to rebuild the shared projection.
+    let warm = get(running.addr(), "/api/status").json();
+    assert_eq!(warm["data"]["projection"]["freshness"], "fresh");
+    let warm_counters = warm["data"]["counters"].clone();
+    seed(
+        &fixture.project,
+        &item("wm-000000000002", "task", "Second bug"),
+    );
+
+    // Prove the refresh happened: the tree now shows the new document.
+    let tree = get(running.addr(), "/api/tree");
+    assert_eq!(tree.status, 200);
+    assert!(
+        tree.text().contains("Second bug"),
+        "the refresh observed the new document"
+    );
+
+    // The successful refresh must carry the lifetime counters into the rebuilt
+    // snapshot rather than restarting them (spec story 20). In v1 the Web layer
+    // never populates the cache, so the values are zero, but the wire contract
+    // is byte-identical across the refresh.
+    let refreshed = get(running.addr(), "/api/status").json();
+    assert_eq!(
+        refreshed["data"]["counters"], warm_counters,
+        "a successful refresh accumulates the lifetime counters"
+    );
+    assert_eq!(refreshed["data"]["projection"]["freshness"], "fresh");
+
+    running.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_failed_refresh_keeps_the_last_snapshot_but_reads_refuse_it() {
     let fixture = seeded();
     let assets = assets();

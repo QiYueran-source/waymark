@@ -790,3 +790,73 @@ fn counters_are_cumulative_across_refresh_and_preserved_by_cache_reconfiguration
     );
     assert_eq!(projection.stats().cache_hits, 1, "counters persist");
 }
+
+#[test]
+fn merge_stats_adds_the_other_projections_lifetime_counters() {
+    let (_dir, project) = project();
+    let one = make(&project, "one");
+    let two = make(&project, "two");
+
+    // A retained projection with a real history: one hit and one eviction.
+    let mut retained = Projection::load(&project).unwrap();
+    retained.reconfigure_cache(CacheSettings {
+        enabled: true,
+        capacity: 1,
+    });
+    let body_key = CacheKey::body(
+        &id(&one),
+        &retained.fingerprint_of(&id(&one)).unwrap().clone(),
+    );
+    retained.cache_put(body_key.clone(), "body of one".to_owned());
+    assert_eq!(retained.cache_get(&body_key), Some("body of one"));
+    let detail_key = CacheKey::detail(
+        &id(&two),
+        &retained.fingerprint_of(&id(&two)).unwrap().clone(),
+    );
+    // The capacity-one cache evicts the body entry.
+    retained.cache_put(detail_key, "detail of two".to_owned());
+    let retained_stats = *retained.stats();
+    assert!(retained_stats.cache_hits > 0);
+    assert!(retained_stats.cache_evictions > 0);
+
+    // A fresh snapshot with its own, different history: one hit.
+    let mut fresh = Projection::load(&project).unwrap();
+    fresh.reconfigure_cache(CacheSettings {
+        enabled: true,
+        capacity: 1,
+    });
+    let fresh_key = CacheKey::body(&id(&one), &fresh.fingerprint_of(&id(&one)).unwrap().clone());
+    fresh.cache_put(fresh_key.clone(), "body of one".to_owned());
+    assert_eq!(fresh.cache_get(&fresh_key), Some("body of one"));
+    let fresh_stats = *fresh.stats();
+    assert!(fresh_stats.cache_hits > 0);
+
+    // Merging the retained history into the rebuilt snapshot is the sum of the
+    // two: this is the discriminating proof for the shared projection's lifetime
+    // counters across a successful refresh.
+    fresh.merge_stats(&retained_stats);
+    assert_eq!(
+        fresh.stats().cache_hits,
+        fresh_stats.cache_hits + retained_stats.cache_hits
+    );
+    assert_eq!(
+        fresh.stats().cache_misses,
+        fresh_stats.cache_misses + retained_stats.cache_misses
+    );
+    assert_eq!(
+        fresh.stats().cache_evictions,
+        fresh_stats.cache_evictions + retained_stats.cache_evictions
+    );
+    assert_eq!(
+        fresh.stats().parse_count,
+        fresh_stats.parse_count + retained_stats.parse_count
+    );
+    assert_eq!(
+        fresh.stats().inventory_passes,
+        fresh_stats.inventory_passes + retained_stats.inventory_passes
+    );
+    assert_eq!(
+        fresh.stats().retries,
+        fresh_stats.retries + retained_stats.retries
+    );
+}

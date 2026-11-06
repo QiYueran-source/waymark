@@ -68,7 +68,10 @@ pub(crate) async fn status(State(state): State<AppState>) -> Response {
     state.shared.sync().await;
     let snapshot = state.shared.snapshot_unchecked().await;
     let meta = state.shared.status_meta(snapshot.as_deref()).await;
-    respond::success(status_json(&state.shared, snapshot.as_deref()).await, meta)
+    respond::success(
+        status_json(&state.shared, &state.project, snapshot.as_deref()).await,
+        meta,
+    )
 }
 
 /// The `data` half of the status payload.
@@ -79,11 +82,12 @@ pub(crate) async fn status(State(state): State<AppState>) -> Response {
 /// lifecycle fields (`loaded`, `last_success`, and the stale override for
 /// `freshness`) come from the shared state. When the snapshot is missing
 /// (startup failed and no refresh has succeeded), the projection block reports
-/// `loaded: false` with `freshness: "unknown"` while the cache and counters
-/// still carry whatever the shared state knows — the configured values when the
-/// snapshot exists, zero when it never loaded.
+/// `loaded: false` with `freshness: "unknown"`; the cache block still reports the
+/// configured enabled state and capacity, while entries and counters stay zero
+/// because nothing has been cached.
 async fn status_json(
     shared: &crate::shared::SharedProjection,
+    project: &Project,
     snapshot: Option<&Projection>,
 ) -> Value {
     let loaded = snapshot.is_some();
@@ -119,25 +123,38 @@ async fn status_json(
                 status.cache_capacity,
                 status.cache_len,
                 json!(status.cache_by_class),
-                json!(status.stats),
+                // The three lifetime counters are the whole wire contract; the
+                // ProjectionStats witnesses (parse_count, inventory_passes,
+                // retries) stay internal.
+                json!({
+                    "hits": status.stats.cache_hits,
+                    "misses": status.stats.cache_misses,
+                    "evictions": status.stats.cache_evictions,
+                }),
             )
         }
-        None => (
-            "scoped",
-            "unknown",
-            0usize,
-            0usize,
-            json!([]),
-            false,
-            0usize,
-            0usize,
-            json!(CacheClassCounts::default()),
-            json!({
-                "cache_hits": 0,
-                "cache_misses": 0,
-                "cache_evictions": 0,
-            }),
-        ),
+        None => {
+            // Nothing has been cached, but the configuration still knows
+            // whether the cache is enabled and how it is bounded: report those
+            // truthfully instead of fabricating `disabled` and a zero capacity.
+            let cache = waymark_core::ops::local_config::effective_lenient(project).cache;
+            (
+                "scoped",
+                "unknown",
+                0usize,
+                0usize,
+                json!([]),
+                cache.enabled,
+                cache.capacity,
+                0usize,
+                json!(CacheClassCounts::default()),
+                json!({
+                    "hits": 0,
+                    "misses": 0,
+                    "evictions": 0,
+                }),
+            )
+        }
     };
     json!({
         "projection": {
@@ -228,12 +245,8 @@ pub(crate) async fn index(State(state): State<AppState>, RawQuery(raw): RawQuery
     state.shared.sync().await;
     let snapshot = state.shared.snapshot_unchecked().await;
     let stale = state.shared.is_stale().await;
-    let last_success = state.shared.last_success().await;
     let meta = state.shared.status_meta(snapshot.as_deref()).await;
-    respond::success(
-        index_json(&state, page, snapshot.as_deref(), stale, last_success),
-        meta,
-    )
+    respond::success(index_json(&state, page, snapshot.as_deref(), stale), meta)
 }
 
 /// The `data` half of the index payload.
@@ -246,13 +259,7 @@ pub(crate) async fn index(State(state): State<AppState>, RawQuery(raw): RawQuery
 /// the snapshot is missing (startup failed and no refresh has succeeded), the
 /// rows are empty; an incomplete or stale snapshot still supplies its parseable
 /// rows behind the `state` block.
-fn index_json(
-    state: &AppState,
-    page: usize,
-    snapshot: Option<&Projection>,
-    stale: bool,
-    last_success: Option<String>,
-) -> Value {
+fn index_json(state: &AppState, page: usize, snapshot: Option<&Projection>, stale: bool) -> Value {
     let mut active: Vec<&ProjectedEntry> = snapshot
         .into_iter()
         .flat_map(Projection::entries)
@@ -275,7 +282,7 @@ fn index_json(
         "has_previous": page > 1 && total > 0,
         "has_next": end < total,
         "rows": rows,
-        "state": index_state(snapshot, stale, last_success),
+        "state": index_state(snapshot, stale),
     })
 }
 
@@ -311,8 +318,9 @@ fn relative_path(state: &AppState, entry: &ProjectedEntry) -> String {
 /// notice; anything else labels the rows and the notice states they are not a
 /// complete/current index. When the snapshot is missing (startup failed and no
 /// refresh has succeeded), `freshness` is `unknown` and the notice says
-/// nothing has loaded.
-fn index_state(snapshot: Option<&Projection>, stale: bool, last_success: Option<String>) -> Value {
+/// nothing has loaded. The last successful refresh time belongs to the status
+/// route, not to this block.
+fn index_state(snapshot: Option<&Projection>, stale: bool) -> Value {
     let Some(projection) = snapshot else {
         return json!({
             "complete": false,
@@ -342,7 +350,6 @@ fn index_state(snapshot: Option<&Projection>, stale: bool, last_success: Option<
         "unreadable_documents": unreadable_documents,
         "uncertain_paths": uncertain_paths,
         "diagnostics": diagnostics,
-        "last_success": last_success,
         "notice": if current { "" } else { "these rows are not a complete, current index" },
     })
 }

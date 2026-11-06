@@ -191,7 +191,16 @@ impl SharedProjection {
             return Ok(());
         }
 
-        // 3. Run the blocking scan; readers keep the old snapshot meanwhile.
+        // 3. Run the blocking scan; readers keep the old snapshot meanwhile. The
+        //    retained snapshot's lifetime counters are copied out (and the lock
+        //    released) before the await: a fresh load starts them at zero, so a
+        //    successful refresh merges the retained history back in (story 20).
+        //    A never-loaded project has nothing to merge and keeps a zero
+        //    history (story 21).
+        let retained_stats = {
+            let current = self.current.read().await;
+            current.as_ref().map(|projection| *projection.stats())
+        };
         let project = self.project.clone();
         let loaded = match tokio::task::spawn_blocking(move || Projection::load(&project)).await {
             Ok(Ok(projection)) => projection,
@@ -207,6 +216,11 @@ impl SharedProjection {
                 return Err(WaymarkError::new(Code::IoError, join_error.to_string()));
             }
         };
+
+        let mut loaded = loaded;
+        if let Some(retained) = retained_stats {
+            loaded.merge_stats(&retained);
+        }
 
         // 4. Publish atomically; a successful scan clears the stale marker.
         *self.current.write().await = Some(Arc::new(loaded));
