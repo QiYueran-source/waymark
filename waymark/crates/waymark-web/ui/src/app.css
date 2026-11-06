@@ -201,6 +201,269 @@ code {
 	font-size: 0.82rem;
 }
 
+/* Dashboard disclosure ----------------------------------------------------- */
+
+/*
+ * The cache/status dashboard is a diagnostic aid, not page content: one small
+ * control in the header discloses it, and the control itself carries the
+ * warning when the projection is unreadable, incomplete, or stale. The panel
+ * stays mounted behind a hidden overlay, so its sections render once and never
+ * occupy the page.
+ */
+.header-actions {
+	display: flex;
+	flex: none;
+	align-items: center;
+	gap: 0.7rem;
+}
+
+.dashboard-button {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	min-height: 1.6rem;
+	padding: 0.18rem 0.55rem;
+	border: 1px solid var(--line-strong);
+	border-radius: 3px;
+	background: var(--panel-2);
+	color: var(--muted);
+	font-size: 0.78rem;
+	font-weight: 550;
+	white-space: nowrap;
+	transition:
+		color 130ms ease,
+		background-color 130ms ease,
+		border-color 130ms ease;
+}
+
+.dashboard-button:hover {
+	background: #fff;
+	color: var(--ink);
+}
+
+.dashboard-button[aria-expanded='true'] {
+	border-color: var(--accent);
+	color: var(--accent);
+}
+
+.dashboard-button.alert {
+	border-color: var(--alert);
+	background: var(--alert-bg);
+	color: var(--alert);
+}
+
+.dashboard-button-alert {
+	font-size: 0.72rem;
+	font-weight: 650;
+	letter-spacing: 0.01em;
+}
+
+.dashboard-overlay {
+	display: none;
+	position: fixed;
+	inset: 0;
+	z-index: 40;
+	background: rgba(26, 36, 32, 0.32);
+}
+
+.dashboard-overlay.open {
+	display: flex;
+	align-items: flex-start;
+	justify-content: flex-end;
+	padding: 0.9rem;
+	overflow: auto;
+}
+
+.dashboard-panel {
+	width: min(46rem, 100%);
+	max-height: 100%;
+	overflow: auto;
+	background: var(--panel);
+	border: 1px solid var(--line-strong);
+	border-radius: 6px;
+	box-shadow: 0 1.2rem 3rem rgba(26, 36, 32, 0.28);
+}
+
+.dashboard-panel-header {
+	position: sticky;
+	top: 0;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
+	padding: 0.6rem 1.1rem;
+	background: var(--panel);
+	border-bottom: 1px solid var(--line);
+}
+
+.dashboard-panel-title {
+	font-size: 0.92rem;
+	font-weight: 650;
+	color: var(--ink);
+}
+
+.dashboard-close {
+	min-height: 1.6rem;
+	padding: 0 0.5rem;
+	border: 1px solid var(--line);
+	border-radius: 3px;
+	background: transparent;
+	color: var(--muted);
+	font-size: 1rem;
+	line-height: 1;
+}
+
+.dashboard-close:hover {
+	background: var(--panel-2);
+	color: var(--ink);
+}
+
+.dashboard-panel-body {
+	padding-bottom: 0.6rem;
+}
+
+/* Status section ----------------------------------------------------------- */
+
+/*
+ * The status section lives inside the dashboard panel; the panel supplies the
+ * frame, so the section only spaces its content.
+ */
+.status-section {
+	padding: 0.6rem 1.1rem;
+}
+
+.status-section h2 {
+	margin: 0 0 0.4rem;
+	font-size: 0.86rem;
+	font-weight: 650;
+	color: var(--ink);
+}
+
+.status-section .status {
+	padding: 0.25rem 0;
+}
+
+/*
+ * The prominent state banner: the projection is incomplete or not current. It
+ * reuses the notice palette but is deliberately stronger — its own background
+ * and border — so it reads as a state, not as a passing warning.
+ */
+.status-banner {
+	margin: 0 0 0.5rem;
+	padding: 0.55rem 0.8rem;
+	border: 1px solid var(--notice-line);
+	border-radius: 4px;
+	background: var(--notice-bg);
+}
+
+.status-banner-title {
+	margin: 0;
+	font-weight: 650;
+}
+
+.status-banner-counts,
+.status-banner-diagnostics {
+	margin: 0.3rem 0 0;
+}
+
+.status-section .status-facts {
+	margin: 0;
+	font-size: 0.82rem;
+}
+
+/* Active-item index -------------------------------------------------------- */
+
+/*
+ * The active-item index lives inside the dashboard panel; the panel supplies the
+ * frame and the section's own table scrolls with it.
+ */
+.index-section {
+	padding: 0.6rem 1.1rem 0;
+	border-top: 1px solid var(--line);
+}
+
+.index-section h2 {
+	margin: 0 0 0.4rem;
+	font-size: 0.86rem;
+	font-weight: 650;
+	color: var(--ink);
+}
+
+.index-section .status {
+	padding: 0.25rem 0;
+}
+
+/*
+ * The prominent state banner: the rows are not a complete/current index. It
+ * reuses the notice palette but is deliberately stronger — its own background
+ * and border — so it reads as a state, not as a passing warning.
+ */
+.index-banner {
+	margin: 0 0 0.5rem;
+	padding: 0.55rem 0.8rem;
+	border: 1px solid var(--notice-line);
+	border-radius: 4px;
+	background: var(--notice-bg);
+}
+
+.index-banner-title {
+	margin: 0;
+	font-weight: 650;
+}
+
+.index-banner-counts,
+.index-banner-diagnostics,
+.index-banner-notice {
+	margin: 0.3rem 0 0;
+}
+
+.index-table {
+	margin: 0.4rem 0;
+	border-collapse: collapse;
+	width: 100%;
+	font-size: 0.82rem;
+}
+
+.index-table th,
+.index-table td {
+	padding: 0.3rem 0.55rem;
+	border-bottom: 1px solid var(--line);
+	text-align: left;
+	vertical-align: top;
+}
+
+.index-table th {
+	font-weight: 650;
+	color: var(--ink);
+}
+
+.index-nav {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	margin-top: 0.5rem;
+}
+
+.index-nav button {
+	padding: 0.3rem 0.75rem;
+	border: 1px solid var(--line);
+	border-radius: 4px;
+	background: var(--sheet);
+	color: var(--ink);
+	font-size: 0.82rem;
+	cursor: pointer;
+}
+
+.index-nav button:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+
+.index-page {
+	font-size: 0.82rem;
+	color: var(--ink);
+}
+
 /* Toolbar ----------------------------------------------------------------- */
 
 .toolbar {

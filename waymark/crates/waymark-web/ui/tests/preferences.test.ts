@@ -727,7 +727,13 @@ describe('read-only traffic', () => {
 		expect(requests.every((request) => request.method === 'GET')).toBe(true);
 		for (const request of requests) {
 			const url = new URL(request.url, 'http://localhost:7331');
-			expect(['/api/health', '/api/tree', '/api/item/wm-bug-login']).toContain(url.pathname);
+			expect([
+				'/api/health',
+				'/api/status',
+				'/api/tree',
+				'/api/item/wm-bug-login',
+				'/api/index'
+			]).toContain(url.pathname);
 			assertNoStateInRequest(request.url);
 		}
 		// The one detail read is the selection; everything else is a tree read.
@@ -754,13 +760,14 @@ describe('read-only traffic', () => {
 
 /**
  * No request may carry a preference, a node id (beyond the item read's path),
- * or any other browser state. The query is the tree read's `view` and nothing
- * else; there is no body and no state-bearing header.
+ * or any other browser state. The query is the tree read's `view` (and the
+ * index read's `page`) and nothing else; there is no body and no state-bearing
+ * header.
  */
 function assertNoStateInRequest(raw: string): void {
 	const url = new URL(raw, 'http://localhost:7331');
 	for (const key of url.searchParams.keys()) {
-		expect(['view']).toContain(key);
+		expect(['view', 'page']).toContain(key);
 	}
 	expect(url.hash).toBe('');
 	// No preference name or value rides in the URL, whatever the control did.

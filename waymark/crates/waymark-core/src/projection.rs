@@ -54,6 +54,7 @@ use std::sync::Arc;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 use crate::config::CacheSettings;
 use crate::envelope::{Completeness, Finding, Freshness, Meta, Source};
@@ -159,6 +160,60 @@ pub struct ProjectionFailure {
     pub error: WaymarkError,
 }
 
+/// The failure/uncertain-path shortfall behind an incomplete projection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Shortfall {
+    /// Documents that could not be read or parsed.
+    pub unreadable_documents: usize,
+    /// Item-shaped inventory paths that could not be classified.
+    pub uncertain_paths: usize,
+}
+
+impl Shortfall {
+    /// The pair [`Projection::shortfall_counts`] reports, in the same order.
+    pub fn from_counts(unreadable_documents: usize, uncertain_paths: usize) -> Self {
+        Self {
+            unreadable_documents,
+            uncertain_paths,
+        }
+    }
+}
+
+/// The lifetime work of one projection, as an immutable snapshot.
+///
+/// The snapshot is read-only: it carries the same fields as [`ProjectionStats`]
+/// but offers no `merge`, so an adapter cannot mutate the counters through it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ProjectionStatsSnapshot {
+    /// Documents actually parsed (a metadata-only refresh does not parse).
+    pub parse_count: usize,
+    /// Cache lookups that found a current entry.
+    pub cache_hits: usize,
+    /// Cache lookups that found nothing, or found an entry for a stale
+    /// fingerprint.
+    pub cache_misses: usize,
+    /// Cache entries dropped to respect the capacity.
+    pub cache_evictions: usize,
+    /// Inventory passes performed, including verification passes.
+    pub inventory_passes: usize,
+    /// Attempts discarded because the inventory moved underneath them.
+    pub retries: usize,
+}
+
+impl ProjectionStatsSnapshot {
+    /// A read-only copy of live stats.
+    fn of(stats: &ProjectionStats) -> Self {
+        Self {
+            parse_count: stats.parse_count,
+            cache_hits: stats.cache_hits,
+            cache_misses: stats.cache_misses,
+            cache_evictions: stats.cache_evictions,
+            inventory_passes: stats.inventory_passes,
+            retries: stats.retries,
+        }
+    }
+}
+
 /// Work a projection build performed, so tests can assert cache and parse rules
 /// without timing.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -241,6 +296,55 @@ impl CacheKey {
     }
 }
 
+/// How many derived cache entries each [`CacheClass`] holds, aggregated without
+/// exposing any cache key, value, or entry internals.
+///
+/// The three fields always sum to the total cache length:
+/// [`Projection::cache_len_by_class`] guarantees it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CacheClassCounts {
+    /// Entries derived from a document body.
+    pub body: usize,
+    /// Entries holding rendered detail data for one item.
+    pub detail: usize,
+    /// Entries holding a query result.
+    pub query: usize,
+}
+
+impl CacheClassCounts {
+    /// The sum of the three per-class counts: the total cache length.
+    pub fn total(&self) -> usize {
+        self.body + self.detail + self.query
+    }
+}
+
+/// A read-only summary of one projection's state, for a status/dashboard read.
+///
+/// The summary is aggregates only: no cache keys, cache values, entry internals,
+/// or work-item content. It is produced by [`Projection::status`], which never
+/// performs a cache lookup and never changes the counters.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectionStatus {
+    /// How much of the project the projection covers.
+    pub completeness: Completeness,
+    /// Whether the projection was verified against the files it was built from.
+    pub freshness: Freshness,
+    /// The failure/uncertain-path shortfall counts.
+    pub shortfall: Shortfall,
+    /// The findings that explain an incomplete projection.
+    pub diagnostics: Vec<Finding>,
+    /// Whether the derived-data cache accepts entries.
+    pub cache_enabled: bool,
+    /// The configured entry budget.
+    pub cache_capacity: usize,
+    /// The current total number of derived cache entries.
+    pub cache_len: usize,
+    /// The per-class entry counts (always summing to `cache_len`).
+    pub cache_by_class: CacheClassCounts,
+    /// A read-only copy of the lifetime counters.
+    pub stats: ProjectionStatsSnapshot,
+}
+
 /// A small bounded LRU over derived values.
 #[derive(Debug, Clone, Default)]
 struct LruCache {
@@ -254,6 +358,20 @@ impl LruCache {
             capacity,
             entries: VecDeque::new(),
         }
+    }
+
+    /// The per-class entry counts, computed from each key's class without
+    /// touching the stored values.
+    fn counts_by_class(&self) -> CacheClassCounts {
+        let mut counts = CacheClassCounts::default();
+        for (key, _) in &self.entries {
+            match key.class {
+                CacheClass::Body => counts.body += 1,
+                CacheClass::Detail => counts.detail += 1,
+                CacheClass::Query => counts.query += 1,
+            }
+        }
+        counts
     }
 
     fn get(&mut self, key: &CacheKey) -> Option<&str> {
@@ -647,6 +765,15 @@ impl Projection {
         &self.stats
     }
 
+    /// Merge another projection's lifetime counters into this one.
+    ///
+    /// The shared Web projection keeps one lifetime history: a refresh builds a
+    /// fresh snapshot and merges the retained counters into it, so the counters
+    /// describe the shared Projection rather than the latest scan.
+    pub fn merge_stats(&mut self, other: &ProjectionStats) {
+        self.stats.merge(other);
+    }
+
     /// Look up a derived cache entry.
     ///
     /// The key's fingerprint must still be current: a `Body`/`Detail` key is
@@ -685,6 +812,38 @@ impl Projection {
     /// How many derived entries the cache holds.
     pub fn cache_len(&self) -> usize {
         self.cache.len()
+    }
+
+    /// The derived-entry count of each [`CacheClass`], as a safe aggregate.
+    ///
+    /// The three counts always sum to the total cache length
+    /// ([`Projection::cache_len`]) and are computed from the entries' key
+    /// classes only — never from cache keys, values, or entry internals.
+    pub fn cache_len_by_class(&self) -> CacheClassCounts {
+        self.cache.counts_by_class()
+    }
+
+    /// A read-only status summary of this projection.
+    ///
+    /// The summary is built from existing accessors only: it performs no cache
+    /// lookup, mutates nothing, and never changes the lifetime counters. It
+    /// exposes aggregates only — no cache keys, values, entry internals, or
+    /// work-item content.
+    pub fn status(&self) -> ProjectionStatus {
+        ProjectionStatus {
+            completeness: self.completeness,
+            freshness: self.freshness,
+            shortfall: Shortfall::from_counts(
+                self.unreadable_document_count(),
+                self.uncertain_document_path_count(),
+            ),
+            diagnostics: self.diagnostics(),
+            cache_enabled: self.cache_settings.enabled,
+            cache_capacity: self.cache_settings.capacity,
+            cache_len: self.cache_len(),
+            cache_by_class: self.cache_len_by_class(),
+            stats: ProjectionStatsSnapshot::of(&self.stats),
+        }
     }
 
     /// Whether the configured cache accepts entries.

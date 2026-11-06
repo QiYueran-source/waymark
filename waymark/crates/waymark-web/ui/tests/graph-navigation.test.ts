@@ -414,10 +414,10 @@ describe('dragging a node', () => {
 		expect(viewport().fitted).toBe(true);
 		// Nothing was written down, and nothing was re-read.
 		expect(localStorage.getItem(preferenceKey(projectIdFor(ROOT_A), 'viewport'))).toBeNull();
-		expect(requests.map((request) => request.url)).toEqual([
-			'/api/health',
-			'/api/tree?view=combined'
-		]);
+		expect(requests.filter((request) => request.url === '/api/tree?view=combined')).toHaveLength(
+			1
+		);
+		expect(requests.filter((request) => request.url === '/api/status')).toHaveLength(1);
 	});
 });
 
@@ -443,10 +443,10 @@ describe('folding a branch', () => {
 
 		// Folding is presentation: nothing was read, written, or re-parented.
 		expect(requests.every((request) => request.method === 'GET')).toBe(true);
-		expect(requests.map((request) => request.url)).toEqual([
-			'/api/health',
-			'/api/tree?view=combined'
-		]);
+		expect(requests.filter((request) => request.url === '/api/tree?view=combined')).toHaveLength(
+			1
+		);
+		expect(requests.filter((request) => request.url === '/api/status')).toHaveLength(1);
 	});
 
 	it('hides every generation below a collapsed node, not only the next one', async () => {

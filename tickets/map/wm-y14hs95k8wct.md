@@ -7,7 +7,7 @@ status: closed
 owner: frank
 creator: frank
 created_at: 2026-11-03T23:52:21Z
-updated_at: 2026-11-05T07:12:29Z
+updated_at: 2026-11-06T08:12:11Z
 closed_at: 2026-11-03T23:52:21Z
 ---
 ---
@@ -744,6 +744,18 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - `validate` and `doctor` inspect `user.toml` as well as shared project configuration. Invalid local settings produce configuration findings located at `user.toml`; they do not change the shared configuration revision or affect other clones.
 - When creating or writing local settings, Waymark repairs a missing `user.toml` entry in `.waymark/.gitignore`. If the ignore file is invalid, non-writable, a symbolic link, or cannot be updated, the operation fails rather than creating or writing a local settings file that may be committed accidentally.
 - Configuration views distinguish shared and local concerns. Human output has project-configuration and local-user-configuration sections. Machine output separates `project_config`, `user_config`, effective values, and per-field source metadata identifying `user.toml`, Git, system timezone, or built-in defaults.
+
+### Web cache/index status dashboard
+
+- Confirmed by the user on 2026-11-06: add a simple, read-only dashboard to Waymark Web for the current process-local LRU cache and disposable Projection/index. This is distinct from displaying the LRU's raw keys/values. It stays on the existing loopback-only service; no remote/LAN exposure, historical trends, mutation or maintenance controls.
+- Confirmed by the user on 2026-11-06: Web retains one shared in-process Projection and LRU across requests, used by ordinary tree/detail reads and the dashboard. Work-item files remain authoritative; the Projection is disposable derived state. Startup attempts to load it before serving; an incomplete projection does not prevent Web startup for diagnostics, but global tree reads reject incomplete data rather than presenting a partial tree as complete.
+- Confirmed by the user on 2026-11-06: each API request performs a lightweight inventory check; detected source changes trigger a refresh. No background watcher, timer scan or browser polling is added. The dashboard loads once and users refresh via browser full-page reload, matching existing Web convention (which may reload the enclosing DSH page). If there is no request, source changes need not be detected until the next request.
+- Confirmed by the user on 2026-11-06: concurrent refresh requests share one in-flight refresh, and readers see only an atomically published snapshot, never a partially updated Projection. No new fixed timeout or configurable timeout is added in v1; reads waiting for this refresh may wait for the existing refresh to complete or fail.
+- Confirmed by the user on 2026-11-06: if refresh fails, retain the last successful snapshot for diagnostics only and mark it stale. The status endpoint returns structured status (including stale state, last successful refresh time and diagnostic summary) rather than failing, while tree/detail business reads return a standard error instead of using stale data as current.
+- Confirmed by the user on 2026-11-06: the v1 cache summary shows enabled state, configured capacity, total entries, counts by class (`body`, `detail`, `query`), and hit/miss/eviction counters. Omit estimated memory bytes because no accounting exists and no estimate convention was agreed. Counters accumulate for the shared Projection lifetime: successful refreshes merge them, process restart resets them; cache-only reconfiguration clears entries but preserves counters. Reading dashboard status must not itself perform cache lookups or change these counters. Never expose keys or values. Per-class counts require a safe aggregate API; the current core API exposes only total cache length.
+- Confirmed by the user on 2026-11-06: show active work-item summaries, paginated 50 rows per page, stable ID ascending, with previous/next navigation and no search/filter in v1. Rows contain only ID, title, category, lifecycle status, and project-relative path. Exclude archived items from rows and counts. Never expose absolute paths, owner, relationships, Markdown bodies or arbitrary custom fields.
+- Confirmed by the user on 2026-11-06: incomplete or stale projections may supply parseable rows for diagnosis only when the dashboard prominently labels incomplete/stale state, reports failure count and diagnostic summary, and states the list is not a complete/current index. No partial or stale result may be represented as complete/current.
+
 
 ## Not yet specified
 

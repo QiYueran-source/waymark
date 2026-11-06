@@ -104,6 +104,90 @@ export interface Health {
 	project: { root: string };
 }
 
+/**
+ * A diagnostic finding, as `waymark_core::envelope::Finding` serializes it:
+ * `{severity, code, location?, message, fixable}`. `location` is absent when
+ * the finding names no place.
+ */
+export interface Finding {
+	severity: 'error' | 'warning' | 'info';
+	code: string;
+	location?: Record<string, unknown>;
+	message: string;
+	fixable: boolean;
+}
+
+/** The derived-cache entry counts by class, always summing to `total`. */
+export interface CacheClassCounts {
+	body: number;
+	detail: number;
+	query: number;
+}
+
+/** The derived-cache summary the status endpoint reports. */
+export interface CacheStatus {
+	/** Whether the derived-data cache accepts entries. */
+	enabled: boolean;
+	/** The configured entry budget. */
+	capacity: number;
+	/** The current total number of derived cache entries. */
+	total: number;
+	/** The per-class entry counts, always summing to `total`. */
+	by_class: CacheClassCounts;
+}
+
+/** The lifetime hit/miss/eviction counters of the shared projection's cache. */
+export interface CacheCounters {
+	hits: number;
+	misses: number;
+	evictions: number;
+}
+
+/** The projection half of the status payload. */
+export interface ProjectionStatus {
+	/** How much of the project the projection covers. */
+	completeness: 'complete' | 'scoped';
+	/**
+	 * How current the answer is. The lifecycle wins: a stale snapshot reports
+	 * `stale`, a never-loaded one `unknown`.
+	 */
+	freshness: 'fresh' | 'stale' | 'unknown';
+	/** Documents that could not be read or parsed. */
+	unreadable_documents: number;
+	/** Item-shaped inventory paths that could not be classified. */
+	uncertain_paths: number;
+	/** The findings that explain an incomplete projection. */
+	diagnostics: Finding[];
+	/** Whether a snapshot exists (startup or a refresh succeeded). */
+	loaded: boolean;
+	/** Last successful load, RFC 3339 UTC, or `null` before the first one. */
+	last_success: string | null;
+}
+
+/** `GET /api/status` data: the projection and cache state, aggregates only. */
+export interface StatusData {
+	projection: ProjectionStatus;
+	cache: CacheStatus;
+	counters: CacheCounters;
+}
+
+/** Human-readable projection completeness. */
+export function completenessLabel(completeness: ProjectionStatus['completeness']): string {
+	return completeness === 'complete' ? 'Complete' : 'Incomplete';
+}
+
+/** Human-readable projection freshness. */
+export function freshnessLabel(freshness: ProjectionStatus['freshness']): string {
+	switch (freshness) {
+		case 'fresh':
+			return 'Fresh';
+		case 'stale':
+			return 'Stale';
+		case 'unknown':
+			return 'Unknown';
+	}
+}
+
 /** One item's read-only detail. */
 export interface ItemRelationships {
 	parent: string | null;
@@ -176,6 +260,59 @@ export function unresolvedReason(item: UnresolvedItem): string {
 export function shapeFor(category: Category): ShapeName {
 	const index = Number.isFinite(category.shape) ? Math.abs(Math.trunc(category.shape)) : 0;
 	return SHAPES[index % SHAPES.length];
+}
+
+/** A diagnostic finding, as `waymark_core::envelope::Finding` reports it. */
+export interface Finding {
+	severity: 'error' | 'warning' | 'info';
+	code: string;
+	location?: Record<string, unknown>;
+	message: string;
+	fixable: boolean;
+}
+
+/** One row of the active-item index, exactly as `/api/index` returns it. */
+export interface IndexRow {
+	id: string;
+	title: string;
+	category: Category;
+	status: WorkStatus;
+	/** The document path relative to the project root, `/` separators. */
+	path: string;
+}
+
+/**
+ * The state label the index payload carries. When `complete` or `current` is
+ * `false`, the rows are a diagnosis only: the banner states they are not a
+ * complete/current index.
+ */
+export interface IndexState {
+	/** Whether the projection behind the rows is complete. */
+	complete: boolean;
+	/** Whether the rows are a complete, current index. */
+	current: boolean;
+	/** The lifecycle freshness: `stale` wins over the retained snapshot's own. */
+	freshness: 'fresh' | 'stale' | 'unknown';
+	/** Documents the projection could not read or parse. */
+	unreadable_documents: number;
+	/** Item-shaped inventory paths it could not classify. */
+	uncertain_paths: number;
+	/** The findings that explain the label. */
+	diagnostics: Finding[];
+	/** The notice the banner shows when the rows are not a current index. */
+	notice: string;
+}
+
+/** `GET /api/index?page=N` data. */
+export interface IndexData {
+	page: number;
+	page_size: number;
+	/** Active items only: archived items are excluded from rows and counts. */
+	total: number;
+	has_previous: boolean;
+	has_next: boolean;
+	rows: IndexRow[];
+	state: IndexState;
 }
 
 /** Human-readable actual status; derived state is shown separately. */

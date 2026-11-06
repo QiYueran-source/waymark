@@ -30,6 +30,7 @@ embed = []
 waymark-core = { workspace = true }
 axum = { workspace = true }
 tokio = { workspace = true }
+chrono = { workspace = true }
 pulldown-cmark = { workspace = true }
 ammonia = { workspace = true }
 # MSRV pin: idna_adapter 1.2.2 pulls icu 2.x (rust-version 1.88). 1.2.0 resolves

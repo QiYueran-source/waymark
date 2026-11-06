@@ -144,6 +144,9 @@ pub(crate) struct AppState {
     /// The actual bound port, which is the only port Host/Origin may name.
     pub(crate) port: u16,
     pub(crate) assets: Arc<AssetSource>,
+    /// The one shared projection, loaded before serving and refreshed per
+    /// request when the sources change.
+    pub(crate) shared: Arc<SharedProjection>,
 }
 
 /// A running loopback listener.
@@ -192,10 +195,15 @@ pub async fn bind(project: Project, config: WebConfig) -> Result<Running, WebErr
             source,
         })?;
     let addr = listener.local_addr().map_err(WebError::Address)?;
+    // The shared projection is loaded before the listener serves: the first
+    // request answers from a snapshot that already reflects the sources. A load
+    // failure never prevents startup; the first request retries the load.
+    let shared = Arc::new(SharedProjection::startup(project.clone()).await);
     let state = AppState {
         project,
         port: addr.port(),
         assets: Arc::new(config.assets),
+        shared,
     };
     let app = router(state);
     let (shutdown, stopped) = oneshot::channel::<()>();
@@ -246,7 +254,9 @@ pub(crate) fn router(state: AppState) -> Router {
         // default paths.
         .route("/_app/{*path}", get(assets::app_asset))
         .route("/api/health", get(api::health))
+        .route("/api/status", get(api::status))
         .route("/api/tree", get(api::tree))
+        .route("/api/index", get(api::index))
         .route("/api/item/{id}", get(api::item))
         .fallback(not_found)
         .layer(middleware::from_fn_with_state(
@@ -255,3 +265,13 @@ pub(crate) fn router(state: AppState) -> Router {
         ))
         .with_state(state)
 }
+
+/// The one shared projection plus its lifecycle bookkeeping.
+///
+/// [`SharedProjection`] is the only projection a running service holds. Every
+/// business read calls [`SharedProjection::snapshot`], which checks the
+/// sources, refreshes (single-flight) when they moved, and answers with an
+/// atomically published [`Projection`]. A failed refresh keeps the last good
+/// snapshot and marks it stale, so business reads fail with the standard
+/// `INCOMPLETE_PROJECTION` error instead of serving old data.
+use crate::shared::SharedProjection;

@@ -1211,6 +1211,86 @@ Web read model can build the hierarchy and readiness from one scan. `hierarchy_t
 whole-project path to it (private `with_meta` preserves the existing `_meta`) and the single-root path
 is unchanged. No existing public signature or behaviour changed.
 
+## Shared Web projection and dashboard wire
+
+**Choice:** the Web service owns one in-process `Projection` plus its bounded derived-data LRU for its
+whole lifetime. Startup attempts `Projection::load` before the listener accepts; an incomplete load
+does not prevent startup (a broken document yields a scoped snapshot, while a hard inventory/IO failure
+leaves no snapshot and the first request retries the load). Every API request runs a lightweight
+inventory check over paths, sizes, modified times, and inventory problems — no byte reads or
+fingerprint recomputation — and only a detected source change triggers a refresh. A local
+configuration or cache-setting edit (`user.toml`) is not a source change; a category-path change in the
+shared configuration surfaces naturally through the inventory. Concurrent requests share one in-flight
+refresh through one `Notify` ticket, publication is atomic, and the blocking load runs inside
+`spawn_blocking`. A failed refresh keeps the last successful snapshot marked stale: the status route
+still answers 200 with the retained aggregates and the last-success instant, while tree and detail
+reads refuse it with `INCOMPLETE_PROJECTION`. There is no watcher, timer, polling, or refresh timeout.
+
+**Why:** the dashboard must describe what the service actually holds, and one shared snapshot is what
+keeps the tree, the detail view, and the dashboard from disagreeing. Request-triggered single-flight
+refresh is the simplest design that stays correct under a burst of requests; moving the scan off the
+async runtime and publishing atomically keeps readers consistent without locking the read path.
+Retaining a stale snapshot for diagnosis is what lets a broken refresh still be inspected without ever
+serving old data as current.
+
+**Choice:** the status payload's counters have exactly the wire names `hits`, `misses`, and
+`evictions`. The `ProjectionStats` witnesses (`parse_count`, `inventory_passes`, `retries`) are
+internal and never serialized. The counters are merged across a successful refresh, preserved by a
+cache-only reconfiguration, and start at zero on restart.
+
+**Why:** the three counters are the lifetime cache-health summary the dashboard shows; the parse,
+inventory-pass, and retry counts are implementation witnesses, not dashboard facts. A rebuilt
+projection starts its counters at zero, so the shared service merges the retained counters into the
+fresh snapshot to keep one lifetime history, while a cache-only reconfiguration clears entries without
+touching that history. A restart is a new process and truthfully begins a new history.
+
+**Choice:** a never-loaded status reports the configured cache enabled state and capacity (from the
+project's effective local settings) while entries (total and per class) and counters stay zero.
+
+**Why:** reporting `enabled: false` and `capacity: 0` would claim the cache is disabled when the
+configuration says it is enabled; nothing has been cached justifies zero entries and counters, but not
+a fabricated configuration.
+
+**Choice:** the active-item index returns 50 rows per page, enforced by the API; `page` is 1-based,
+absent or blank defaults to 1, unknown parameters are tolerated, and repeated, non-positive, or
+non-numeric values are `400 INVALID_QUERY`. Rows carry exactly stable ID, title, category, lifecycle
+status, and project-relative path; archived items are excluded from rows and total; ordering is stable
+ID ascending. The `state` block (`complete`, `current`, `freshness`, `unreadable_documents`,
+`uncertain_paths`, `diagnostics`, `notice`) labels the rows as diagnostic-only whenever the projection
+is not complete and current. The block has no `last_success`: the status route already carries the last
+successful refresh time.
+
+**Why:** the page size is a server guarantee, not a client preference, and the row fields are the whole
+safe summary — absolute paths, owners, relationships, bodies, and custom fields never leave the
+project. Labeling every incomplete or stale result keeps a partial list from being mistaken for the
+whole project, and keeping the last-success instant in the status payload alone gives each fact one
+home.
+
+**Choice:** an invalid project mid-run yields a 200 status reporting stale or unknown state, an index
+with zero rows and the `unknown` state, and tree/detail reads that fail with `INCOMPLETE_PROJECTION`;
+it never produces an empty "healthy" dashboard.
+
+**Why:** a broken launch or a project that becomes invalid is a diagnosis, not an empty project; one
+clear failure beats a dashboard that silently implies there is no work.
+
+## Dashboard disclosure and warning placement
+
+**Choice:** the cache/status dashboard is disclosed by one small control in the header
+(“Cache & status”), not rendered as page content. The control opens a dialog holding the two
+sections unchanged; the panel starts closed and never occupies the tree's area. The sections
+stay mounted behind a hidden overlay, so the one status and index read per page load still
+happens exactly once whether or not the panel is opened. The control carries the warning when
+the projection is unreadable, incomplete, or stale — a red label plus “Needs attention” — and
+the panel keeps its own in-section banner. There is no page-level banner.
+
+**Why:** the dashboard is a diagnostic aid used occasionally; as always-on page content its
+fifty-row table pushed the tree below the fold and added continuous noise. A disclosed panel
+keeps the tree first while keeping the state one click away. Moving the warning from a
+page-level banner onto the control is the deliberate trade-off: the state stays visible on the
+control that leads to the detail, and the full banner appears the moment the panel opens. The
+specification's “prominent banner” requirement is met by the warning state of that control
+plus the panel's own banner, not by a persistent strip above the tree.
+
 ## What phase 2 (SvelteKit) must know
 
 - Build the frontend into `crates/waymark-web/ui/build` (the default) or pass `--assets` elsewhere.

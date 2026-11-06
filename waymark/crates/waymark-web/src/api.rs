@@ -1,15 +1,17 @@
 //! The read model behind the JSON API.
 //!
-//! Everything here is derived from one core read per request:
+//! Everything here is derived from the one shared projection the service holds
+//! for its whole lifetime:
 //!
 //! - `GET /api/health` touches nothing.
-//! - `GET /api/tree` loads one [`Graph`] and builds the hierarchy from it, so the
-//!   tree shape and every node's readiness come from the same scan.
-//! - `GET /api/item/:id` reads one document and also loads the graph for
-//!   readiness and relationships. A graph that cannot be built is reported as a
-//!   read failure, never as a detail with made-up readiness.
+//! - `GET /api/tree` takes the shared snapshot, builds the hierarchy from its
+//!   graph, and rejects an incomplete or stale projection rather than serving a
+//!   partial tree.
+//! - `GET /api/item/:id` takes the shared snapshot and scoped-reads one item
+//!   from it. The scoped read answers while the projection is incomplete; the
+//!   snapshot still refuses to answer from a stale or missing projection.
 //!
-//! Archived items never appear in the tree, because [`Graph::from_project`] puts
+//! Archived items never appear in the tree, because [`Graph::from_items`] puts
 //! them aside. The item route still answers for an archived ID (the flag says
 //! so); there is no archive browser and no list route.
 
@@ -18,12 +20,12 @@ use axum::response::Response;
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use waymark_core::envelope::Meta;
+use waymark_core::envelope::{Freshness, Meta};
 use waymark_core::error::WaymarkError;
 use waymark_core::model::{CategoryKey, WorkItem};
 use waymark_core::ops::list::complete_meta;
-use waymark_core::ops::read;
 use waymark_core::ops::tree::{self, HierarchyTree, TreeNode, UnresolvedItem};
+use waymark_core::projection::{CacheClassCounts, ProjectedEntry, Projection};
 use waymark_core::readiness::{Graph, Readiness};
 use waymark_core::store::Project;
 use waymark_core::view::{blocked_reason, display_state};
@@ -39,6 +41,10 @@ use crate::server::AppState;
 /// assignments; inserting or reordering does, so the list is a contract.
 pub const SHAPES: [&str; 6] = ["circle", "square", "triangle", "diamond", "hexagon", "star"];
 
+/// The one page size of the active-item index. The API enforces it: a client
+/// can never ask for a different window.
+pub const INDEX_PAGE_SIZE: usize = 50;
+
 /// One category as the API exposes it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CategoryView {
@@ -48,6 +54,126 @@ pub struct CategoryView {
     pub name: String,
     /// The stable shape index into [`SHAPES`].
     pub shape: usize,
+}
+
+/// `GET /api/status`: the projection and derived-cache state, always answered.
+///
+/// Unlike the business reads, the status route never fails for a stale or
+/// missing snapshot: it reports exactly that state (with the retained snapshot's
+/// aggregates when there is one) so the dashboard stays useful for diagnosis.
+/// The only failure mode is malformed server state, and there is none: the
+/// response is always the full payload below. The read performs no cache lookup
+/// and never changes the counters.
+pub(crate) async fn status(State(state): State<AppState>) -> Response {
+    state.shared.sync().await;
+    let snapshot = state.shared.snapshot_unchecked().await;
+    let meta = state.shared.status_meta(snapshot.as_deref()).await;
+    respond::success(
+        status_json(&state.shared, &state.project, snapshot.as_deref()).await,
+        meta,
+    )
+}
+
+/// The `data` half of the status payload.
+///
+/// All the projection facts come from the snapshot's own [`Projection::status`]
+/// summary (completeness, freshness, shortfall counts, diagnostics, cache
+/// enabled/capacity/total/per-class counts, and the lifetime counters), and the
+/// lifecycle fields (`loaded`, `last_success`, and the stale override for
+/// `freshness`) come from the shared state. When the snapshot is missing
+/// (startup failed and no refresh has succeeded), the projection block reports
+/// `loaded: false` with `freshness: "unknown"`; the cache block still reports the
+/// configured enabled state and capacity, while entries and counters stay zero
+/// because nothing has been cached.
+async fn status_json(
+    shared: &crate::shared::SharedProjection,
+    project: &Project,
+    snapshot: Option<&Projection>,
+) -> Value {
+    let loaded = snapshot.is_some();
+    let last_success = shared.last_success().await;
+    let stale = shared.is_stale().await;
+    let (
+        completeness,
+        freshness,
+        unreadable_documents,
+        uncertain_paths,
+        diagnostics,
+        cache_enabled,
+        cache_capacity,
+        cache_total,
+        by_class,
+        counters,
+    ) = match snapshot {
+        Some(projection) => {
+            let status = projection.status();
+            (
+                status.completeness.as_str(),
+                // The lifecycle freshness wins: a stale snapshot reports stale
+                // even though its own freshness (verified when built) says fresh.
+                if stale {
+                    "stale"
+                } else {
+                    status.freshness.as_str()
+                },
+                status.shortfall.unreadable_documents,
+                status.shortfall.uncertain_paths,
+                json!(status.diagnostics),
+                status.cache_enabled,
+                status.cache_capacity,
+                status.cache_len,
+                json!(status.cache_by_class),
+                // The three lifetime counters are the whole wire contract; the
+                // ProjectionStats witnesses (parse_count, inventory_passes,
+                // retries) stay internal.
+                json!({
+                    "hits": status.stats.cache_hits,
+                    "misses": status.stats.cache_misses,
+                    "evictions": status.stats.cache_evictions,
+                }),
+            )
+        }
+        None => {
+            // Nothing has been cached, but the configuration still knows
+            // whether the cache is enabled and how it is bounded: report those
+            // truthfully instead of fabricating `disabled` and a zero capacity.
+            let cache = waymark_core::ops::local_config::effective_lenient(project).cache;
+            (
+                "scoped",
+                "unknown",
+                0usize,
+                0usize,
+                json!([]),
+                cache.enabled,
+                cache.capacity,
+                0usize,
+                json!(CacheClassCounts::default()),
+                json!({
+                    "hits": 0,
+                    "misses": 0,
+                    "evictions": 0,
+                }),
+            )
+        }
+    };
+    json!({
+        "projection": {
+            "completeness": completeness,
+            "freshness": freshness,
+            "unreadable_documents": unreadable_documents,
+            "uncertain_paths": uncertain_paths,
+            "diagnostics": diagnostics,
+            "loaded": loaded,
+            "last_success": last_success,
+        },
+        "cache": {
+            "enabled": cache_enabled,
+            "capacity": cache_capacity,
+            "total": cache_total,
+            "by_class": by_class,
+        },
+        "counters": counters,
+    })
 }
 
 /// The tree view selected by `?view=`.
@@ -100,13 +226,178 @@ fn project_root(project: &Project) -> String {
         .unwrap_or_else(|| project.root().to_string())
 }
 
+/// `GET /api/index?page=N`: the active items the shared projection holds.
+///
+/// The index is a diagnostic list, not a business read: it answers in every
+/// state the snapshot can be in — healthy, incomplete, stale after a failed
+/// refresh, or never loaded — because the dashboard must still say what the
+/// service holds. Incomplete or stale snapshots supply whatever rows parsed,
+/// labeled by a `state` block stating the rows are not a complete/current
+/// index; a never-loaded snapshot answers empty rows with the same block. The
+/// page is enforced by the API: `INDEX_PAGE_SIZE` rows per page, and a page
+/// beyond the last one is an empty window with correct navigation, never an
+/// error. Only a non-positive or non-numeric `page` is a `400 INVALID_QUERY`.
+pub(crate) async fn index(State(state): State<AppState>, RawQuery(raw): RawQuery) -> Response {
+    let page = match index_page(raw.as_deref()) {
+        Ok(page) => page,
+        Err(message) => return respond::bad_request("INVALID_QUERY", message),
+    };
+    state.shared.sync().await;
+    let snapshot = state.shared.snapshot_unchecked().await;
+    let stale = state.shared.is_stale().await;
+    let meta = state.shared.status_meta(snapshot.as_deref()).await;
+    respond::success(index_json(&state, page, snapshot.as_deref(), stale), meta)
+}
+
+/// The `data` half of the index payload.
+///
+/// The rows come from the snapshot's own entries — never from
+/// [`Graph::from_projection`], which would refuse an incomplete or stale
+/// snapshot — filtered to active items, sorted by stable ID ascending, and
+/// windowed to `page`. `total` counts the same active population, so rows and
+/// counts can never disagree, and archived items are excluded from both. When
+/// the snapshot is missing (startup failed and no refresh has succeeded), the
+/// rows are empty; an incomplete or stale snapshot still supplies its parseable
+/// rows behind the `state` block.
+fn index_json(state: &AppState, page: usize, snapshot: Option<&Projection>, stale: bool) -> Value {
+    let mut active: Vec<&ProjectedEntry> = snapshot
+        .into_iter()
+        .flat_map(Projection::entries)
+        .filter(|entry| !entry.item.is_archived())
+        .collect();
+    active.sort_by(|left, right| left.id.cmp(&right.id));
+    let total = active.len();
+    let start = page
+        .saturating_sub(1)
+        .saturating_mul(INDEX_PAGE_SIZE)
+        .min(total);
+    let end = start.saturating_add(INDEX_PAGE_SIZE).min(total);
+    let window = &active[start..end];
+    let rows: Vec<Value> = window.iter().map(|entry| index_row(state, entry)).collect();
+
+    json!({
+        "page": page,
+        "page_size": INDEX_PAGE_SIZE,
+        "total": total,
+        "has_previous": page > 1 && total > 0,
+        "has_next": end < total,
+        "rows": rows,
+        "state": index_state(snapshot, stale),
+    })
+}
+
+/// One row of the index: ID, title, category, status, and a project-relative
+/// path — nothing else.
+fn index_row(state: &AppState, entry: &ProjectedEntry) -> Value {
+    let item = &entry.item;
+    json!({
+        "id": item.id.as_str(),
+        "title": item.title,
+        "category": category_view(&item.category, &category_views(&state.project)),
+        "status": item.status.as_str(),
+        "path": relative_path(state, entry),
+    })
+}
+
+/// The project-relative document path (`work/bugs/wm-….md`), computed from the
+/// absolute path the inventory recorded by stripping the project root.
+fn relative_path(state: &AppState, entry: &ProjectedEntry) -> String {
+    entry
+        .path
+        .strip_prefix(state.project.root())
+        .map(|path| path.to_string())
+        .unwrap_or_else(|_| entry.path.to_string())
+}
+
+/// The `state` block every index payload carries.
+///
+/// The retained projection's `is_complete()` decides the label; the lifecycle
+/// `stale` flag overrides only the reported freshness (the retained snapshot
+/// was built fresh, but the refresh that should have replaced it failed). A
+/// complete, fresh snapshot gets `complete: true, current: true` with an empty
+/// notice; anything else labels the rows and the notice states they are not a
+/// complete/current index. When the snapshot is missing (startup failed and no
+/// refresh has succeeded), `freshness` is `unknown` and the notice says
+/// nothing has loaded. The last successful refresh time belongs to the status
+/// route, not to this block.
+fn index_state(snapshot: Option<&Projection>, stale: bool) -> Value {
+    let Some(projection) = snapshot else {
+        return json!({
+            "complete": false,
+            "current": false,
+            "freshness": Freshness::Unknown.as_str(),
+            "unreadable_documents": 0,
+            "uncertain_paths": 0,
+            "diagnostics": [],
+            "notice": "no projection has loaded yet: these rows are not a complete, current index",
+        });
+    };
+    let current = projection.is_complete() && !stale;
+    let (unreadable_documents, uncertain_paths) = projection.shortfall_counts();
+    let diagnostics: Vec<Value> = projection
+        .diagnostics()
+        .iter()
+        .filter_map(|finding| serde_json::to_value(finding).ok())
+        .collect();
+    json!({
+        "complete": current,
+        "current": current,
+        "freshness": if stale {
+            Freshness::Stale.as_str()
+        } else {
+            projection.freshness().as_str()
+        },
+        "unreadable_documents": unreadable_documents,
+        "uncertain_paths": uncertain_paths,
+        "diagnostics": diagnostics,
+        "notice": if current { "" } else { "these rows are not a complete, current index" },
+    })
+}
+
+/// Parse the `page` query parameter: 1-based, defaulting to 1.
+///
+/// Unknown parameters are ignored (they let a caller add a cache-buster); a
+/// repeated or non-numeric `page`, or one below 1, is a `400`. Hand parsing
+/// keeps the rejection a JSON envelope instead of axum's plain-text extractor
+/// rejection, exactly like `tree_view`.
+fn index_page(raw: Option<&str>) -> Result<usize, String> {
+    let Some(raw) = raw else {
+        return Ok(1);
+    };
+    let mut selected = None;
+    for pair in raw.split('&') {
+        if pair.is_empty() {
+            continue;
+        }
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        let key = percent_decode(key).ok_or("the query string is not valid UTF-8")?;
+        let value = percent_decode(value).ok_or("the query string is not valid UTF-8")?;
+        if key != "page" {
+            continue;
+        }
+        if selected.is_some() {
+            return Err("page is given more than once".to_owned());
+        }
+        selected = Some(value);
+    }
+    match selected {
+        None => Ok(1),
+        Some(value) if value.is_empty() => Ok(1),
+        Some(value) => value
+            .parse::<usize>()
+            .ok()
+            .filter(|page| *page >= 1)
+            .ok_or_else(|| format!("page must be a positive integer, found {value:?}")),
+    }
+}
+
 /// `GET /api/tree?view=combined|grouped`.
 pub(crate) async fn tree(State(state): State<AppState>, RawQuery(raw): RawQuery) -> Response {
     let view = match tree_view(raw.as_deref()) {
         Ok(view) => view,
         Err(message) => return respond::bad_request("INVALID_QUERY", message),
     };
-    match tree_data(&state.project, view) {
+    match tree_data(&state, view).await {
         Ok((data, meta)) => respond::success(data, meta),
         Err(error) => respond::domain_error(&error),
     }
@@ -114,7 +405,7 @@ pub(crate) async fn tree(State(state): State<AppState>, RawQuery(raw): RawQuery)
 
 /// `GET /api/item/:id`.
 pub(crate) async fn item(State(state): State<AppState>, Path(id): Path<String>) -> Response {
-    match item_data(&state.project, &id) {
+    match item_data(&state, &id).await {
         Ok(data) => respond::success(data, Meta::direct_file_scoped()),
         Err(error) => respond::domain_error(&error),
     }
@@ -153,12 +444,14 @@ fn tree_view(raw: Option<&str>) -> Result<TreeView, String> {
 }
 
 /// One tree read: a complete snapshot or an error with diagnostics.
-fn tree_data(project: &Project, view: TreeView) -> Result<(Value, Meta), WaymarkError> {
-    // One scan: the same graph answers both shape and readiness. A damaged
-    // document fails the scan and therefore the request — never a partial tree.
-    let graph = Graph::from_project(project)?;
+async fn tree_data(state: &AppState, view: TreeView) -> Result<(Value, Meta), WaymarkError> {
+    // The shared snapshot refuses a stale or missing projection; a complete
+    // projection yields the graph that answers both shape and readiness. A
+    // damaged document fails the read — never a partial tree.
+    let projection = state.shared.snapshot().await?;
+    let graph = Graph::from_projection(&projection)?;
     let hierarchy = tree::hierarchy_from_graph(&graph, None);
-    let categories = category_views(project);
+    let categories = category_views(&state.project);
     let unresolved: Vec<Value> = hierarchy
         .unresolved
         .iter()
@@ -266,20 +559,29 @@ fn node_json(node: &TreeNode, graph: &Graph, categories: &[CategoryView]) -> Val
     })
 }
 
-fn item_data(project: &Project, id: &str) -> Result<Value, WaymarkError> {
-    let read = read::read(project, id)?;
-    // Detail needs readiness and relationships, which are whole-project facts.
-    let graph = Graph::from_project(project)?;
+/// One item read: the shared snapshot's scoped read of the document.
+///
+/// The scoped read carries readiness and relationships when the projection is
+/// complete, and still answers (with `completeness: scoped`) while it is
+/// incomplete. The snapshot refuses a stale or missing projection, so a detail
+/// never answers from old data.
+async fn item_data(state: &AppState, id: &str) -> Result<Value, WaymarkError> {
+    let projection = state.shared.snapshot().await?;
+    let read = projection.scoped_read(
+        &waymark_core::id::WorkItemId::parse(id.trim())
+            .map_err(|error| WaymarkError::invalid_id(id.trim(), &error).at_field("id"))?,
+    )?;
     let item = read.item;
-    let readiness = graph.readiness_any(&item.id);
-    let child_ids = graph.children(&item.id);
-    let dependent_ids = graph.dependents(&item.id);
+    let readiness = read.readiness;
+    // The blocked reason names the blocker's state, which is a whole-project
+    // fact: the same graph the scoped read used for relationships answers it.
+    let graph = projection.graph();
     let custom_fields = serde_json::to_value(&item.custom_fields).unwrap_or_else(|_| json!({}));
     Ok(json!({
         "id": item.id.as_str(),
         "title": item.title,
         "body_html": render::markdown_to_html(&item.body),
-        "category": category_view(&item.category, &category_views(project)),
+        "category": category_view(&item.category, &category_views(&state.project)),
         "status": item.status.as_str(),
         "state": item_state(&item, readiness.as_ref()),
         "ready": readiness.as_ref().is_some_and(|readiness| readiness.ready),
@@ -297,15 +599,15 @@ fn item_data(project: &Project, id: &str) -> Result<Value, WaymarkError> {
         // resolves it, and this adapter only carries the result.
         "display_times": waymark_core::view::item_display_times_json(
             &item,
-            waymark_core::ops::local_config::effective_lenient(project).timezone,
+            waymark_core::ops::local_config::effective_lenient(&state.project).timezone,
         ),
         "archived": item.is_archived(),
         "custom_fields": custom_fields,
         "relationships": {
             "parent": item.parent.as_ref().map(|parent| parent.as_str()),
-            "children": id_list(&child_ids),
+            "children": id_list(&read.children),
             "dependencies": id_list(&item.dependencies),
-            "dependents": id_list(&dependent_ids),
+            "dependents": id_list(&read.dependents),
             "soft_links": id_list(&item.soft_links),
         },
     }))
