@@ -9,7 +9,8 @@
 # to relax the requirement for index.html or assets-manifest.json.
 #
 # Both variants are built from one call so the basic and Web archives of a
-# platform always share README.md, the licence files, and the licence inventory.
+# platform always share README.md, README.zh-CN.md, SECURITY.md, the licence
+# files, and the licence inventory.
 #
 # Usage:
 #   scripts/release/package.sh [--out DIR] [--version VERSION] [--git-sha SHA]
@@ -149,7 +150,9 @@ fi
 [[ -s "$licence_file" ]] || fail "the licence inventory is empty"
 
 for stage in "$stage_basic" "$stage_web"; do
-    cp "$RELEASE_ROOT/README.md" "$RELEASE_ROOT/LICENSE-MIT" "$RELEASE_ROOT/LICENSE-APACHE" "$stage/"
+    cp "$RELEASE_ROOT/README.md" "$RELEASE_ROOT/README.zh-CN.md" \
+        "$RELEASE_ROOT/SECURITY.md" "$RELEASE_ROOT/LICENSE-MIT" \
+        "$RELEASE_ROOT/LICENSE-APACHE" "$stage/"
     cp "$licence_file" "$stage/THIRD_PARTY_LICENSES.txt"
     # Windows has no executable bit; the .exe extension carries the meaning.
     if [[ "$os" != windows ]]; then
@@ -159,7 +162,7 @@ done
 
 basic_archive="$out_dir/waymark-v$version-$platform.$archive_ext"
 web_archive="$out_dir/waymark-web-v$version-$platform.$archive_ext"
-archive_files=("$waymark_bin" "$mcp_bin" README.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_LICENSES.txt)
+archive_files=("$waymark_bin" "$mcp_bin" README.md README.zh-CN.md SECURITY.md LICENSE-MIT LICENSE-APACHE THIRD_PARTY_LICENSES.txt)
 
 pack_archive() {
     local archive="$1" stage="$2"

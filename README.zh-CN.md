@@ -31,8 +31,9 @@ Waymark 由同一个 tag 构建出两种预编译版本：
 | Windows x86_64 | `waymark-v<version>-windows-x86_64.zip` |
 
 每个 Unix 压缩包都没有顶层目录：根目录下直接是 `waymark`、`waymark-mcp`、
-`README.md`、`LICENSE-MIT`、`LICENSE-APACHE` 和 `THIRD_PARTY_LICENSES.txt`。
-Windows 压缩包内容相同，可执行文件名为 `waymark.exe` 与 `waymark-mcp.exe`。
+`README.md`、`README.zh-CN.md`、`SECURITY.md`、`LICENSE-MIT`、`LICENSE-APACHE`
+和 `THIRD_PARTY_LICENSES.txt`。Windows 压缩包内容相同，可执行文件名为
+`waymark.exe` 与 `waymark-mcp.exe`。
 `THIRD_PARTY_LICENSES.txt` 是该构建的依赖许可证清单。
 
 下面的示例使用版本 `0.1.0`。安装其他版本时请修改 `VERSION`。

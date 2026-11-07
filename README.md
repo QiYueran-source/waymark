@@ -34,9 +34,10 @@ The archive names are:
 | Windows x86_64 | `waymark-v<version>-windows-x86_64.zip` |
 
 Each Unix archive contains no top-level directory: it holds `waymark`,
-`waymark-mcp`, `README.md`, `LICENSE-MIT`, `LICENSE-APACHE`, and
-`THIRD_PARTY_LICENSES.txt` at its root. The Windows archive holds the same files
-with the binaries named `waymark.exe` and `waymark-mcp.exe`.
+`waymark-mcp`, `README.md`, `README.zh-CN.md`, `SECURITY.md`, `LICENSE-MIT`,
+`LICENSE-APACHE`, and `THIRD_PARTY_LICENSES.txt` at its root. The Windows
+archive holds the same files with the binaries named `waymark.exe` and
+`waymark-mcp.exe`.
 `THIRD_PARTY_LICENSES.txt` is the dependency-licence inventory for that build.
 
 The examples below use version `0.1.0`. Set `VERSION` to the release you are

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `SECURITY.md`, covering the supported versions, the private reporting
+  channel, the response targets, and the security scope of the CLI, the MCP
+  server, and the Web view.
+- `README.zh-CN.md`, a Simplified Chinese translation of the README, linked
+  from the English one.
+- Every release archive now ships `README.zh-CN.md` and `SECURITY.md`, so the
+  links in the packaged `README.md` resolve.
+
+### Fixed
+
+- The first-run transcript in the README matches the output of `waymark init`,
+  `waymark create`, and `waymark list`.
+
 ## [0.1.0] - 2026-11-06
 
 The first public release of Waymark.
