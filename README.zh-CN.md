@@ -1,13 +1,46 @@
 # Waymark
 
+**工单就是仓库里的 Markdown 文件。没有数据库，没有后台服务——`git clone`
+就是全部安装。**
+
 [English](README.md) | 简体中文
 
-Waymark 是一个本地优先、Git 友好的工单追踪器。每个工单都是一份带 YAML
-frontmatter 的 Markdown 文档，存放在项目的存储根目录下（默认是 `work/`），项目
-的配置与元数据放在 `.waymark/`。没有数据库，也没有后台进程：文档本身就是事实
-来源，Git 就是历史。
+```sh
+$ waymark init
+initialised Waymark project at /home/you/demo
 
-Waymark 由同一个 tag 构建出两种预编译版本：
+$ waymark create --title "Ship the first screen" --category task --owner "You"
+created wm-f3c4djp65z9e
+
+$ sed -n '1,5p' work/task/wm-f3c4djp65z9e.md
+---
+schema: 1
+id: wm-f3c4djp65z9e
+title: Ship the first screen
+category: task
+```
+
+- **文档就是事实来源。** 一个工单一份带 YAML frontmatter 的 Markdown 文件，放在
+  `work/` 下，配置放在 `.waymark/`。历史由 Git 保管，所以工单可以像代码一样被
+  评审、diff 和回滚。
+- **查询由内存投影作答，而且会说明来源。** 集合查询来自一份从文件重建、按内容
+  指纹校验的内存投影。长期运行的视图会增量刷新，字节没变的文档不会重新解析。
+  每个响应都记录 `source`、`completeness` 和 `freshness`；视图不完整时返回
+  `INCOMPLETE_PROJECTION`，而不是发布半份结果。
+- **agent 和你用同一个项目。** `waymark-mcp` 是走 stdio 的 Model Context
+  Protocol 服务器，Claude Code、Cursor 或任何 MCP 客户端读写的都是同一批工单。
+- **运行时什么都不用装。** 四平台预编译二进制；没有数据库、没有后台进程；除只读
+  Web 视图外没有任何网络监听，且只绑定回环地址。
+
+Pre-1.0：文档格式与 CLI 仍可能在版本之间变化；macOS 和 Windows 二进制没有签名，
+运行前请用 `.sha256` 校验每个压缩包。
+
+**不适合你的情况**：你需要看板、通知或多人实时协作——这些是刻意不做的，不是
+路线图上的缺口。
+
+## 两种包
+
+两种包由同一个 tag 构建，读写同一种项目格式：
 
 - **Basic** —— `waymark` 命令行工具，以及 `waymark-mcp` 这个 Model Context
   Protocol 服务器。

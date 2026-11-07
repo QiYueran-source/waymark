@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The README opens with the pitch, a first-run transcript, the capabilities the
+  tracker guarantees, and who should not use it, followed by the package and
+  installation reference. `README.zh-CN.md` carries the same structure.
+
 ### Added
 
 - `SECURITY.md`, covering the supported versions, the private reporting
