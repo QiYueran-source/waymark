@@ -1,9 +1,10 @@
 # Release checklist
 
-A Waymark release is one version bump, one tag, one workflow run, and one human
-decision to publish. The workflow attaches everything to a **draft** GitHub
-Release; nothing is published automatically and no crate is published to
-crates.io. This checklist is the human part.
+A Waymark release is one version bump, one tag, one workflow run, and two human
+decisions to publish. The workflow attaches everything to a **draft** GitHub
+Release and stops there; the crates.io job in the same run waits behind a
+required reviewer on its environment. Nothing reaches users until a human acts,
+and this checklist is that human part.
 
 The machine-checkable parts live in `.github/workflows/release.yml` and
 `scripts/release/`; do not duplicate them here. A finding from a manual run gets
@@ -149,6 +150,48 @@ Use the extracted archive, not the checkout.
       unsigned binary.
 - [ ] On Windows, confirm the unsigned `.exe` binaries still launch through
       SmartScreen's “More info → Run anyway” path.
+
+## Publish to crates.io
+
+`publish-crates` runs after `verify` and publishes `waymark-core`, then
+`waymark-web`, `waymark-mcp`, and `waymark-cli` in dependency order, waiting for
+each version to reach the index before the next. It is skipped for a pre-release
+tag: `v0.1.0-rc.1` produces a GitHub pre-release and no crates.io version.
+
+One-time repository setup:
+
+- [ ] The `crates-io` environment exists and requires at least one reviewer.
+      Without a reviewer there is no gate, and the job publishes on its own.
+- [ ] `CARGO_REGISTRY_TOKEN` is an environment secret on `crates-io`, not a
+      repository secret, and the token carries only `publish-new` and
+      `publish-update`.
+- [ ] The crates.io account behind the token has a verified email address.
+      Until it does, every upload fails with `A verified email address is
+      required to publish crates to crates.io`.
+
+Per release:
+
+- [ ] Wait for the run to pause at *Waiting for review* on `publish-crates`;
+      the draft Release is created in parallel. Approve only once the draft's
+      artifacts passed the smoke checks above. The approval *is* the publish:
+      the upload starts on approval, there is no second command.
+- [ ] Rejecting the deployment cancels the job and leaves the draft in place;
+      publishing the draft by hand then ships binaries without crates.
+- [ ] Confirm the job reports all four crates and that
+      `https://crates.io/crates/waymark-cli` shows the new version.
+- [ ] In a scratch directory, `cargo install waymark-cli --version <version>
+      --locked` installs it and `waymark version` prints that version.
+
+A local run publishes for real; rehearse with `--dry-run` first. The script is
+idempotent, so a run that stopped halfway resumes instead of failing on an
+already-uploaded version:
+
+```sh
+scripts/release/publish-crates.sh --version <version> --dry-run
+CARGO_REGISTRY_TOKEN=... scripts/release/publish-crates.sh --version <version>
+```
+
+Publishing is irreversible: a wrong version is yanked, never replaced.
 
 ## Publish
 
