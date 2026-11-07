@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The README banner and the GitHub social preview use the new Waymark artwork;
+  the 1280x400 README crop and the 1280x640 social card are both refreshed.
+
 ## [0.1.1] - 2026-11-07
 
 ### Changed
