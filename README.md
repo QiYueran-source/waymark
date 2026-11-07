@@ -1,14 +1,53 @@
 # Waymark
 
+**Work items are Markdown files in your repo. No database, no daemon —
+`git clone` is the whole install.**
+
 English | [简体中文](README.zh-CN.md)
 
-Waymark is a local-first, Git-friendly work-item tracker. Every work item is a
-Markdown document with YAML frontmatter stored under the project's storage root
-(`work/` by default), and the project's configuration and metadata live in
-`.waymark/`. There is no database and no background daemon: the documents are
-the source of truth and Git is the history.
+![Waymark banner](assets/banner-readme.png)
 
-Waymark ships as two prebuilt variants built from the same tag:
+```sh
+$ waymark init
+initialised Waymark project at /home/you/demo
+
+$ waymark create --title "Ship the first screen" --category task --owner "You"
+created wm-f3c4djp65z9e
+
+$ sed -n '1,5p' work/task/wm-f3c4djp65z9e.md
+---
+schema: 1
+id: wm-f3c4djp65z9e
+title: Ship the first screen
+category: task
+```
+
+- **The documents are the source of truth.** One Markdown file per work item,
+  YAML frontmatter, under `work/`; configuration in `.waymark/`. Git holds the
+  history, so a ticket can be reviewed, diffed, and reverted like code.
+- **Reads come from an in-memory projection — and say so.** Collection queries
+  are answered from a projection rebuilt from the files and verified against
+  their content fingerprints. A long-running view refreshes incrementally, so a
+  document whose bytes did not change is not re-parsed. Every response records
+  its `source`, `completeness`, and `freshness`, and a partial view fails with
+  `INCOMPLETE_PROJECTION` instead of being published.
+- **Agents work on the same project.** `waymark-mcp` is a Model Context Protocol
+  server over stdio, so Claude Code, Cursor, or any MCP client reads and writes
+  the work items you do.
+- **Nothing to install at run time.** Prebuilt binaries for Linux, macOS, and
+  Windows; no database, no daemon, and no network listener except the read-only
+  Web view, which binds loopback only.
+
+Pre-1.0: the document format and the CLI may still change between releases. The
+macOS and Windows binaries are unsigned, so verify every archive against its
+`.sha256` before running it.
+
+**Not for you if** you need a board, notifications, or real-time multi-user
+collaboration — those are deliberate omissions, not a roadmap gap.
+
+## Packages
+
+Both variants are built from the same tag and read the same project format:
 
 - **Basic** — the `waymark` command-line tool and the `waymark-mcp` Model
   Context Protocol server.
