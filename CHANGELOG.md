@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The README opens with the pitch, a first-run transcript, the capabilities the
   tracker guarantees, and who should not use it, followed by the package and
   installation reference. `README.zh-CN.md` carries the same structure.
+- The README landing section now includes a replaceable banner asset; the same
+  1280x640 source also exports a 1280x400 README crop and a GitHub social preview.
 
 ### Added
 

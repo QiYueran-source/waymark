@@ -5,6 +5,8 @@
 
 [English](README.md) | 简体中文
 
+![Waymark 横幅](assets/banner-readme.png)
+
 ```sh
 $ waymark init
 initialised Waymark project at /home/you/demo
