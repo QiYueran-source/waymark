@@ -1,5 +1,7 @@
 # Waymark
 
+English | [简体中文](README.zh-CN.md)
+
 Waymark is a local-first, Git-friendly work-item tracker. Every work item is a
 Markdown document with YAML frontmatter stored under the project's storage root
 (`work/` by default), and the project's configuration and metadata live in
@@ -375,6 +377,12 @@ Every release archive has a `.sha256` sibling. The source tarball has one too.
 To check downloaded artifacts, verify each checksum, confirm the archive
 contents, run `waymark version`, and check a Web build's manifest and served
 `index.html` hash as described above.
+
+## Security
+
+Do not open a public issue for a vulnerability. Report it through
+[`SECURITY.md`](SECURITY.md), which also lists the supported versions and the
+response targets.
 
 ## Licence
 
