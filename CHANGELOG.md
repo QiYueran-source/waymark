@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-07
+
 ### Changed
 
 - The README opens with the pitch, a first-run transcript, the capabilities the
@@ -14,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   installation reference. `README.zh-CN.md` carries the same structure.
 - The README landing section now includes a replaceable banner asset; the same
   1280x640 source also exports a 1280x400 README crop and a GitHub social preview.
+- The read-only Web view shows the Waymark logo in the header, replacing the
+  three-bar placeholder mark.
 
 ### Added
 
@@ -96,5 +100,6 @@ The first public release of Waymark.
   binaries are unsigned too, so SmartScreen may require the same explicit
   approval.
 
-[Unreleased]: https://github.com/QiYueran-source/waymark/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/QiYueran-source/waymark/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/QiYueran-source/waymark/releases/tag/v0.1.1
 [0.1.0]: https://github.com/QiYueran-source/waymark/releases/tag/v0.1.0
