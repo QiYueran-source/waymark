@@ -164,10 +164,12 @@ cd "$HOME/waymark-demo"
 waymark init
 # initialised Waymark project at /home/you/waymark-demo
 #   configuration  /home/you/waymark-demo/.waymark/config.toml
+#   local settings  /home/you/waymark-demo/.waymark/user.toml
 #   category task  work/task
 
 waymark create --title "Try Waymark" --category task --owner "Your Name"
 # created wm-...
+#   /home/you/waymark-demo/work/task/wm-....md
 
 waymark list
 # wm-...  open  ready  Try Waymark
