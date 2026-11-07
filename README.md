@@ -1,5 +1,7 @@
 # Waymark
 
+English | [简体中文](README.zh-CN.md)
+
 Waymark is a local-first, Git-friendly work-item tracker. Every work item is a
 Markdown document with YAML frontmatter stored under the project's storage root
 (`work/` by default), and the project's configuration and metadata live in
@@ -32,9 +34,10 @@ The archive names are:
 | Windows x86_64 | `waymark-v<version>-windows-x86_64.zip` |
 
 Each Unix archive contains no top-level directory: it holds `waymark`,
-`waymark-mcp`, `README.md`, `LICENSE-MIT`, `LICENSE-APACHE`, and
-`THIRD_PARTY_LICENSES.txt` at its root. The Windows archive holds the same files
-with the binaries named `waymark.exe` and `waymark-mcp.exe`.
+`waymark-mcp`, `README.md`, `README.zh-CN.md`, `SECURITY.md`, `LICENSE-MIT`,
+`LICENSE-APACHE`, and `THIRD_PARTY_LICENSES.txt` at its root. The Windows
+archive holds the same files with the binaries named `waymark.exe` and
+`waymark-mcp.exe`.
 `THIRD_PARTY_LICENSES.txt` is the dependency-licence inventory for that build.
 
 The examples below use version `0.1.0`. Set `VERSION` to the release you are
@@ -173,10 +176,12 @@ cd "$HOME/waymark-demo"
 waymark init
 # initialised Waymark project at /home/you/waymark-demo
 #   configuration  /home/you/waymark-demo/.waymark/config.toml
+#   local settings  /home/you/waymark-demo/.waymark/user.toml
 #   category task  work/task
 
 waymark create --title "Try Waymark" --category task --owner "Your Name"
 # created wm-...
+#   /home/you/waymark-demo/work/task/wm-....md
 
 waymark list
 # wm-...  open  ready  Try Waymark
@@ -375,6 +380,12 @@ Every release archive has a `.sha256` sibling. The source tarball has one too.
 To check downloaded artifacts, verify each checksum, confirm the archive
 contents, run `waymark version`, and check a Web build's manifest and served
 `index.html` hash as described above.
+
+## Security
+
+Do not open a public issue for a vulnerability. Report it through
+[`SECURITY.md`](SECURITY.md), which also lists the supported versions and the
+response targets.
 
 ## Licence
 
