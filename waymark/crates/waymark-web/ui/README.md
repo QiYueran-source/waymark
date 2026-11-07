@@ -90,7 +90,9 @@ an out-of-scope sibling of the chain is not dragged in.
   `ReferenceList`, `Shape`, and the graph layer: `GraphView` (the only importer
   of the drawing library, dagre, and the library stylesheet), `GraphBridge` (its
   `useSvelteFlow` bridge), `GraphItemNode` (the library's node slot), `GraphNode`
-  (one card), and `GraphText` (the structured text alternative).
+  (one card), `GraphDependencyRoute` (the registered edge type that paints a
+  routed dependency; it imports `BaseEdge` and nothing else from the library),
+  and `GraphText` (the structured text alternative).
 - `src/lib/api.ts` — GET-only envelope client and failure types.
 - `src/lib/storage.ts` — project-scoped browser preferences.
 - `src/lib/tree.ts` — pure rows, dependency edges, grouped reference nodes, and

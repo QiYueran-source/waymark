@@ -486,6 +486,239 @@ export function dependencyGaps(
 	);
 }
 
+/** One card's place in the drawing, as the layout put it. */
+export interface PlacedCard {
+	id: string;
+	/** Which generation the card belongs to; the layout gives each its own row. */
+	depth: number;
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+}
+
+/**
+ * A dependency drawn around the cards that would otherwise hide it.
+ *
+ * Two items of one generation share a corridor: a row in the default reading,
+ * a column left to right. Drawn straight, a dependency between them runs behind
+ * every card standing in between, so a reader cannot tell which two items it
+ * joins. A route leaves the source's facing side, runs along the corridor's
+ * clearance and arrives at the target's facing side, staying visible along its
+ * whole length; dependencies sharing the corridor take separate lanes so no two
+ * routes share a stroke.
+ */
+export interface DependencyRoute {
+	/** The `d` attribute, in drawing coordinates, from side to side. */
+	path: string;
+	/** Where the relation's label sits along the route. */
+	labelX: number;
+	labelY: number;
+	/** The side of the source the route leaves, for the handle that anchors it. */
+	sourceSide: 'left' | 'right' | 'top' | 'bottom';
+	/** The side of the target the route arrives at. */
+	targetSide: 'left' | 'right' | 'top' | 'bottom';
+	/** The route's drawn length, which caps the dash pattern. */
+	length: number;
+}
+
+/** The least bend radius used at a route's corners, in drawing units. */
+const ROUTE_BEND = 10;
+
+function roundRoute(value: number): number {
+	return Math.round(value * 10) / 10;
+}
+
+/**
+ * A path through `points` with each bend rounded, so a route reads as one line
+ * rather than a set of corners. Only moves, lines and quadratics are emitted:
+ * every pair of numbers in the result is a point, which keeps the drawn path
+ * readable back as geometry.
+ */
+function roundedRoutePath(
+	points: ReadonlyArray<{ x: number; y: number }>,
+	radius: number
+): string {
+	const parts = [`M ${roundRoute(points[0].x)} ${roundRoute(points[0].y)}`];
+	for (let index = 1; index < points.length - 1; index += 1) {
+		const before = points[index - 1];
+		const corner = points[index];
+		const after = points[index + 1];
+		const inLength = Math.hypot(corner.x - before.x, corner.y - before.y);
+		const outLength = Math.hypot(after.x - corner.x, after.y - corner.y);
+		const bend = Math.min(radius, inLength / 2, outLength / 2);
+		if (bend <= 0.01) {
+			parts.push(`L ${roundRoute(corner.x)} ${roundRoute(corner.y)}`);
+			continue;
+		}
+		const into = {
+			x: corner.x + ((before.x - corner.x) / inLength) * bend,
+			y: corner.y + ((before.y - corner.y) / inLength) * bend
+		};
+		const out = {
+			x: corner.x + ((after.x - corner.x) / outLength) * bend,
+			y: corner.y + ((after.y - corner.y) / outLength) * bend
+		};
+		parts.push(`L ${roundRoute(into.x)} ${roundRoute(into.y)}`);
+		parts.push(
+			`Q ${roundRoute(corner.x)} ${roundRoute(corner.y)} ${roundRoute(out.x)} ${roundRoute(out.y)}`
+		);
+	}
+	const last = points[points.length - 1];
+	parts.push(`L ${roundRoute(last.x)} ${roundRoute(last.y)}`);
+	return parts.join(' ');
+}
+
+/**
+ * The dependency routes a drawing needs, keyed by edge id.
+ *
+ * Only a dependency between two items of one generation is routed, and only
+ * when another card of that generation stands between its ends: with nothing in
+ * the way there is nothing to route around, so the ordinary direct line stays.
+ * Dependencies between different generations cross their own gap, which the
+ * layout leaves empty, and are left alone. The result is deterministic — the
+ * same placement and the same dependencies always produce the same routes.
+ */
+export function dependencyRoutes(
+	cards: readonly PlacedCard[],
+	dependencies: ReadonlyArray<{ id: string; from: string; to: string }>,
+	direction: GraphDirection = DEFAULT_GRAPH_DIRECTION
+): Map<string, DependencyRoute> {
+	const cardById = new Map(cards.map((card) => [card.id, card]));
+	const alongRow = direction === 'TB';
+	const corridorGap = alongRow ? GRAPH_ROW_GAP : GRAPH_COLUMN_GAP;
+	const corridorOf = new Map<number, string[]>();
+	const candidates: Array<{
+		id: string;
+		source: PlacedCard;
+		target: PlacedCard;
+		row: PlacedCard[];
+	}> = [];
+
+	for (const dependency of dependencies) {
+		const source = cardById.get(dependency.from);
+		const target = cardById.get(dependency.to);
+		if (source === undefined || target === undefined) continue;
+		if (source.depth !== target.depth) continue;
+
+		// The stretch of the corridor the route has to cross: from the source's
+		// facing edge to the target's, whichever way the relation points.
+		const ahead = alongRow ? target.x >= source.x : target.y >= source.y;
+		let facing: number;
+		let facingTarget: number;
+		if (alongRow) {
+			facing = ahead ? source.x + source.width : source.x;
+			facingTarget = ahead ? target.x : target.x + target.width;
+		} else {
+			facing = ahead ? source.y + source.height : source.y;
+			facingTarget = ahead ? target.y : target.y + target.height;
+		}
+		const low = Math.min(facing, facingTarget);
+		const high = Math.max(facing, facingTarget);
+
+		const between = cards.filter(
+			(card) =>
+				card.depth === source.depth &&
+				card.id !== source.id &&
+				card.id !== target.id &&
+				(alongRow
+					? card.x < high && card.x + card.width > low
+					: card.y < high && card.y + card.height > low)
+		);
+		if (between.length === 0) continue;
+
+		candidates.push({ id: dependency.id, source, target, row: [source, target, ...between] });
+		const ids = corridorOf.get(source.depth) ?? [];
+		ids.push(dependency.id);
+		corridorOf.set(source.depth, ids);
+	}
+
+	const routes = new Map<string, DependencyRoute>();
+	const laneById = new Map<string, { lane: number; lanes: number }>();
+	for (const ids of corridorOf.values()) {
+		const ordered = [...ids].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+		ordered.forEach((id, lane) => laneById.set(id, { lane, lanes: ordered.length }));
+	}
+
+	for (const candidate of candidates) {
+		const lane = laneById.get(candidate.id);
+		if (lane === undefined) continue;
+		const { source, target, row } = candidate;
+		// Lanes share the clearance between generations evenly, so every route
+		// stays inside the gap instead of drifting into the next generation.
+		const inset = (corridorGap * (lane.lane + 1)) / (lane.lanes + 1);
+		const corridor = alongRow
+			? Math.max(...row.map((card) => card.y + card.height)) + inset
+			: Math.max(...row.map((card) => card.x + card.width)) + inset;
+		const ahead = alongRow ? target.x >= source.x : target.y >= source.y;
+
+		let points: Array<{ x: number; y: number }>;
+		let labelX: number;
+		let labelY: number;
+		let sourceSide: DependencyRoute['sourceSide'];
+		let targetSide: DependencyRoute['targetSide'];
+
+		if (alongRow) {
+			// A row's clearance is below it: leave the side that faces the
+			// target, drop into the gap and come back up into the other card.
+			const step = ahead ? 1 : -1;
+			const startY = source.y + source.height / 2;
+			const endY = target.y + target.height / 2;
+			const startX = ahead ? source.x + source.width : source.x;
+			const endX = ahead ? target.x : target.x + target.width;
+			const bend = Math.min(ROUTE_BEND, Math.abs(endX - startX) / 2);
+			points = [
+				{ x: startX, y: startY },
+				{ x: startX + step * bend, y: startY },
+				{ x: startX + step * bend, y: corridor },
+				{ x: endX - step * bend, y: corridor },
+				{ x: endX - step * bend, y: endY },
+				{ x: endX, y: endY }
+			];
+			labelX = (startX + endX) / 2;
+			labelY = corridor;
+			sourceSide = ahead ? 'right' : 'left';
+			targetSide = ahead ? 'left' : 'right';
+		} else {
+			// A column's clearance is beside it, so the route leaves and arrives
+			// on the side facing that clearance.
+			const startY = source.y + source.height / 2;
+			const endY = target.y + target.height / 2;
+			const startX = source.x + source.width;
+			const endX = target.x + target.width;
+			points = [
+				{ x: startX, y: startY },
+				{ x: corridor, y: startY },
+				{ x: corridor, y: endY },
+				{ x: endX, y: endY }
+			];
+			labelX = corridor;
+			labelY = (startY + endY) / 2;
+			sourceSide = 'right';
+			targetSide = 'right';
+		}
+
+		let length = 0;
+		for (let index = 1; index < points.length; index += 1) {
+			length += Math.hypot(
+				points[index].x - points[index - 1].x,
+				points[index].y - points[index - 1].y
+			);
+		}
+
+		routes.set(candidate.id, {
+			path: roundedRoutePath(points, ROUTE_BEND),
+			labelX,
+			labelY,
+			sourceSide,
+			targetSide,
+			length
+		});
+	}
+
+	return routes;
+}
+
 /**
  * What the node adapter is handed for one drawn node: the model values plus
  * where the layout put it and whether it is the selected item.

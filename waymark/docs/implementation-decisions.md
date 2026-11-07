@@ -2567,7 +2567,9 @@ in `devDependencies` beside every other UI input (the SPA is bundled at build ti
 static files, so this project has no runtime `dependencies` list). The sanctioned set is exactly the
 graph component layer: `ui/src/lib/components/GraphView.svelte` imports `@xyflow/svelte`,
 `@dagrejs/dagre`, and the library's `base.css`; its child `ui/src/lib/components/GraphBridge.svelte`
-imports only `useSvelteFlow`. Nothing else under `ui/src` may import either package (see the
+imports only `useSvelteFlow`; and `ui/src/lib/components/GraphDependencyRoute.svelte` imports
+`BaseEdge` and the `EdgeProps` type to paint a dependency along its route (see "Dependency edges in
+the graph" below). Nothing else under `ui/src` may import either package (see the
 integration seam below). The stylesheet lives with the graph, not in `routes/+layout.svelte`, so the
 app shell imports no graph library at all; the bridge is a child of the view, no dagre reaches it, and
 no library type escapes that layer.
@@ -2631,7 +2633,9 @@ is heavier than a fixed top-to-bottom rank layout needs. Cytoscape's equivalent 
   `ui/src/lib/components/GraphBridge.svelte` imports only `useSvelteFlow` to hand the pan/zoom API
   up; it draws nothing and no library type or dagre object leaves this layer. `GraphView` receives the
   model and `onSelect`/`onToggle` callbacks, owns the layout call and the pan/zoom/fit/reset controls,
-  and never becomes application state.
+  and never becomes application state. `ui/src/lib/components/GraphDependencyRoute.svelte` is the one
+  further importer: an edge type has to be a component, so it imports `BaseEdge`/`EdgeProps` and
+  paints the path `GraphView` hands it. It measures nothing and owns no layout.
 - `ui/src/lib/components/GraphText.svelte` renders the structured text/list alternative as plain DOM.
 - `ui/src/lib/keys.ts` holds the one Enter/Space activation rule the graph title buttons share;
   `tree.ts` still owns the tree's own helpers.
@@ -2696,12 +2700,14 @@ is heavier than a fixed top-to-bottom rank layout needs. Cytoscape's equivalent 
   server's reason. It carries `data-node-id`/`data-depth`/`data-parent-id`/`data-graph-y`/
   `data-collapsed` on the card element, so placement, fold state, and single-appearance are assertable
   without touching the library.
-- `ui/src/lib/components/GraphView.svelte` (with its child `GraphBridge.svelte` and the library
+- `ui/src/lib/components/GraphView.svelte` (with its child `GraphBridge.svelte`, the
+  `GraphDependencyRoute.svelte` edge type, and the library
   stylesheet) is the graph component layer. It lays the model out with dagre (`rankdir: 'TB'`,
   `nodesep: 28`, `ranksep: 56`, 16 px margins) and hands the renderer fixed geometry. It owns the
   legend panel; it does not own the presentation choice. `GraphBridge` imports only
   `useSvelteFlow` and exposes `{setViewport, zoomIn, zoomOut}` as a `GraphFlow`; there is no unused
-  `getViewport` on that seam.
+  `getViewport` on that seam. `GraphDependencyRoute` is a registered edge type that paints a path
+  computed in `GraphView`, so it adds no measurement and no layout input.
 - `ui/src/lib/components/Explorer.svelte` — owns the presentation. A second `.segment` radio group
   (`name="presentation"`, labels `Tree` and `Graph`, sr-only legend `Presentation`) switches between
   `<TreeView>` and `<GraphView>`; both render the tree payload already in memory, so switching reads
@@ -2763,6 +2769,37 @@ geometry makes the drawing deterministic and lets the suite assert real edge ele
   Dependency edges pick the facing pair instead (top/bottom when the rows differ, left/right for two
   items on one row) so the arrow does not wrap around its own node. Handle ids are app constants; the
   renderer only consumes them.
+- **A same-generation dependency circles its own row instead of crossing it.**
+  `dependencyRoutes(cards, dependencies, direction)` in `graph.ts` is a pure function of the placement
+  and the model: two items of one generation share a corridor (a row in `TB`, a column in `LR`), and a
+  line drawn straight between them runs behind every card standing in between, so a reader cannot
+  tell which two items it joins and several such lines look like one. When at least one card of that
+  generation stands between the two ends, the route leaves the source's facing side, runs along the
+  corridor's own clearance — `GRAPH_ROW_GAP` / `GRAPH_COLUMN_GAP` beyond the generation's far edge, so
+  it stays inside the gap and never enters the next generation — and arrives at the target's facing
+  side. The route's ends are its handle points, and the handle ids follow the route's sides, so the
+  anchors and the drawn line agree.
+- **Nothing in the way means no detour.** A dependency between two unobstructed neighbours keeps the
+  ordinary straight line: a detour there would add length and bend for nothing. Dependencies between
+  *different* generations are never routed either — they cross their own gap, which the layout leaves
+  empty. The straight chord therefore stays the common case, and the dash cap keeps applying to it.
+- **Routes sharing a corridor take separate lanes.** The routes of one generation are ordered by edge
+  id and evenly spaced inside the gap (`inset = gap·(i+1)/(n+1)`), so no two share a stroke even when
+  they span overlapping stretches — the arrangement that used to draw two indistinguishable lines.
+  Both the path and the label follow the lane, so the hovered label sits on the route it names rather
+  than at the midpoint of the line the route replaced.
+- **The route is drawn by one custom edge type.** `GraphView` sets `type: 'dependency-route'` and
+  `data: { route }` only on a routed dependency, registers `edgeTypes`, and passes it to
+  `SvelteFlow`; `GraphDependencyRoute.svelte` forwards the path to the library's `BaseEdge`, so the
+  style, dash, arrowhead, `aria-label` and label portal are the same as for every other edge. This is
+  the one sanctioned exception to "only `GraphView` imports the library", because an edge type has to
+  be a component; it measures nothing, so placement stays a function of the model. The library does
+  not forward `pathOptions` to custom edges, and its `getSmoothStepPath` cannot express a detour
+  between two collinear handles, which is why the `d` is built in `graph.ts` rather than configured.
+- **The dash is capped by the drawn route, not the straight chord.** A routed edge is longer than the
+  chord between its ends, so `dependencyEdge` hands `route.length · zoom` to `dependencyDashArray`
+  instead of the handle-to-handle distance; the ordinary case keeps the chord cap that keeps a short
+  same-row edge from drawing as one solid dash.
 - **Legend.** The one `graph-legend` panel lists both treatments, each with a swatch and a
   `data-legend-kind` hook: `Solid line: parent-child` and
   `Dashed line: dependency; the arrow points at the depended-on item`. The dashed swatch draws a dash
