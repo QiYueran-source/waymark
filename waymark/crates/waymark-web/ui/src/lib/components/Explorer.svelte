@@ -612,11 +612,16 @@
 <div class="explorer">
 	<header class="app-header">
 		<div class="brand">
-			<svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-				<rect x="4.5" y="16.6" width="15" height="3.3" rx="1.65" />
-				<rect x="7" y="11.8" width="10" height="3.3" rx="1.65" />
-				<rect x="9.5" y="7" width="5" height="3.3" rx="1.65" />
-			</svg>
+			<!-- The Waymark mark, in its solid variant. Decorative here: the
+			     heading beside it already names the project. -->
+			<img
+				class="brand-mark"
+				src="/assets/brand/waymark-logo-2-mark.webp"
+				alt=""
+				width="400"
+				height="200"
+				data-testid="brand-logo"
+			/>
 			<div class="brand-text">
 				<h1>Waymark</h1>
 				<p class="project" data-testid="project-root" title={projectRoot}>

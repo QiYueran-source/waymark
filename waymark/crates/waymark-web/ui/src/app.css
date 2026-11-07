@@ -139,9 +139,9 @@ code {
 
 .brand-mark {
 	flex: none;
-	width: 1.45rem;
-	height: 1.45rem;
-	fill: var(--accent);
+	display: block;
+	width: auto;
+	height: 2.4rem;
 }
 
 .brand-text {
@@ -2258,6 +2258,10 @@ button.graph-text-title:hover {
 }
 
 @media (max-width: 620px) {
+	.brand-mark {
+		height: 1.9rem;
+	}
+
 	.category-name {
 		max-width: 5.5rem;
 	}
