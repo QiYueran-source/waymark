@@ -104,6 +104,10 @@ an out-of-scope sibling of the chain is not dragged in.
 - `src/lib/keys.ts` — the shared Enter/Space activation rule for graph titles.
 - `src/app.css` — the whole visual system in plain CSS (tokens, tree, graph,
   detail, states, responsive); there is no UI framework and no icon package.
+- `static/brand/` — the Waymark logo artwork. `waymark-logo-1.webp` and
+  `waymark-logo-2.webp` are the two supplied variants (trimmed to their
+  artwork), and `waymark-logo-2-mark.webp` is the cropped mark the header uses.
+  They are served by the backend under `/assets/brand/...`.
 - `tests/` — vitest suites for combined/grouped rendering, overlay toggling and
   reference anchoring, detail contents and the HTML-injection boundary,
   expand/collapse, persistence and per-project isolation, unavailable storage,
@@ -118,5 +122,6 @@ an out-of-scope sibling of the chain is not dragged in.
 "Field index": a surveyor's field sheet for a work tree. Cool paper ground,
 instrument ink, one deep-teal accent for interaction, category identity as a
 stable shape plus name, and work state as a narrow colour stripe plus a state
-word (with the blocked reason in prose). No images, gradients, shadows, or
-external fonts; the screen is a tool, not a landing page.
+word (with the blocked reason in prose). No gradients, shadows, or external
+fonts, and the only image is the Waymark mark in the header's top-left corner;
+the screen is a tool, not a landing page.
