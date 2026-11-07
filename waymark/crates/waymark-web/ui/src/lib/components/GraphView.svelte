@@ -29,10 +29,11 @@
 	import '@xyflow/svelte/dist/base.css';
 	import { Graph as DagreGraph, layout as dagreLayout } from '@dagrejs/dagre';
 	import { MarkerType, Panel, Position, SvelteFlow } from '@xyflow/svelte';
-	import type { Edge, EdgeMarker, Node, NodeTypes } from '@xyflow/svelte';
+	import type { Edge, EdgeMarker, EdgeTypes, Node, NodeTypes } from '@xyflow/svelte';
 	import { untrack, type Snippet } from 'svelte';
 
 	import GraphBridge from './GraphBridge.svelte';
+	import GraphDependencyRoute from './GraphDependencyRoute.svelte';
 	import GraphDirectionControl from './GraphDirection.svelte';
 	import GraphItemNode from './GraphItemNode.svelte';
 	import UnresolvedList from './UnresolvedList.svelte';
@@ -48,6 +49,7 @@
 		MIN_GRAPH_ZOOM,
 		dependencyDashArray,
 		dependencyGaps,
+		dependencyRoutes,
 		edgeLabel,
 		estimatedGraphNodeHeight,
 		fittedViewport,
@@ -60,6 +62,7 @@
 		type GraphFlow,
 		type GraphNodePayload,
 		type GraphViewport,
+		type PlacedCard,
 		type WorkGraph
 	} from '$lib/graph';
 
@@ -165,6 +168,20 @@
 	const IN_LEFT_OFFSET = 'in-left-offset';
 	const OUT_LEFT_OFFSET = 'out-left-offset';
 	const IN_RIGHT_OFFSET = 'in-right-offset';
+
+	/**
+	 * The handle pair for each side of a card, so a routed dependency anchors
+	 * its ends exactly where the route leaves and arrives.
+	 */
+	const SIDE_HANDLES = {
+		left: { out: OUT_LEFT, in: IN_LEFT },
+		right: { out: OUT_RIGHT, in: IN_RIGHT },
+		top: { out: OUT_TOP, in: IN_TOP },
+		bottom: { out: OUT_BOTTOM, in: IN_BOTTOM }
+	} as const;
+
+	/** The edge type that paints a dependency along its computed route. */
+	const ROUTED_DEPENDENCY_TYPE = 'dependency-route';
 
 	/**
 	 * The overlay's arrowhead, defined by the renderer's marker machinery and
@@ -319,6 +336,35 @@
 	}
 
 	const placed = $derived(placeNodes(graph, measuredHeights, direction));
+
+	/**
+	 * The placement as route geometry.
+	 *
+	 * A dependency between two items of one generation leaves its generation
+	 * instead of crossing it, so the router needs the same rows and columns the
+	 * cards are drawn in — and nothing else. It is computed from the model, not
+	 * measured, so the routes are as deterministic as the layout.
+	 */
+	const placedCards: PlacedCard[] = $derived(
+		placed.map((entry) => ({
+			id: entry.payload.node.id,
+			depth: entry.payload.node.depth,
+			x: entry.x,
+			y: entry.y,
+			width: NODE_WIDTH,
+			height: entry.height
+		}))
+	);
+
+	/**
+	 * Which dependencies need a route of their own, and where it runs.
+	 *
+	 * Only a same-generation dependency with a card standing between its ends
+	 * appears here; every other relation keeps the ordinary straight line.
+	 */
+	const dependencyRouteById = $derived(
+		dependencyRoutes(placedCards, graph.dependencies, direction)
+	);
 
 	/**
 	 * Where each node sits, so an overlay can leave by the nearest side and can
@@ -668,21 +714,40 @@
 	 * direction without geometry; the accessible name says it in words too.
 	 * Its dash is capped by the edge's own screen span, so a short chord keeps
 	 * a visible gap even at the fitted zoom of a large drawing.
+	 *
+	 * A dependency between two items of one generation that has a card standing
+	 * between its ends takes its own route around that row or column, and is
+	 * drawn by the route edge type instead of the straight one. The handles
+	 * follow the route's ends, so the anchors and the drawn line agree.
 	 */
 	function dependencyEdge(edge: GraphDependencyEdge, zoom: number): Edge {
 		const coincident = parentPairs.has(
 			edge.from < edge.to ? `${edge.from}|${edge.to}` : `${edge.to}|${edge.from}`
 		);
-		const handles = dependencyHandles(edge.from, edge.to, coincident, direction);
+		const route = dependencyRouteById.get(edge.id);
+		const handles =
+			route === undefined
+				? dependencyHandles(edge.from, edge.to, coincident, direction)
+				: {
+						source: SIDE_HANDLES[route.sourceSide].out,
+						target: SIDE_HANDLES[route.targetSide].in
+					};
 		const gap = gapByEdge.get(edge.id);
 		const raised = hoveredEdgeId === edge.id;
-		const screenSpan = dependencyScreenSpan(edge.from, edge.to, handles, zoom);
+		// A route is longer than the chord between its ends, so its own length is
+		// what the dash has to fit into.
+		const screenSpan =
+			route === undefined
+				? dependencyScreenSpan(edge.from, edge.to, handles, zoom)
+				: route.length * zoom;
 		return {
 			id: edge.id,
 			source: edge.from,
 			target: edge.to,
 			sourceHandle: handles.source,
 			targetHandle: handles.target,
+			type: route === undefined ? undefined : ROUTED_DEPENDENCY_TYPE,
+			data: route === undefined ? undefined : { route },
 			style: edgeStyle('dependency', zoom, raised, screenSpan),
 			class: edgeClass('dependency'),
 			zIndex: raised ? RAISED_Z_INDEX : 0,
@@ -706,6 +771,12 @@
 	}
 
 	const nodeTypes: NodeTypes = { workitem: GraphItemNode };
+
+	/**
+	 * The edge types the drawing paints. Only a routed dependency names a type;
+	 * every other edge keeps the renderer's own straight line.
+	 */
+	const edgeTypes: EdgeTypes = { [ROUTED_DEPENDENCY_TYPE]: GraphDependencyRoute };
 
 	/**
 	 * The navigation layer.
@@ -1051,6 +1122,7 @@
 			{nodes}
 			{edges}
 			{nodeTypes}
+			{edgeTypes}
 			class="graph-canvas"
 			nodesDraggable={false}
 			nodesConnectable={false}

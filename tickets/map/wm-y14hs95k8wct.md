@@ -413,6 +413,19 @@ Confirmed by the user on 2026-11-04. These extend the accepted Web specification
 - The legend keeps its two entries and adds a hint that hovering an edge identifies it.
 - Aggregating same-row dependencies by default, hiding or fading dependencies at low zoom, and annotation-only treatment were rejected: the first two change what the overview means, and the last leaves the visual confusion in place.
 
+#### Dependency routing around cards
+
+Confirmed by the user on 2026-11-07 ("都使用曲线绕过节点"). Implemented on the branch `fix/dependency-edge-routing`; the specification and implementation tickets have not yet been synchronized.
+
+- A dependency between two items of one generation is drawn around the cards that stand between its ends instead of straight through them: the line leaves the source's facing side, runs in that generation's own clearance, and enters the target's facing side, so it stays visible along its whole length and both ends can be followed.
+- That clearance is the gap the layout already leaves between generations: the row gap below the row in top-to-bottom, the column gap beside the column in left-to-right. A route therefore never enters the next generation, and no card is ever crossed.
+- Only a route with something in the way leaves the straight line. Two unobstructed neighbours keep the direct line — a detour there would add length and bend for nothing — and a dependency between different generations keeps it too, because that gap is already empty.
+- Routes sharing one corridor take separate lanes, evenly spaced inside the gap, so no two dependencies share a stroke; that was the "one line, cannot tell how many" complaint.
+- The hover label sits on the route it names, along its lane, not at the midpoint of the straight line the route replaced.
+- The route is computed from the same placement the cards are laid out with, so the drawing stays deterministic and the overlay still never moves a node: switching dependency edges on or off, or hovering one, changes no position.
+- A dependency's handles follow its route's sides, so the anchors and the drawn line agree; the coincident-pair offset for a dependency covering the same pair as a parent-child edge is unchanged.
+- Nothing else about a dependency edge changes: dashed treatment with a minimum on-screen dash and gap, the arrowhead on the depended-on item, the hover raise and label, the accessible name, the shared-gap counts, and the two-entry legend.
+
 #### Messages
 
 - Centered states are the blocking and empty ones: no category selected, selected categories with no active work, an empty project, a read failure, and a detail-load failure (centered within the detail panel).
