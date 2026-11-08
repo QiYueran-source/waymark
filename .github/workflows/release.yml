@@ -3,8 +3,9 @@ name: Release
 # A tag is the only release trigger. The pipeline refuses to run unless the tag
 # equals the workspace version, builds the frontend once, runs the same gates as
 # CI on the tagged commit, packages both variants for every supported platform,
-# verifies the artifacts, and attaches them to a **draft** Release. Publishing is
-# a human decision made from docs/release-checklist.md.
+# verifies the artifacts, and attaches them to a **draft** Release. Publication is
+# a human decision: the draft is published by hand, and the crates.io job waits
+# behind a required reviewer on its environment (docs/release-checklist.md).
 on:
   push:
     tags:
@@ -327,6 +328,31 @@ jobs:
             --git-sha "$GITHUB_SHA" \
             --manifest web-dist/assets-manifest.json \
             --require-platforms
+
+  publish-crates:
+    name: Publish crates to crates.io
+    needs: [version-gate, verify]
+    # A pre-release tag produces a GitHub pre-release and no crates.io version:
+    # an irreversible publish is for versions users are told to depend on.
+    if: ${{ !contains(needs.version-gate.outputs.version, '-') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    # The approval gate and the token scope in one place: required reviewers on
+    # this environment are the human decision, and CARGO_REGISTRY_TOKEN lives
+    # here as an environment secret so no other job can publish.
+    environment:
+      name: crates-io
+      url: https://crates.io/crates/waymark-cli
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # The script publishes in dependency order, waits for each version to reach
+      # the index, and skips versions that are already published, so a partial
+      # failure resumes instead of aborting on "already uploaded".
+      - name: Publish in dependency order
+        run: scripts/release/publish-crates.sh --version "${{ needs.version-gate.outputs.version }}"
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
   release:
     name: Draft release

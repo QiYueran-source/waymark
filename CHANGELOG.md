@@ -7,8 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-08
+
+### Added
+
+- `waymark-core`, `waymark-web`, `waymark-mcp`, and `waymark-cli` are published
+  to crates.io, so `cargo install waymark-cli` installs the `waymark` binary and
+  `cargo install waymark-mcp` installs the MCP server. The CLI crate is named
+  `waymark-cli` because `waymark` on crates.io is an unrelated crate.
+
 ### Changed
 
+- The release workflow publishes the four crates in dependency order after a
+  reviewer approves the `crates-io` deployment; a pre-release tag still produces
+  a GitHub pre-release and no crates.io version.
 - The README banner and the GitHub social preview use the new Waymark artwork;
   the 1280x400 README crop and the 1280x640 social card are both refreshed.
 

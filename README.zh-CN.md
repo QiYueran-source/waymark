@@ -56,6 +56,16 @@ Pre-1.0：文档格式与 CLI 仍可能在版本之间变化；macOS 和 Windows
 预编译包发布在 `https://github.com/QiYueran-source/waymark` 的 GitHub Releases
 里。下载对应平台的 basic 包，校验、解压，然后把解压出的目录加入 `PATH`。
 
+有 Rust 工具链时，同样的二进制也可以直接从 crates.io 安装：
+
+```sh
+cargo install waymark-cli   # 安装 waymark 这个二进制
+cargo install waymark-mcp   # 安装 MCP 服务器
+```
+
+CLI 的 crate 名是 `waymark-cli` 而不是 `waymark`：crates.io 上的 `waymark`
+是另一个无关的 crate。
+
 压缩包命名如下：
 
 | 平台 | 压缩包 |

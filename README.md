@@ -63,6 +63,16 @@ Prebuilt archives are attached to the GitHub Releases for
 `https://github.com/QiYueran-source/waymark`. Download the basic archive for your
 platform, verify it, extract it, and put the extracted directory on `PATH`.
 
+With a Rust toolchain, the same binaries also install from crates.io:
+
+```sh
+cargo install waymark-cli   # the `waymark` binary
+cargo install waymark-mcp   # the MCP server
+```
+
+The CLI crate is `waymark-cli`, not `waymark`: `waymark` on crates.io is an
+unrelated crate.
+
 The archive names are:
 
 | Platform | Archive |

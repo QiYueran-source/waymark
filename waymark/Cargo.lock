@@ -1839,7 +1839,7 @@ dependencies = [
 
 [[package]]
 name = "waymark-cli"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "camino",
  "chrono",
@@ -1854,7 +1854,7 @@ dependencies = [
 
 [[package]]
 name = "waymark-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "camino",
  "chrono",
@@ -1874,7 +1874,7 @@ dependencies = [
 
 [[package]]
 name = "waymark-mcp"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "camino",
  "clap",
@@ -1889,7 +1889,7 @@ dependencies = [
 
 [[package]]
 name = "waymark-web"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "ammonia",
  "axum",
