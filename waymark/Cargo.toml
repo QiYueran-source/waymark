@@ -8,7 +8,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 rust-version = "1.85"
@@ -38,8 +38,8 @@ ammonia = "4"
 
 # `version` is what crates.io sees once `path` is stripped on publish; keep it
 # in step with `[workspace.package] version`.
-waymark-core = { version = "0.1.1", path = "crates/waymark-core" }
-waymark-web = { version = "0.1.1", path = "crates/waymark-web" }
+waymark-core = { version = "0.1.2", path = "crates/waymark-core" }
+waymark-web = { version = "0.1.2", path = "crates/waymark-web" }
 rmcp = { version = "0.8", features = ["transport-io"] }
 schemars = "1"
 
