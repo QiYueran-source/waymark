@@ -15,7 +15,9 @@ a regression test with its fix, not another checklist item.
 - [ ] `waymark/integration` is merged and its CI gates are green on the commit
       that will be tagged.
 - [ ] `[workspace.package] version` in `waymark/Cargo.toml` is the version being
-      released. Nothing else carries the version; every crate inherits it.
+      released. Every crate inherits it, but the two published path dependencies
+      repeat it, so bump all three places; `scripts/release/version.sh --check`
+      fails until they agree, and the `Versions` CI job runs the same check.
 - [ ] `CHANGELOG.md` has a dated entry for the version under `## [Unreleased]`,
       in Keep a Changelog form. The generated release notes will be reconciled
       with this section, so it must be accurate before the tag exists.

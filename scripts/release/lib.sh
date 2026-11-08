@@ -40,6 +40,29 @@ workspace_version() {
     ' "$WAYMARK_DIR/Cargo.toml"
 }
 
+# Every workspace path dependency and the version its entry declares, one
+# "<member> <version>" line each, with the version printed as `<missing>` when
+# the entry carries none. crates.io strips `path` at publish time, so a path
+# dependency without a matching version either cannot be packaged at all or
+# pins the published crate to a version that does not exist in the index.
+workspace_path_dependency_versions() {
+    awk '
+        $0 == "[workspace.dependencies]" { in_deps = 1; next }
+        /^\[/ { in_deps = 0 }
+        in_deps && /path[[:space:]]*=[[:space:]]*"crates\// {
+            name = $0
+            sub(/[[:space:]]*=.*/, "", name)
+            version = "<missing>"
+            if (match($0, /version[[:space:]]*=[[:space:]]*"[^"]*"/)) {
+                # Split on the quotes: the value is between the first two.
+                split(substr($0, RSTART, RLENGTH), parts, "\"")
+                version = parts[2]
+            }
+            print name, version
+        }
+    ' "$WAYMARK_DIR/Cargo.toml"
+}
+
 # The commit at HEAD, or the commit a revision resolves to.
 git_sha_for() {
     local revision="${1:-HEAD}"
