@@ -21,6 +21,20 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  versions:
+    name: Versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      # crates.io strips `path` when it packages a crate, so a path dependency
+      # whose `version` did not follow [workspace.package] either fails to
+      # package at all or pins a version that is not in the index.
+      - name: Path dependency versions match the workspace version
+        run: scripts/release/version.sh --check
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest

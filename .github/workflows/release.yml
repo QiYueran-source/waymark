@@ -43,6 +43,10 @@ jobs:
           version="$(scripts/release/version.sh --tag "$GITHUB_REF_NAME")"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag $GITHUB_REF_NAME matches workspace version $version"
+      # A tag is not enough: the published path dependencies must repeat the
+      # version, or `cargo publish` packages a dependency the index cannot resolve.
+      - name: Published dependency versions must match
+        run: scripts/release/version.sh --check
 
   web-dist:
     name: Frontend tree and provenance manifest
