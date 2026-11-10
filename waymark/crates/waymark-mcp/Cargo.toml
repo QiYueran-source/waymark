@@ -1,10 +1,13 @@
 [package]
 name = "waymark-mcp"
-description = "Waymark MCP adapter over the shared domain library"
+description = "MCP server for Waymark, a local-first work tracker kept in Markdown and Git"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+repository.workspace = true
+keywords = ["mcp", "mcp-server", "issue-tracker", "local-first", "markdown"]
+categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
 name = "waymark-mcp"
