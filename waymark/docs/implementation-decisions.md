@@ -3522,3 +3522,16 @@ the exclusion is visible in the source. The current list:
 The Windows release matrix is now implemented: `.github/workflows/release.yml` builds the MSVC leg and
 `scripts/release/` packages `waymark-v<version>-windows-x86_64.zip` and its Web counterpart. The GNU
 leg remains out of scope and publishes nothing.
+
+# Release artifacts — the Linux glibc floor
+
+**Choice:** the Linux release archives are built on the `ubuntu-latest` GitHub runner, so the binaries
+require glibc 2.39 and newer. The floor is stated in both READMEs next to the Linux install steps, with
+the exact loader error a too-old system prints and the crates.io install as the alternative. It is not
+raised or lowered by a flag; the runner image decides it.
+
+**Why:** the floor is a property of the build image, which the repository does not pin, so nothing in
+the code enforces it. A materialised glibc 2.35 (Ubuntu 22.04, this development machine) fails with
+`weak version 'GLIBC_2.39' not found` before any Waymark code runs, and no document said so. Building on
+an older image or against musl would lower the floor, but that is a change to the release matrix and a
+decision of its own, not a silent consequence of where the package job happens to run.
