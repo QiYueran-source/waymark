@@ -3,7 +3,7 @@
   "name": "io.github.QiYueran-source/waymark",
   "title": "Waymark",
   "description": "MCP server for Waymark: query and edit work items, dependencies, and trees.",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "repository": {
     "url": "https://github.com/QiYueran-source/waymark",
     "source": "github",
@@ -13,7 +13,7 @@
     {
       "registryType": "cargo",
       "identifier": "waymark-mcp",
-      "version": "0.1.3",
+      "version": "0.1.4",
       "transport": {
         "type": "stdio"
       }
