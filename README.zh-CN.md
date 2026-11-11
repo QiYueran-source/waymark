@@ -102,6 +102,21 @@ export PATH="$HOME/.local/waymark:$PATH"
 `sha256sum --check` 必须只对压缩包输出 `OK`。校验值不匹配说明下载已损坏，或者
 拿到的不是发布的文件，此时不要运行它。
 
+Linux 压缩包在 Ubuntu 24.04 上构建，二进制要求 **glibc 2.39 或更新**。Ubuntu
+24.04 和 Debian 13 满足；Ubuntu 22.04、Debian 12 及更老的发行版不满足，运行时
+任何 Waymark 代码都还没执行就会报错：
+
+```text
+waymark: /lib/x86_64-linux-gnu/libc.so.6: weak version `GLIBC_2.39' not found
+```
+
+老发行版请改用 crates.io 安装，编译时链接的是发行版自带的 libc：
+
+```sh
+cargo install waymark-cli   # 得到 waymark 和
+cargo install waymark-mcp   # waymark-mcp
+```
+
 ### macOS Apple 芯片
 
 ```sh

@@ -112,6 +112,23 @@ export PATH="$HOME/.local/waymark:$PATH"
 checksum mismatch means the download is corrupt or not the published file; do
 not run it.
 
+The Linux archives are built on Ubuntu 24.04, so the binaries need **glibc 2.39
+or newer**. Ubuntu 24.04 and Debian 13 meet that; Ubuntu 22.04, Debian 12, and
+older distributions do not — running them there fails before any Waymark code
+runs:
+
+```text
+waymark: /lib/x86_64-linux-gnu/libc.so.6: weak version `GLIBC_2.39' not found
+```
+
+On an older distribution, install from crates.io instead, which builds against
+the distribution's own libc:
+
+```sh
+cargo install waymark-cli   # the waymark and
+cargo install waymark-mcp   # waymark-mcp binaries
+```
+
 ### macOS, Apple silicon
 
 ```sh
