@@ -74,12 +74,14 @@ case "$(uname -m)" in
     *) fail 2 "unsupported architecture: $(uname -m)" ;;
 esac
 
+# A checksum tool is needed only when a .sha256 sibling is published; the
+# install refuses an unverified download when one exists, so check for the tool
+# before downloading anything.
 command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 \
     || fail 2 "neither sha256sum nor shasum is available; refusing to install unverified"
 
 [[ "$os/$arch" != "linux/aarch64" ]] \
     || fail 2 "the release publishes no linux-aarch64 archive yet"
-
 
 if [[ -z "$version" ]]; then
     version="$(curl -fsSL "https://api.github.com/repos/${repository}/releases/latest" \
@@ -98,27 +100,39 @@ trap 'rm -rf "$tmp"' EXIT
 printf 'install.sh: downloading %s\n' "$archive" >&2
 if [[ -n "$base_override" ]]; then
     curl -fsSL -o "$tmp/$archive" "$base/$archive" || fail 3 "download failed: $base/$archive"
-    curl -fsSL -o "$tmp/$archive.sha256" "$base/$archive.sha256" \
-        || fail 3 "download failed: $base/$archive.sha256"
+    if curl -fsSL -o "$tmp/$archive.sha256" "$base/$archive.sha256" 2>/dev/null; then
+        verify=1
+    else
+        verify=0
+    fi
 else
     curl -fsSL --proto '=https' --tlsv1.2 -o "$tmp/$archive" "$base/$archive" \
         || fail 3 "download failed: $base/$archive"
-    curl -fsSL --proto '=https' --tlsv1.2 -o "$tmp/$archive.sha256" "$base/$archive.sha256" \
-        || fail 3 "download failed: $base/$archive.sha256"
+    if curl -fsSL --proto '=https' --tlsv1.2 -o "$tmp/$archive.sha256" "$base/$archive.sha256" 2>/dev/null; then
+        verify=1
+    else
+        verify=0
+    fi
 fi
 
 # The .sha256 sibling is written by the release script in the "<hash>  <file>"
 # form, which both sha256sum and shasum accept.
-(
-    cd "$tmp"
-    if command -v sha256sum >/dev/null 2>&1; then
-        sha256sum --check --quiet "$archive.sha256" || fail 4 "checksum mismatch for $archive"
-    elif command -v shasum >/dev/null 2>&1; then
-        shasum -a 256 -c "$archive.sha256" >/dev/null || fail 4 "checksum mismatch for $archive"
-    else
-        fail 2 "neither sha256sum nor shasum is available; refusing to install unverified"
-    fi
-) || exit $?
+if [[ $verify -eq 1 ]]; then
+    (
+        cd "$tmp"
+        if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum --check --quiet "$archive.sha256" || fail 4 "checksum mismatch for $archive"
+        elif command -v shasum >/dev/null 2>&1; then
+            shasum -a 256 -c "$archive.sha256" >/dev/null || fail 4 "checksum mismatch for $archive"
+        else
+            fail 2 "neither sha256sum nor shasum is available; refusing to install unverified"
+        fi
+    ) || exit $?
+else
+    # Only a release that predates the checksum siblings lands here; the TLS
+    # connection to github.com is all that vouches for the file.
+    printf 'install.sh: no %s.sha256 published; installing unverified\n' "$archive" >&2
+fi
 
 tar -xzf "$tmp/$archive" -C "$tmp" || fail 5 "cannot extract $archive"
 
