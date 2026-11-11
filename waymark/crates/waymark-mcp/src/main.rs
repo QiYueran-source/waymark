@@ -25,6 +25,18 @@ struct Args {
     /// the working directory.
     #[arg(long, value_name = "DIR")]
     project: Option<Utf8PathBuf>,
+
+    /// Check the install instead of serving: print OK and exit 0 when a Waymark
+    /// project is found, otherwise print the reason on stderr and exit nonzero.
+    ///
+    /// A CLI connector asks its tool "are you ready" and expects this shape.
+    #[arg(long, conflicts_with = "forget")]
+    ready: bool,
+
+    /// Clear any per-user state this server keeps. The server keeps none, so
+    /// this succeeds without doing anything and keeps a logout step idempotent.
+    #[arg(long, conflicts_with = "ready")]
+    forget: bool,
 }
 
 fn main() -> ExitCode {
@@ -42,19 +54,35 @@ fn main() -> ExitCode {
         }
     };
 
+    // Both checks answer on a single line and never start the transport, so a
+    // caller can run them without a client attached.
+    if args.forget {
+        // The server keeps no per-user state: project settings live in the
+        // project's own `.waymark` directory and credentials do not exist.
+        println!("OK");
+        return ExitCode::SUCCESS;
+    }
+
     let start = match args.project {
         Some(directory) => directory,
-        None => match std::env::current_dir()
+        None => std::env::current_dir()
             .ok()
             .and_then(|directory| Utf8PathBuf::from_path_buf(directory).ok())
-        {
-            Some(directory) => directory,
-            None => {
-                eprintln!("error: the working directory is not UTF-8");
-                return ExitCode::from(1);
-            }
-        },
+            .unwrap_or_else(|| {
+                // Reported per command below, so `--ready` and serving share one
+                // failure path.
+                Utf8PathBuf::new()
+            }),
     };
+
+    if args.ready {
+        return ready(&start);
+    }
+
+    if start.as_str().is_empty() {
+        eprintln!("error: the working directory is not UTF-8");
+        return ExitCode::from(1);
+    }
 
     if !start.is_dir() {
         let error = WaymarkError::project_not_found(start.to_string());
@@ -76,6 +104,32 @@ fn main() -> ExitCode {
     }
 
     run(start)
+}
+
+/// Answer `--ready` without starting the transport.
+///
+/// Ready means "this install can serve a project from here". A caller that runs
+/// it while no project exists yet gets a nonzero exit and the reason, which is
+/// the useful answer: the install is fine, the project is not there.
+fn ready(start: &Utf8PathBuf) -> ExitCode {
+    if start.as_str().is_empty() {
+        eprintln!("the working directory is not UTF-8");
+        return ExitCode::from(1);
+    }
+    match WaymarkServer::new(start.clone()).project() {
+        Ok(project) => {
+            println!("OK");
+            eprintln!("waymark-mcp: project {}", project.root());
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!(
+                "no Waymark project at or above {start}: {}",
+                error.message()
+            );
+            ExitCode::from(exit_code(&error))
+        }
+    }
 }
 
 /// Serve until the client closes the transport.

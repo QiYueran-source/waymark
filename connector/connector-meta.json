@@ -1,0 +1,21 @@
+{
+  "name": "Waymark 工作项",
+  "name_zh": "Waymark 工作项",
+  "name_en": "Waymark Work Items",
+  "description": "在你的 Git 仓库里读写 Markdown 工作项：查看可开工和被阻塞的任务，建立依赖关系树，并创建、修改、关闭工作项。",
+  "description_zh": "在你的 Git 仓库里读写 Markdown 工作项：查看可开工和被阻塞的任务，建立依赖关系树，并创建、修改、关闭工作项。",
+  "description_en": "Read and edit Markdown work items in your Git repository, with dependencies and trees.",
+  "source": "waymark-work-items",
+  "type": "cli",
+  "version": "0.1.3",
+  "examples_zh": [
+    "这个仓库里有哪些任务现在可以开工？",
+    "把「修复登录崩溃」标记为进行中，并说明它卡在哪个任务上",
+    "画一下任务 wm-y14hs95k8wct 下面的层级树"
+  ],
+  "examples_en": [
+    "Which tasks in this repository can I start right now?",
+    "Mark \"fix the login crash\" as in progress and tell me what it is blocked on",
+    "Show the hierarchy under work item wm-y14hs95k8wct"
+  ]
+}

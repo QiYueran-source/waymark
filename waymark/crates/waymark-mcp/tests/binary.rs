@@ -217,3 +217,51 @@ fn the_binary_degrades_without_git_and_reports_both_causes() {
     assert!(status.success(), "the server exited with {status}");
     drop(dir);
 }
+
+/// The install check a CLI connector runs: one line on stdout, exit 0 when a
+/// project is found, the reason on stderr and a nonzero exit when it is not.
+#[test]
+fn ready_answers_on_one_line_without_serving() {
+    let bin = env!("CARGO_BIN_EXE_waymark-mcp");
+
+    let with_project = Command::new(bin)
+        .arg("--ready")
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("the binary runs");
+    assert!(
+        with_project.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&with_project.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&with_project.stdout).trim(), "OK");
+
+    let empty = tempfile::tempdir().expect("a temporary directory");
+    let without_project = Command::new(bin)
+        .arg("--ready")
+        .current_dir(empty.path())
+        .output()
+        .expect("the binary runs");
+    assert!(!without_project.status.success());
+    assert!(without_project.stdout.is_empty());
+    assert!(
+        String::from_utf8_lossy(&without_project.stderr).contains("no Waymark project"),
+        "stderr: {}",
+        String::from_utf8_lossy(&without_project.stderr)
+    );
+
+    // Logging out is idempotent and succeeds: the server keeps no user state.
+    let forget = Command::new(bin)
+        .arg("--forget")
+        .output()
+        .expect("the binary runs");
+    assert!(forget.status.success());
+    assert_eq!(String::from_utf8_lossy(&forget.stdout).trim(), "OK");
+
+    // The two modes exclude each other rather than silently picking one.
+    let both = Command::new(bin)
+        .args(["--ready", "--forget"])
+        .output()
+        .expect("the binary runs");
+    assert!(!both.status.success());
+}
