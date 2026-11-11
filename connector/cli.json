@@ -1,0 +1,18 @@
+{
+  "init": {
+    "darwin": "npm install -g waymark-mcp",
+    "linux": "npm install -g waymark-mcp",
+    "win32": "npm install -g waymark-mcp"
+  },
+  "unAuth": {
+    "darwin": "waymark-mcp --forget",
+    "linux": "waymark-mcp --forget",
+    "win32": "waymark-mcp.exe --forget"
+  },
+  "status": {
+    "darwin": "waymark-mcp --ready",
+    "linux": "waymark-mcp --ready",
+    "win32": "waymark-mcp.exe --ready"
+  },
+  "statusMatch": "OK"
+}
