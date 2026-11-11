@@ -49,14 +49,20 @@ bash scripts/workbuddy-connector/check.sh
 
 ## 第 2 步：打包
 
-平台只收 `.zip`，连接器不超过 20MB，包内必须有 `connector-meta.json`。
+平台收的是一个**连接器能力包**，不是编译好的程序。上传页的原文是「上传压缩包，平台自动开包解析并生成连接器 ID」，解析的就是你包里那几份描述文件：`connector-meta.json`、`cli.json`、`icon.svg`、`skills/`。
+
+所以发布页里 `waymark-v0.1.3-linux-x86_64.tar.gz` 这类归档**不能直接上传**。它里面是 `waymark`、`waymark-mcp`、README 和许可证，没有 `connector-meta.json`，平台开包会报「未找到 connector-meta.json」。
+
+把二进制塞进包里也没用。CLI 连接器的流程是「用户点连接 → WorkBuddy 执行 `init` 安装 → 执行 `status` 判断状态」，它不知道包里躺着什么二进制。`init` 写的是 `npm install -g …` 这种无人值守命令，平台只会执行它。
+
+只有 `.zip`，连接器不超过 20MB，包内必须有 `connector-meta.json`。
 
 ```sh
 cd ~/projects/waymark/connector
 zip -r ../waymark-connector-0.1.3.zip . -x '.*' -x '*/.*'
 ```
 
-打出来检查一遍结构（`connector/README.md` 里也叫 `connector-meta.json`，别把整个仓库打进去）：
+打出来检查一遍结构：
 
 ```text
 connector-meta.json
@@ -65,7 +71,9 @@ icon.svg
 skills/waymark-work-items/SKILL.md
 ```
 
-压缩包里的路径必须是相对根目录的，不能多一层 `connector/` 目录。把上面那条 `zip` 在 `connector/` 目录里执行就是对的。
+压缩包里的路径必须是相对根目录的，不能多一层 `connector/` 目录。把上面那条 `zip` 在 `connector/` 目录里执行就是对的。这个包只有几 KB，离 20MB 上限很远。
+
+如果你原本想的是「把我编译好的东西传上去」，那条路在 CLI 连接器里是 `init` 命令去下载。这里有两个数据点：release 里的 linux 二进制压缩前分别是 5.1MB（`waymark`）和 7.7MB（`waymark-mcp`），整个归档压缩后 4.4MB。一个 zip 装三平台两个二进制大约十几 MB，**勉强低于 20MB，但平台不认**：连接器包里放二进制没有意义，WorkBuddy 不会去执行它。
 
 ## 第 3 步：进控制台创建连接器
 
