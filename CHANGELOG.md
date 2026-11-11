@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-11
+
+### Added
+
+- `server.json` at the repository root describes the MCP server for the
+  official MCP Registry, pointing at the Cargo package `waymark-mcp` 0.1.3 over
+  stdio.
+- `waymark-mcp` has its own README on crates.io, covering installation, how the
+  server finds a project, client configuration, and the full tool list.
+
+### Changed
+
+- The `waymark-mcp` crate description names what the server does instead of the
+  internal architecture, and the crate now carries `repository`, `keywords`, and
+  `categories` so it is findable from crates.io and docs.rs.
+- CI refuses to pass when a published path dependency in
+  `[workspace.dependencies]` declares a version other than the workspace
+  version; the release workflow runs the same check ahead of the release. This
+  is the failure mode where crates.io strips `path` and publishes a dependency
+  version that is not in the index.
+
 ## [0.1.2] - 2026-11-08
 
 ### Added
@@ -117,6 +138,7 @@ The first public release of Waymark.
   binaries are unsigned too, so SmartScreen may require the same explicit
   approval.
 
-[Unreleased]: https://github.com/QiYueran-source/waymark/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/QiYueran-source/waymark/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/QiYueran-source/waymark/releases/tag/v0.1.3
 [0.1.1]: https://github.com/QiYueran-source/waymark/releases/tag/v0.1.1
 [0.1.0]: https://github.com/QiYueran-source/waymark/releases/tag/v0.1.0
