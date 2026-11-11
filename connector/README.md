@@ -17,6 +17,9 @@ Check it with `scripts/workbuddy-connector/check.sh`, which validates the
 package against the published spec and runs every command the Skill quotes
 against a throwaway project.
 
+The step-by-step submission walkthrough is in
+[docs/workbuddy-connector.md](../docs/workbuddy-connector.md).
+
 ## Status: blocked on the install step, ready for everything else
 
 The CLI approach is the only one that fits Waymark. The MCP approach in the same
