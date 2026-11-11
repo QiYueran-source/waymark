@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-11-11
+
+### Added
+
+- `waymark-mcp --ready` prints `OK` and exits 0 when a Waymark project is found
+  above the working directory, and `--forget` exits 0 without doing anything.
+  They exist so a CLI connector can ask "is this install usable here" and
+  "log out" without a separate binary; Waymark has no accounts.
+- `scripts/gitee-mirror-download.sh` and `scripts/gitee-release.sh` mirror a
+  published release to Gitee, where the archives download far faster for users
+  in mainland China than from github.com.
+
 ## [0.1.3] - 2026-11-11
 
 ### Added
@@ -138,7 +150,9 @@ The first public release of Waymark.
   binaries are unsigned too, so SmartScreen may require the same explicit
   approval.
 
-[Unreleased]: https://github.com/QiYueran-source/waymark/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/QiYueran-source/waymark/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/QiYueran-source/waymark/releases/tag/v0.1.4
 [0.1.3]: https://github.com/QiYueran-source/waymark/releases/tag/v0.1.3
+[0.1.2]: https://github.com/QiYueran-source/waymark/releases/tag/v0.1.2
 [0.1.1]: https://github.com/QiYueran-source/waymark/releases/tag/v0.1.1
 [0.1.0]: https://github.com/QiYueran-source/waymark/releases/tag/v0.1.0
