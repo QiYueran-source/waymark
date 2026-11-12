@@ -3,11 +3,12 @@ schema: 1
 id: wm-ckwnd9wq9jje
 title: link remove always works on one side
 category: implement
-status: open
+status: closed
 owner: frank
 creator: Frank
 created_at: 2026-11-12T06:27:26Z
-updated_at: 2026-11-12T06:27:32Z
+updated_at: 2026-11-12T09:46:07Z
+closed_at: 2026-11-12T09:46:07Z
 parent: wm-62yfmh5j41t5
 dependencies:
   - wm-0txgrh7efs7z

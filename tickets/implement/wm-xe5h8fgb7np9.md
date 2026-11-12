@@ -3,11 +3,12 @@ schema: 1
 id: wm-xe5h8fgb7np9
 title: doctor reports archived references and one-sided links
 category: implement
-status: open
+status: closed
 owner: frank
 creator: Frank
 created_at: 2026-11-12T06:27:27Z
-updated_at: 2026-11-12T06:27:32Z
+updated_at: 2026-11-12T09:45:45Z
+closed_at: 2026-11-12T09:45:45Z
 parent: wm-62yfmh5j41t5
 dependencies:
   - wm-9wz141hh9p73
