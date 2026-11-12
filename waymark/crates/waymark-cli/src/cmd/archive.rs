@@ -1,9 +1,10 @@
 //! `waymark archive`: retire one item without deleting it.
 //!
-//! The rules — the marker, the child refusal, the inbound cleanup batch, the
-//! archived-write rejection — all live in `waymark_core::ops::archive`. This
-//! module parses the two flags and renders the result, including every planned
-//! relationship removal on a dry run.
+//! The rules — the marker, the child refusal, the consent-gated inbound cleanup
+//! batch, the archived-write rejection — all live in
+//! `waymark_core::ops::archive`. This module parses the flags and renders the
+//! result, including every planned relationship removal and every document the
+//! archive left untouched, on a dry run as well as a real one.
 
 use clap::Args;
 use waymark_core::envelope::success_envelope;
@@ -78,6 +79,18 @@ pub fn run(
     if outcome.removals.is_empty() {
         err_line("  no inbound relationships to remove");
     }
+    if let Some(summary) =
+        waymark_core::view::archive_leftovers_summary(&outcome.item.id, outcome.untouched.len())
+    {
+        err_line(&format!("  {summary}"));
+        for item in &outcome.untouched {
+            err_line(&format!(
+                "  {}  left for its owner ({})",
+                item.id,
+                relations_phrase(&outcome.untouched_relations_for(&item.id))
+            ));
+        }
+    }
     for warning in &outcome.meta.warnings {
         err_line(&format!("  {}: {}", warning.code, warning.message));
     }
@@ -103,8 +116,21 @@ fn payload(outcome: &ArchiveOutcome) -> serde_json::Value {
                 "path": item.path.to_string(),
             }))
             .collect::<Vec<_>>(),
+        "untouched": waymark_core::view::archive_leftovers_json(
+            &outcome.untouched,
+            &outcome.untouched_relations,
+        ),
         "item": waymark_core::view::item_fields(&outcome.item),
     })
+}
+
+/// The relation names of one leftover document, joined for a terminal line.
+fn relations_phrase(relations: &[archive::InboundRelation]) -> String {
+    relations
+        .iter()
+        .map(|relation| relation.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn removal_json(removal: &PlannedRemoval) -> serde_json::Value {

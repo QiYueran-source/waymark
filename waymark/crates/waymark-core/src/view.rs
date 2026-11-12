@@ -26,6 +26,9 @@
 //! - [`listing_json`] — the complete collection page (summary, rows, projection).
 //! - [`write_result_json`] / [`write_result_json_with`] — the shared
 //!   `{id, path, …, changed, written, item}` core of every write result.
+//! - [`archive_leftovers_json`] — the documents an archive deliberately did
+//!   not rewrite, each with the relations that still point at the target.
+//! - [`archive_leftovers_summary`] — the one human sentence that precedes them.
 //! - [`DisplayState`] / [`display_state`] / [`blocked_reason`] — the one
 //!   derivation of the display state and the human blocked-reason prose.
 //!
@@ -45,6 +48,7 @@ use camino::Utf8Path;
 use serde_json::{json, Map, Value};
 
 use crate::config::Config;
+use crate::id::WorkItemId;
 use crate::model::{Status, WorkItem};
 use crate::ops::list::Listing;
 use crate::ops::tree::{DependencyRow, TreeNode};
@@ -504,6 +508,65 @@ pub fn write_result_json_with(
     value.insert("written".to_owned(), json!(written));
     value.insert("item".to_owned(), item_json(item, path));
     Value::Object(value)
+}
+
+/// The documents an archive deliberately left as they are.
+///
+/// One entry per document, in the outcome's stable-ID order, each carrying the
+/// relation kinds it still points at the archived item with:
+///
+/// ```json
+/// [{"id": "wm-…", "path": "work/task/wm-….md",
+///   "relations": ["dependencies", "soft_links"]}]
+/// ```
+///
+/// The document comes first and its relations second because the reader's
+/// question is "whose file", then "why it matters". The path is the document
+/// the reader has to open; the relations are persisted field names, so the
+/// same literals appear here as in `removals`. An archive that left nothing
+/// alone renders an empty list, which is the ordinary quiet result.
+pub fn archive_leftovers_json(
+    untouched: &[crate::ops::archive::UntouchedItem],
+    relations: &[crate::ops::archive::UntouchedRelation],
+) -> Value {
+    Value::Array(
+        untouched
+            .iter()
+            .map(|item| {
+                let kinds: Vec<&str> = relations
+                    .iter()
+                    .filter(|relation| relation.from == item.id)
+                    .map(|relation| relation.relation.as_str())
+                    .collect();
+                json!({
+                    "id": item.id.as_str(),
+                    "path": item.path.as_str(),
+                    "relations": kinds,
+                })
+            })
+            .collect(),
+    )
+}
+
+/// The one human sentence that precedes an archive's leftover list.
+///
+/// It names the target and the count so the line stands on its own in a
+/// terminal where the list below it may scroll away, and it says "left alone"
+/// rather than "skipped", which sounds like a failure: the documents were
+/// deliberately preserved, not neglected. `None` when nothing was left alone,
+/// because a write with nothing to report stays quiet.
+pub fn archive_leftovers_summary(target: &WorkItemId, untouched: usize) -> Option<String> {
+    match untouched {
+        0 => None,
+        1 => Some(format!(
+            "{} still referenced by 1 document left untouched",
+            target.as_str()
+        )),
+        count => Some(format!(
+            "{} still referenced by {count} documents left untouched",
+            target.as_str()
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -1008,5 +1071,70 @@ mod tests {
             "an extra key never overrides the shared written flag"
         );
         assert_eq!(value["changed"], json!(true));
+    }
+
+    #[test]
+    fn archive_leftovers_pair_each_document_with_the_relations_it_keeps() {
+        use crate::ops::archive::{InboundRelation, UntouchedItem, UntouchedRelation};
+
+        let first = id("wm-000000000002");
+        let second = id("wm-000000000003");
+        let untouched = vec![
+            UntouchedItem {
+                id: first.clone(),
+                path: Utf8Path::new("work/task/wm-000000000002.md").to_owned(),
+            },
+            UntouchedItem {
+                id: second.clone(),
+                path: Utf8Path::new("work/task/wm-000000000003.md").to_owned(),
+            },
+        ];
+        let relations = vec![
+            UntouchedRelation {
+                from: first.clone(),
+                relation: InboundRelation::Dependencies,
+            },
+            UntouchedRelation {
+                from: second.clone(),
+                relation: InboundRelation::Parent,
+            },
+            UntouchedRelation {
+                from: second.clone(),
+                relation: InboundRelation::SoftLinks,
+            },
+        ];
+
+        let value = archive_leftovers_json(&untouched, &relations);
+
+        assert_eq!(
+            value,
+            json!([
+                {
+                    "id": "wm-000000000002",
+                    "path": "work/task/wm-000000000002.md",
+                    "relations": ["dependencies"],
+                },
+                {
+                    "id": "wm-000000000003",
+                    "path": "work/task/wm-000000000003.md",
+                    "relations": ["parent", "soft_links"],
+                },
+            ])
+        );
+        assert_eq!(archive_leftovers_json(&[], &[]), json!([]));
+    }
+
+    #[test]
+    fn the_leftover_summary_counts_documents_and_stays_quiet_at_zero() {
+        let target = id("wm-000000000001");
+        assert_eq!(archive_leftovers_summary(&target, 0), None);
+        assert_eq!(
+            archive_leftovers_summary(&target, 1).as_deref(),
+            Some("wm-000000000001 still referenced by 1 document left untouched")
+        );
+        assert_eq!(
+            archive_leftovers_summary(&target, 3).as_deref(),
+            Some("wm-000000000001 still referenced by 3 documents left untouched")
+        );
     }
 }
