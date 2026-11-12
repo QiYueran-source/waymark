@@ -308,6 +308,188 @@ fn doctor_reports_a_held_lock_without_waiting() {
 /// other command: an unopenable project is a `PROJECT_NOT_FOUND` failure with
 /// the registry's exit class, not a special diagnostic exit.
 #[test]
+fn doctor_observes_a_closed_parent_at_info_severity_and_stays_healthy() {
+    let (_dir, root) = project();
+    let parent = create_one(&root);
+    let child = create_one(&root);
+    for arguments in [
+        vec!["parent", "set", child.as_str(), parent.as_str()],
+        vec!["close", parent.as_str()],
+    ] {
+        let mut command = waymark();
+        command.arg("--project").arg(&root);
+        for argument in arguments {
+            command.arg(argument);
+        }
+        let result = run(&mut command);
+        assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
+    }
+
+    let result = run(waymark()
+        .arg("--json")
+        .arg("doctor")
+        .arg("--strict")
+        .arg("--project")
+        .arg(&root));
+    assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
+    let data = result.json()["data"].clone();
+    let observation = data["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|finding| finding["code"] == "CLOSED_PARENT")
+        .unwrap_or_else(|| panic!("{}", result.stdout()))
+        .clone();
+    assert_eq!(observation["severity"], serde_json::json!("info"));
+    assert_eq!(observation["fixable"], serde_json::json!(false));
+    assert!(
+        observation["message"].as_str().unwrap().contains(&child),
+        "{observation}"
+    );
+    // An observation never makes a project unhealthy.
+    assert_eq!(data["valid"], serde_json::json!(true));
+    assert_eq!(data["counts"]["errors"], serde_json::json!(0));
+
+    let human = run(waymark().arg("doctor").arg("--project").arg(&root));
+    assert!(
+        human.stderr().contains("CLOSED_PARENT"),
+        "{}",
+        human.stderr()
+    );
+}
+
+/// Write a soft link onto one document only, the way a non-cascading add or a
+/// hand edit leaves it.
+fn record_one_sided_link(root: &Utf8PathBuf, id: &str, partner: &str) {
+    let path = root.join(format!("work/task/{id}.md"));
+    let mut item = waymark_core::parse::parse_item_file(&path).expect("the document parses");
+    item.soft_links = vec![waymark_core::WorkItemId::parse(partner).unwrap()];
+    std::fs::write(&path, waymark_core::serialize::to_document(&item)).unwrap();
+}
+
+fn archive_one(root: &Utf8PathBuf, id: &str) {
+    let result = run(waymark().arg("archive").arg(id).arg("--project").arg(root));
+    assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
+}
+
+#[test]
+fn doctor_keeps_the_one_sided_and_archived_soft_link_findings_apart_and_offers_no_command() {
+    let (_dir, root) = project();
+    let stale = create_one(&root);
+    let silent = create_one(&root);
+    let partial = create_one(&root);
+    let linked = create_one(&root);
+    // `linked` records a link to a live partner that never recorded it back.
+    record_one_sided_link(&root, &linked, &silent);
+    // `partial` also still points at an item that is about to be archived; a
+    // non-cascading archive leaves that reference where it is.
+    record_one_sided_link(&root, &partial, &stale);
+    archive_one(&root, &stale);
+
+    let before = std::fs::read(root.join(format!("work/task/{partial}.md"))).unwrap();
+    let result = run(waymark()
+        .arg("--json")
+        .arg("doctor")
+        .arg("--project")
+        .arg(&root));
+    assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
+    let findings = result.json()["data"]["findings"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let of = |code: &str| -> Vec<serde_json::Value> {
+        findings
+            .iter()
+            .filter(|finding| finding["code"] == code)
+            .cloned()
+            .collect()
+    };
+
+    let dangling = of("DANGLING_REFERENCE");
+    assert_eq!(dangling.len(), 1, "{findings:#?}");
+    assert_eq!(dangling[0]["severity"], "error");
+    assert!(
+        dangling[0]["message"].as_str().unwrap().contains(&stale),
+        "{dangling:?}"
+    );
+    assert_eq!(
+        dangling[0]["location"]["kind"], "work_item",
+        "located on the referencing item"
+    );
+
+    let one_sided = of("ONE_SIDED_SOFT_LINK");
+    assert_eq!(one_sided.len(), 1, "{findings:#?}");
+    assert!(
+        one_sided[0]["message"].as_str().unwrap().contains(&silent),
+        "{one_sided:?}"
+    );
+    assert!(
+        !one_sided[0]["message"].as_str().unwrap().contains(&stale),
+        "an archived partner is not re-reported as one-sided: {one_sided:?}"
+    );
+
+    for finding in dangling.iter().chain(one_sided.iter()) {
+        assert_eq!(finding["fixable"], false, "{finding}");
+        let rendered = serde_json::to_string(finding).unwrap();
+        assert!(
+            !rendered.contains("waymark "),
+            "no repair command: {rendered}"
+        );
+    }
+
+    // Read-only: the documents come out byte-identical.
+    assert_eq!(
+        before,
+        std::fs::read(root.join(format!("work/task/{partial}.md"))).unwrap()
+    );
+}
+
+#[test]
+fn show_reports_a_one_sided_soft_link_without_suggesting_a_repair() {
+    let (_dir, root) = project();
+    let here = create_one(&root);
+    let silent = create_one(&root);
+    record_one_sided_link(&root, &here, &silent);
+
+    let result = run(waymark()
+        .arg("--json")
+        .arg("show")
+        .arg(&here)
+        .arg("--project")
+        .arg(&root));
+    assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
+    let envelope = result.json();
+    let issues = envelope["data"]["relationships"]["soft_link_issues"]
+        .as_array()
+        .cloned()
+        .unwrap_or_else(|| panic!("{}", result.stdout()));
+    assert_eq!(issues.len(), 1, "{issues:?}");
+    assert_eq!(issues[0]["partner"], silent.as_str());
+    assert_eq!(issues[0]["missing"], "link");
+    assert_eq!(issues[0]["partner_owner"], "frank");
+    assert!(
+        issues[0]["reason"].as_str().unwrap().contains(&silent),
+        "{issues:?}"
+    );
+    assert!(
+        !issues[0].to_string().contains("waymark "),
+        "no repair command: {}",
+        issues[0]
+    );
+
+    // The human view says the same thing.
+    let human = run(waymark().arg("show").arg(&here).arg("--project").arg(&root));
+    assert_eq!(human.status(), 0, "stderr: {}", human.stderr());
+    assert!(
+        human.stderr().contains("soft link")
+            && human.stderr().contains(&silent)
+            && human.stderr().contains("never recorded"),
+        "{}",
+        human.stderr()
+    );
+}
+
+#[test]
 fn a_diagnostic_failure_uses_the_shared_exit_mapping() {
     let dir = tempfile::tempdir().expect("a temporary directory");
     let empty = Utf8PathBuf::from_path_buf(dir.path().to_path_buf())

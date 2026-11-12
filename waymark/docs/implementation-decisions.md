@@ -119,8 +119,10 @@ severity, no exit class), so the current total is 41.
 registry table"). Counting the table at T2 gave 37; counting it plus `USAGE_ERROR` gives 38, and the
 brief's parenthetical listed the finding-only codes correctly, so the original total was simply
 transcribed wrong. No code was invented to match the brief's number, and none was dropped: the three
-distribution additions each have a producing failure, and the golden snapshot names all 41 and a
-consistency test fails if the enum and the snapshot disagree in either direction.
+distribution additions each have a producing failure, and the golden snapshot names every code and a
+consistency test fails if the enum and the snapshot disagree in either direction. Two read-only
+diagnostic codes followed (`CLOSED_PARENT`, `ONE_SIDED_SOFT_LINK`), and the cross-item refusals added
+`CASCADE_CONSENT_REQUIRED` and `OWNED_BY_OTHER`, for 46 today; `tests/registry.rs` pins the count.
 
 ## One `Spec` row per code, read by every accessor
 
@@ -571,15 +573,16 @@ operation that nobody asked for and that would be very hard to undo.
 
 ### Soft links live in `ops::link`, and both documents change in one batch
 
-**Choice:** `add_soft_link` / `remove_soft_link` write `soft_links` on **both** documents, sorted and
-deduplicated, in one `write::replace_batch` call: prevalidate both, stage both, replace both, roll back
-the first if the second fails. A duplicate link, a self-link, or a cross-kind relationship is
-`INVALID_RELATIONSHIP {relation: "soft_links"}`; a missing target is `ITEM_NOT_FOUND` and an archived
-one `ITEM_ARCHIVED`.
+**Choice:** with consent, `add_soft_link` / `remove_soft_link` write `soft_links` on **both**
+documents, sorted and deduplicated, in one `write::replace_batch` call: prevalidate both, stage both,
+replace both, roll back the first if the second fails. A duplicate link, a self-link, or a cross-kind
+relationship is `INVALID_RELATIONSHIP {relation: "soft_links"}`; a missing target is `ITEM_NOT_FOUND`
+and an archived one `ITEM_ARCHIVED`. Without consent `link add` writes one document; see "A
+non-consenting `link add` leaves the pair one-sided" below.
 
-**Why:** a symmetric edge stored on one side only is a lie that depends on which document you read.
-Sorting and deduplicating makes the persisted bytes a function of the set, so two agents that add the
-same pair in either order converge instead of producing a spurious write conflict.
+**Why:** sorting and deduplicating makes the persisted bytes a function of the set, so two agents that
+add the same pair in either order converge instead of producing a spurious write conflict, and a
+two-sided change is never left half-applied.
 
 ### Removing a soft link tolerates a missing or archived partner
 
@@ -1686,9 +1689,16 @@ document/configuration rewrites (a category-key migration's value rewrites can r
   are `VALIDATION_ERROR` with a `custom_fields.<key>` field location. This is
   how schema-removal drift surfaces without touching the document.
 - Missing relationship targets: the graph's `DANGLING_REFERENCE` findings.
-  Archived targets are also `DANGLING_REFERENCE`: the graph deliberately treats
-  archived items as known, so the diagnostic run adds the distinct archived
-  case itself. Neither case is repaired.
+  Archived targets are `DANGLING_REFERENCE` too: the graph deliberately treats
+  archived items as known, so the diagnostic run adds the archived case itself,
+  once per relation kind per item (`dependencies`, `parent`, `soft_links`), with
+  every archived target that kind names. Neither case is repaired, and neither
+  finding is `fixable`.
+- A soft link recorded on one side only is `ONE_SIDED_SOFT_LINK` (warning,
+  finding-only, details `{from, to, missing}`). It is never filed under
+  `DANGLING_REFERENCE`: the partner is live and simply never recorded the link,
+  which is a different fact from "the partner is archived". The two kinds are
+  exclusive, so a soft link pair produces at most one finding per direction.
 - Dependency and parent cycles: `CYCLE_DETECTED` from `Graph::diagnostics`. The
   closed path is in the message (`a -> b -> a`); `Finding` has no details field
   and the registry details shape stays frozen.
@@ -1942,9 +1952,9 @@ document/configuration rewrites (a category-key migration's value rewrites can r
 
 ## Write options and shared semantics
 
-- **Every write constructs `OpOptions::new()` and adds only `dry_run`.** The
-  clock is the system clock, the repository's configured operator is the
-  effective operator, and the lock wait is the core default. There is no
+- **Every write constructs `OpOptions::new()` and adds only `dry_run`, plus `cascade` on the four
+  cross-item operations.** The clock is the system clock, the repository's
+  configured operator is the effective operator, and the lock wait is the core default. There is no
   per-call operator, clock, or lock-timeout argument: those are process/operator
   concerns, and the CLI's `--lock-timeout-ms` has no MCP equivalent because an
   agent has no useful way to choose one.
@@ -2142,15 +2152,18 @@ document/configuration rewrites (a category-key migration's value rewrites can r
   `BatchTarget`'s public shape did not change, so archive and migration callers are
   untouched.
 - **Parent and dependency edges write only the new document.** A soft link is
-  symmetric, so every link partner is loaded for writing under the lock (archived
-  or changed partners refuse the whole create), gains the new ID in sorted
-  position, and is stamped with the same operation instant. The new document and
-  all partners go through one `replace_batch_with_creates` call.
+  symmetric, so every link partner is loaded for writing (archived, missing, or
+  changed partners refuse the whole create) and, **from the consent change on**,
+  only a partner the new item's owner, the partner's owner, and the operator all
+  share is rewritten with `cascade`; every other partner is left byte-identical
+  and named in `untouched`. A rewritten partner gains the new ID in sorted
+  position and is stamped with the same operation instant. The new document and
+  all rewritten partners go through one `replace_batch_with_creates` call.
 - **The result reports partners and fingerprints.** `Created` carries the item,
-  path, `partners` (the rewritten items with their own paths), `fingerprint` for
-  the new document, and `fingerprints` in `[new, partners…]` order. A dry run
-  returns the same shape with no fingerprints and `written: false`, and takes no
-  lock.
+  path, `partners` (the rewritten items with their own paths), `untouched` (the
+  partners left alone, with their paths), `fingerprint` for the new document, and
+  `fingerprints` in `[new, partners…]` order. A dry run returns the same shape
+  with no fingerprints and `written: false`, and takes no lock.
 - **CLI surface:** `--creator NAME`, `--body`/`--body-file` (mutually exclusive,
   `-` means stdin), repeatable `--field KEY=VALUE` using the same text grammar as
   `field update --set` (the parser is shared), `--parent ID`, repeatable
@@ -3535,3 +3548,489 @@ the code enforces it. A materialised glibc 2.35 (Ubuntu 22.04, this development 
 `weak version 'GLIBC_2.39' not found` before any Waymark code runs, and no document said so. Building on
 an older image or against musl would lower the floor, but that is a change to the release matrix and a
 decision of its own, not a silent consequence of where the package job happens to run.
+
+# Cross-item write consent (expand step)
+
+### `cascade` is one boolean on `OpOptions`, off by default
+
+**Choice:** the consent flag is `OpOptions::cascade`, a plain `bool` whose default is `false`.
+`OpOptions::with_cascade()` is the only builder that sets it, and `OpOptions::flags(consent, dry_run)`
+applies an adapter's flag pair through it, so no adapter assigns the field. The CLI exposes it as
+`--cascade` on `archive`, `link add`, `link remove`, and `create`, and every one of those commands
+assembles its options with `options.clone().flags(cascade, dry_run)` — one line, one order. The MCP
+tools expose it as the optional boolean `cascade` on `waymark_archive_work_item`,
+`waymark_add_soft_link`, `waymark_remove_soft_link`, and `waymark_create_work_item`, and
+`params::write_options(dry_run, cascade, lock_timeout_ms)` calls the same `flags` method.
+
+**Why:** the flag belongs to the options every operation already receives, so an operation that can
+reach a second document reads it without a parameter per function and an operation that cannot simply
+ignores it. `create` with soft links reads the same field; a second spelling would be two
+vocabularies for one rule.
+
+### Archive's outcome carries the untouched documents and their relations
+
+**Choice:** `ArchiveOutcome` has `untouched: Vec<UntouchedItem>` (`{id, path}`) and
+`untouched_relations: Vec<UntouchedRelation>` (`{from, relation}`). They sit beside `affected` and
+`removals`, which describe the opposite outcome. Both are populated by every archive: a document is
+`untouched` when it still references the target and the archive did not rewrite it, which is every
+referencing document without consent and every document whose owner is not the operator with it.
+`view::archive_leftovers_json` renders them as one `data.untouched` entry per document,
+`{id, path, relations}`, for both adapters; an archive that left nothing alone renders `[]`. The CLI
+also prints the count through `view::archive_leftovers_summary` and one line per document.
+
+**Why:** the adapters already render "which documents did this archive rewrite"; the consent rule adds
+"which did it deliberately leave alone", and that list has to travel with the outcome so an adapter
+never re-reads the project to describe what just happened. Keeping the relations beside the documents
+rather than inside them keeps `UntouchedItem` the same shape `affected` uses (renaming those types is
+deferred), while the renderer owns the join.
+
+### `link` takes its consent per subcommand, not on the shared pair
+
+**Choice:** `LinkAddArgs` and `LinkRemoveArgs` are two argument structs with their own `--cascade`
+and `--dry-run`, instead of one `LinkPair` shared by both verbs.
+
+**Why:** the two verbs carry different consent semantics — `remove` writes the caller's side without
+consent and treats `--cascade` as the old two-sided path, while `add` without consent eventually
+records only the caller's side. One shared flag struct would force a single meaning onto both, and
+clap's own help is where a caller learns which verb consents to what.
+
+### `link remove` reports the partner it left alone as its own field
+
+**Choice:** `LinkOutcome` gains `other_untouched: Option<UntouchedLink>`
+(`{id, path, owner, owned}`). It is `Some` exactly when a removal dropped the
+link from the caller's document only, and `None` when the pair was rewritten,
+when the partner's document is missing or archived, and on every `link add`.
+`view::link_untouched_json` renders it; the CLI puts it under `data.other_untouched`
+and prints one stderr sentence ("`wm-…` was left alone", present tense under
+`--dry-run`), and the MCP `waymark_remove_soft_link` result carries the same field
+from the same renderer. `other`/`other_path`/`other_item` keep meaning "the partner
+this operation rewrote", so a one-sided removal reports `other_item: null` and a
+`fingerprints` list of one.
+
+**Why:** the partner in a one-sided removal is read but never written, so putting
+it in `other` would let a reader believe the file changed. At the same time the
+caller needs to know which document still lists the link, and re-reading the
+project in an adapter to find out is the second opinion this codebase forbids.
+`owned` is included because it answers the natural next question ("would
+`--cascade` have been enough?") without a second lookup.
+
+**`link add` reports through the same field.** An `add` without consent — a fresh one and the repeat
+of a one-sided pair alike — also returns `other_untouched` (`{id, path, owner, owned}`) next to
+`partner_unsynchronised: true`, and `other_untouched` is `None` only when the change wrote both
+documents or never had a partner document to name (it is missing or archived). `partner_unsynchronised`
+keeps its meaning and its key, because the MCP tool already emitted it, and the two keys describe
+different facts: the state of the pair, and the document that state left behind. The shared renderer
+`view::link_result_json` owns the block for both adapters, and the one-sided link is now the same
+`UntouchedLink` shape `remove` reports, so the four cross-item operations answer "which documents did I
+leave alone, and whose are they" with one vocabulary.
+
+### A one-sided removal reads its partner under the same `link remove` operation
+
+**Choice:** the partner is loaded with `mediated::load_for_write(…, "link remove")`,
+the same call the consented path uses, and a partner that is missing or archived
+is simply not reported as untouched. Nothing is refused. Ownership is reported
+(`owned`, computed with the advisory `mediated::effective_operator`) but not
+used as a gate on this path: consent plus ownership is the rule for *writing* a
+second document, and this path writes none. It is a gate on the consented path,
+where the partner is rewritten; a `link add` against a foreign partner that is
+told to write both sides is `OWNED_BY_OTHER`.
+
+**Why:** the consent design makes `remove` an asymmetry — it may always drop the
+caller's side — so the ownership refusal the spec reserves for cross-item writes
+cannot apply here. Keeping the same load call means an archived or vanished
+partner behaves identically with and without consent.
+
+### SUPERSEDED: a non-consenting `link add` was refused, not half-written
+
+The choice below was reversed on 2026-11-12; see *Consent decides whether the partner is written, not whether the command fails* at the end of this section.
+
+**Choice:** `add_soft_link` without `options.cascade` is refused with `CASCADE_CONSENT_REQUIRED`
+before anything is staged: neither document is written, neither `updated_at` moves. The earlier choice
+in this section — record the caller's side and report `partner_unsynchronised` — was superseded by
+the refusal ticket; the field, its rendering, and its meaning survive for the states that still
+produce a one-sided pair (a pair delivered by Git, or completed by hand).
+
+**Why:** a half-link cannot converge on its own. If the partner is the operator's, the missing half is
+exactly what `--cascade` writes, so the one-step answer is better; if it is not the operator's, the
+partner can never record the link and the half-write creates state nobody can finish. The refusal
+carries the recovery in its message, so the caller does not guess.
+
+**Why:** the spec calls adding a link a claim about the caller's item. Writing the partner without a
+word is exactly the collateral edit the consent rule exists to stop, and "one side only" has to be
+visible in the result or nobody can tell it from a deliberate complete link. `partner_unsynchronised`
+is a boolean rather than an enum keyed on the verb because `remove` without consent produces the
+mirror-image one-sided state in its own ticket, and that ticket can reuse the field without renaming
+anything.
+
+**Consequence:** `LinkOutcome::other == None` no longer means "the partner document is missing". It
+means "this operation did not write the partner", which is also true for a non-consenting add and a
+repeat that changed nothing. The CLI's
+`had no document` line is therefore the last branch of the human output, reached only for a consented
+`remove` (`add` never writes the partner and reports `other_untouched` instead); when it prints, the
+other document really is missing or archived.
+
+### A repeated non-consenting `link add` succeeds without writing
+
+**Choice:** a second `link add` that repeats an add whose caller's document already records the link,
+without consent, succeeds with `changed: false`, `written: false`, no fingerprints, and
+`partner_unsynchronised: true`, without restamping the caller's `updated_at` and without reading the
+partner for anything but that one answer. It is not an error. When the fresh add is what left the pair
+one-sided, running the same command again is the only sensible retry, and an error would either hide
+the state or push the caller toward `--cascade`. The repeat is refused with
+`INVALID_RELATIONSHIP` only when nothing is left to do:
+
+- with `--cascade` and the caller's side already listing the link (the pre-existing duplicate rule,
+  unchanged — a consented add is a claim about the pair, and the pair is already what it asks for);
+- without consent when the partner's document *also* already lists the caller, because then the pair
+  is complete and the caller's request has been satisfied.
+
+An add from the far side of a one-sided pair is not a repeat of anything: that document does not
+record the link yet, so it is an ordinary first add and needs the same consent as any other.
+
+**Not superseded:** a later revision refused a non-consenting add outright, and the reversal below
+restored this rule, so the "repeat succeeds without writing" branch is live again — for a pair the
+fresh add just left one-sided, and for one that arrived that way through Git alike.
+
+**Why:** the duplicate rule's purpose is to tell a caller that the thing it asked for already exists.
+For a one-sided pair that is not the whole truth — the caller's half exists and the partner's does
+not — and the honest answer is the same result shape the first run produced, at zero cost. Restamping
+`updated_at` for a retry would also be a timestamp change for an edit that did not happen, which the
+spec forbids for the partner and which there is no reason to allow for the caller.
+
+### The archive module no longer says "archive never cascades"
+
+**Choice:** the module documentation and the child check now say archive never cascades *to children*.
+
+**Why:** with `cascade` meaning inbound cleanup, the bare sentence would read as a contradiction of a
+flag that now exists.
+
+## Two refusals for a cross-item write
+
+### A missing consent and a foreign owner get their own codes
+
+**Choice:** `CASCADE_CONSENT_REQUIRED` (exit class 4, not retryable, details
+`{operation, id, other, option}`, location `relationship(mediated_by)`) and `OWNED_BY_OTHER`
+(exit class 4, not retryable, details `{id, owner, operation}`, location `work_item`) are separate
+registry rows. The consent message names the option to re-run with (`re-run with --cascade to also
+record the link there` / `to also drop the link there`); the ownership message says re-running will not
+change the outcome and names the owner and the two ways forward (the owner makes the change, or
+ownership is transferred first). The golden snapshot, the JSON-schema enum, the registry test, and
+the anti-drift constructor test change in the same commit, taking the registry from 44 to 46 codes.
+
+**Why:** the two refusals have different recoveries — one is fixed by the caller alone, the other
+cannot be fixed by the caller at all — so they are different recovery units and the registry's rule
+says they are different codes. Both are class 4 (conflict or state rejection) because neither can
+proceed as issued, and neither is retryable because the same request produces the same answer.
+
+### Consent is checked before ownership
+
+**Choice:** consent is what turns a request into a cross-item write, so only a consented request is
+checked for ownership. Without `cascade` neither verb writes the partner and neither can refuse for
+its owner's sake; with `cascade`, the operator is resolved and the partner's owner compared, and a
+mismatch is `OWNED_BY_OTHER`. `CASCADE_CONSENT_REQUIRED` therefore has no producer any more and is
+kept registered but dormant, because retiring a code costs a snapshot, a schema change and a
+documentation sweep while reinstating it costs the same again.
+
+**Why:** refusing a request that writes nothing would be a refusal about a write the caller never
+asked for. The ownership rule is not hidden by this: it fires the moment the caller does ask.
+
+### Consent decides whether the partner is written, not whether the command fails
+
+**Choice:** every cross-item operation leaves a document it may not write alone and reports it, and
+none of them fails because of it. `OWNED_BY_OTHER` survives for exactly one case — a consented
+request against another owner's document — because there the caller did ask for that write and
+quietly downgrading it would report a change that never happened.
+
+| Operation | No consent | Consent, partner mine | Consent, partner foreign |
+|---|---|---|---|
+| `link add` | writes the caller's document, reports `partner_unsynchronised: true` and the partner in `other_untouched` | writes both as one batch | `OWNED_BY_OTHER`, writes nothing |
+| `link remove` | drops the caller's link, reports the partner in `other_untouched` | drops both | `OWNED_BY_OTHER`, writes nothing |
+| `create` with a soft link | writes the new item, names the partner in `untouched` | rewrites the partner | leaves the partner, names it in `untouched` |
+| `archive` | writes the target, names every referencing document in `untouched` | cleans the operator's own inbound references, names the rest in `untouched` | leaves foreign references, names them in `untouched` |
+| `dependency`, `parent` | writes the caller's document only | — | — |
+
+Every "names it" is the same `{id, path}` entry in a `data.untouched` list; every "reports the partner"
+in a link verb is the richer `other_untouched` (`{id, path, owner, owned}`), because a link verb has
+exactly one other end. The tests that hold this table: `crates/waymark-core/tests/link_refusals.rs`
+(the four link cells, including the repeat and the foreign refusals), `.../create_consent.rs` (the
+three create cells, including the missing-operator refusal), `.../archive.rs` (both archive columns),
+and `crates/waymark-cli/tests/{structure,create,archive}.rs` for the adapter's rendering of the same
+cells.
+
+**Why:** the earlier split — link verbs refusing, archive and create reporting — was not a decision
+anyone made; it came from a spec whose user story asked for a refusal while its implementation
+decisions asked for a half-write. One rule is easier to hold in the head and easier to test, and the
+one genuine asymmetry (a consented request that cannot be honoured) keeps its own code.
+
+**Open:** the Web view does not surface any of this; it is read-only and shows the documents as they
+are, including one-sided links.
+
+### `link remove` without consent takes no ownership check
+
+**Choice:** a non-consenting `link remove` writes the caller's document only, reports the partner in
+`other_untouched` (`{id, path, owner, owned}`), and never calls the operator resolution. A broken
+local document or a missing operator does not stop it. With `cascade` the removal is a cross-item
+write and takes the same two conditions as `add`.
+
+**Why:** the rule is about writing a second document, and this path writes none. Requiring an
+identity to delete a line from your own file would block the one operation the spec guarantees is
+always possible.
+
+### Operator resolution for ownership
+
+**Choice:** the ownership comparison uses the operation override when one is supplied (the
+`OpOptions::operator` override is the caller stating who it is), and otherwise the strict resolution
+`mediated::strict_operator`: the local `user.toml` value, then Git's `user.name`, then nothing. A local
+document that exists but does not parse fails the cross-item write with `CONFIG_INVALID` located at
+`user.toml`, before any ownership or consent answer is produced for the consented path. `link add`,
+`link remove --cascade` and `create --link --cascade` all take this path.
+
+**Why:** strictness is the point — a broken identity document must be a configuration failure, not a
+silent "no operator" that a lenient fallback would turn into either a pass or an incorrect
+`OWNED_BY_OTHER`. Strictness is about the *error policy*, not about the *sources*: a person whose only
+identity is Git's `user.name` is the operator exactly as one who wrote `user.toml`, and dropping the
+Git step silently disqualified every clone that never ran `waymark config set`. The earlier
+`link`-local helper returned "no operator" whenever no local document existed, which on a machine with
+a Git identity turned a legitimate consented write into `CONFIG_INVALID`; it now delegates to the same
+resolution everything else uses, so one function answers "who am I" for ownership, for creation and
+for the provenance a document records.
+
+### No operator at all is a configuration error that names the source
+
+**Choice:** when neither the override, the local document, nor Git supplies an operator, a consented
+cross-item write is refused with `CONFIG_INVALID` at `config_key("user.toml")`, details
+`{path, issues}`, and a message that says no operator identity is configured and names the document
+that would supply one. It is never a silent pass and never `OWNED_BY_OTHER` (which would blame the
+partner's owner for the caller's missing identity). This covers `link add --cascade`,
+`link remove --cascade` and `create --link --cascade`. The cases without consent ask no ownership
+question and succeed without an operator: `link add` and `link remove` write one document, and
+`create --link` writes the new item and reports the partner as left alone.
+
+**Why:** the registry has no "identity missing" code, and inventing one for a configuration problem the
+registry already covers would be a second vocabulary. `CONFIG_INVALID` is class 3, which is the
+honest instruction: fix the document, then re-run.
+
+### The repeat rule survives, narrowed to pairs that arrive from outside
+
+**Choice:** with or without consent, an add whose pair already records the link on both sides is
+`INVALID_RELATIONSHIP`. Without consent, an add whose caller's side records it on a pair that is
+one-sided succeeds with `changed: false`, `written: false`, `partner_unsynchronised: true`, and no
+timestamp change. With consent, a one-sided pair is completed by writing the missing half.
+
+**Why:** the retry must not be an error — the caller's request is already true — while a consented
+add is a claim about the pair and a one-sided pair is exactly what consent is for. The narrowed rule
+only matters for pairs that a merge, a hand edit, or an older half-write left behind, because Waymark
+no longer creates them.
+
+## A closed parent is a row column, not a state
+
+**Choice:** `CLOSED_PARENT` is an info-severity registry code, and the list-family
+row carries a `closed_parent` column holding the parent's stable ID when the row
+itself is active and that one parent is `closed`. `doctor` reports the same
+condition as an info finding. Nothing is persisted and readiness is untouched.
+
+**Why:** the signal answers "what should I look at", which is what a `list` row
+is for; putting it only in `doctor` would hide it from the surface people read
+every day. Only the direct parent is inspected so the answer cannot depend on an
+ancestor walk, and a closed child under a closed parent is silent because
+nothing about it is surprising.
+
+**Open:** whether the Web view should render the same column; that is a separate
+read-only presentation decision.
+
+## A one-sided soft link is its own code, diagnosed once in the view
+
+**Choice:** `ONE_SIDED_SOFT_LINK` is a warning-severity, finding-only registry code with details
+`{from, to, missing}`, located on the document that records the link. A soft link whose partner is
+archived stays `DANGLING_REFERENCE`; a soft link whose partner is live but does not record it back is
+`ONE_SIDED_SOFT_LINK`. The derivation itself — which of the two cases a pair is in, and whether the
+pair is healthy — lives in `waymark_core::view::soft_link_findings`. `doctor` turns the result into
+findings through `view::soft_link_finding`; `show` renders the same list under
+`relationships.soft_link_issues` as `{partner, partner_owner, missing, reason}` (`missing` is
+`"link"` or `"archived"`), and the CLI prints the `reason` line. A partner that does not exist at all
+is left to the existing missing-target check, and an archived item's own soft links are history and
+are not diagnosed.
+
+**Why:** "the partner never recorded it" and "the partner is gone" call for different actions, so
+collapsing them into one code would lose the distinction the reader needs. Putting the derivation in
+the view layer keeps the CLI, MCP, and JSON from each deciding which case is which. No finding or
+issue carries a suggested command: completing or dropping the other side rewrites a document its
+owner may not have consented to, and the manual repair follows Git, so the diagnosis states the fact
+and names the document that would have to change.
+
+# Cross-item write consent — `create` with soft links (wm-4y03e40qvzy1)
+
+### A create consent never rewrites another owner's partner, and never refuses for it
+
+**Choice:** `create` with soft links applies the same two conditions the spec gives every cross-item
+write — `cascade` given, and the partner's `owner` equal to the effective operator — plus the third
+identity the spec names for creation: the new item's `owner` must equal the partner's `owner` too.
+A partner that fails any of them is not rewritten; the new item is created with the link recorded on
+its own side only, and the partner is listed in the result's `untouched`. There is no
+`OWNED_BY_OTHER` / `CASCADE_CONSENT_REQUIRED` refusal on `create`.
+
+**Why:** the spec's sentence "`create --link` is refused when the partner belongs to somebody else"
+describes the `link add` shape, where the caller names two existing documents. On `create` the caller
+asks for one new document, and refusing would throw away a create the operator is entitled to make
+for a side effect on a document that is not theirs. The `archive` decisions resolve the same tension
+the same way — a foreign document never aborts the operation, it is left and named — and this
+ticket's acceptance criteria ask for the partner to be named as written or left alone, not for a
+refusal. The two refusal codes stay with `link add`, where re-running with `--cascade` or transferring
+ownership is the actual recovery.
+
+**Consequence:** a create can produce a one-sided link exactly as a non-cascading `link add` does, and
+`show`/`doctor` report it as one-sided (`soft_link_issues`, `ONE_SIDED_SOFT_LINK`). That is already
+the spec's "normal, reachable state".
+
+### An archived, missing, or stale partner still refuses the create
+
+**Choice:** every partner is loaded through the same mediated write check as before, with or without
+`cascade`. A partner that is archived (`ITEM_ARCHIVED {operation: "create"}`), missing
+(`ITEM_NOT_FOUND {relation: "soft_links"}`), or of an older format generation
+(`ITEM_NEEDS_MIGRATION`) refuses the whole create and writes nothing.
+
+**Why:** the answer must not depend on consent or ownership: the caller asked to link to a document
+that no longer accepts writes, and that is a defect in the request, not a permission question.
+Leaving such a partner "untouched" would store a link to a tombstone as if the request had succeeded.
+
+### The operator is resolved strictly only when consent and a partner meet
+
+**Choice:** `create` resolves the operator through `creation_operator` — the override, else
+`mediated::strict_operator` — only when `cascade` was given **and** the request named at least one soft
+link, and it does so before anything is staged. Without consent, or with no partner to judge, the
+resolution is not consulted at all, so a malformed `.waymark/user.toml` does not fail an ordinary
+create.
+
+**Why:** the strict resolution exists because ownership is a permission question. Without consent no
+partner can be rewritten and no permission question is asked, so turning an unrelated create into
+`CONFIG_INVALID` would be a new failure mode for a write the rule never governs. With consent, a
+broken local document is a configuration error exactly as the spec's "strict for ownership" rule
+requires, and so is having no operator at all: `create --link --cascade` with no resolvable identity
+used to succeed and silently leave the partner untouched, which the user stories forbid. It now fails
+exactly as `link add --cascade` does, with `CONFIG_INVALID` naming the sources, and writes nothing.
+
+### The result names partners as `partners` or `untouched`; a create never warns
+
+**Choice:** `Created` gains `untouched: Vec<UntouchedPartner>` (`item` + `path`). Both adapters render
+the whole create block through the shared `view::create_result_json`: `id`, `path`, `written`, `item`,
+`partners`, `fingerprints`, and `untouched` (`view::leftover_partners_json`, one entry per partner,
+`{id, path}`). The human CLI line is `<id> left alone (it did not record the link)`. `fingerprints`
+stays `[new, partners…]`, so a create that rewrote nothing carries exactly one fingerprint.
+
+**`OWNER_MISMATCH` is deliberately never produced for a create.** The ticket asked for a warning on a
+rewritten partner, but under the three-identity rule (`is_planned_for`: consent, the partner's owner is
+the operator, the new item's owner is the partner's owner) a rewritten partner is always the
+operator's own document, and a document its own owner writes is not a mismatch. The warning set was
+therefore empty in every reachable state — including the `--operator` override, where the operator
+*is* the partner's owner for the purposes of the rule. A test now pins that the set is empty even in
+that closest-to-a-mismatch case. What explains a rewritten partner is its entry in `partners` together
+with its new `updated_at`; what explains an unwritten one is its entry in `untouched`. Rewriting the
+rule to manufacture a warning would either relax ownership or warn about a document the operator owns,
+and neither is worth a message that says nothing actionable.
+
+**Why the listing is still right:** the original complaint was that a partner could be rewritten and
+appear nowhere in the result. Listing both outcomes closes that, exactly as archive does. A create
+whose owner is somebody else never reports anything about the new document — that is ordinary and
+unchanged — and a create that moved nothing but its own document stays quiet apart from a partner it
+left alone, matching the spec's "a non-cascading write that rewrote nothing reports nothing". `view`
+owns the renderer because the CLI and MCP must not grow two spellings.
+
+### The dry run decides partners exactly as the write does
+
+**Choice:** the dry-run path loads the partners through the same mediated check, resolves the operator
+the same way when `cascade` is present, and fills `partners` / `untouched` from the same predicate as
+the write half (`is_planned_for`).
+
+**Why:** the spec's preview rule — a preview never promises a write the real run would refuse — cuts
+both ways: it must not promise a partner rewrite the write will not perform, and it must not hide a
+partner the write will actually leave alone.
+
+### The new-item owner condition is read in both directions
+
+**Choice:** with `cascade`, a partner is rewritten only when the new item's owner, the partner's owner,
+and the operator are one identity — so a partner the operator owns is still left alone when the item
+is being created for somebody else. The module documentation of `ops::create` states the rule; this
+paragraph records that the reverse reading was considered and rejected.
+
+**Why:** "the operator may rewrite partners it owns" alone would let `create --owner alice --link
+x --cascade` attach alice's new item to a partner while the operator is a third person. The spec
+states the three-way condition, and the stricter reading is the one that cannot surprise an owner
+whose partner suddenly lists a link they never asked for.
+
+# Cross-item write consent — adapter parity (wm-8rr624fc9mjr)
+
+### The parity suite names the consent flag on both surfaces
+
+**Choice:** `crates/waymark-mcp/tests/parity.rs` holds the cross-item operations in two tables — the
+CLI invocations (`create`, `link add`, `link remove`, `archive`) and the MCP tools that cover them — and
+fails when either side loses the flag: the CLI test reads each command's `--help` and requires the exact
+token `--cascade`, and the MCP test reads each tool's input schema and requires an optional boolean
+`cascade`. A second test drives one archive and one soft-link pair through both adapters and compares
+the `data` blocks — `removals`, `affected`, `untouched`, `written`, the warnings — and one more drives
+both refusals through both adapters and compares the whole error document and the CLI's exit code (4)
+with the registry's class.
+
+**Why:** the ticket's promise is that a tool lacking the consent field fails the suite rather than
+quietly behaving differently, and an adapter that lost the flag would have looked identical to one that
+refused every call for consent — the names are what pin the option down.
+
+### Every cross-item result block is rendered once, in the view layer
+
+**Choice:** `view` owns four renderers, and the CLI and MCP each call them instead of building JSON:
+`archive_result_json` (plus `archive_leftovers_json` for its `untouched` list),
+`create_result_json` (plus `leftover_partners_json`), `link_result_json`, and the human sentences
+`archive_leftovers_summary` and `link_untouched_json`. After this change no adapter builds or
+rewords a cross-item result block; the CLI commands only decide which renderer to call and what to
+print around it, and the MCP tools return the renderer's value unchanged.
+
+**Why:** the archive block was moved here first and the other two were left behind as two copies each.
+Copies agree exactly when nothing changes, which is the state in which the next field lands on one side
+only. The link block was additionally the place where `link add` had no path or owner to report, and
+adding one there would have meant writing it twice.
+
+**Choice:** `view::archive_result_json` builds the `data` block for an archive — marker, reason,
+status, `written`, `removals`, `affected`, `untouched`, `item`. Both the CLI's `archive` command and
+the MCP `waymark_archive_work_item` result call it; neither keeps a copy.
+
+**Divergence fixed:** the two adapters had each grown their own copy of that block. The fields agreed
+today, which is exactly the state in which the next change to the footprint — a new list, a renamed
+relation, a reordered entry — lands on one side only, and the suite would then have to say which copy
+is right. The block now lives next to the other renderers in `view`, and both adapters are thin callers
+of it. The suite drives an archive whose consent cleans nothing and names a foreign partner, so the
+`removals`, `affected`, and `untouched` lists are non-empty and compared across adapters instead of
+being three empty arrays that agree by accident.
+
+**Why:** the module note already said the CLI and MCP must not grow two spellings of one result. The
+equivalence suite caught the drift because it compares every `data` field the two surfaces report, not
+only the bytes on disk.
+
+### A divergence is fixed in the shared layer, and the suite proves it at both seams
+
+**Choice:** when an adapter misspells what the other reports, the fix is the shared renderer or the
+domain operation, never a rule taught to the adapter. The equivalence suite drives one operation
+through both adapters over two copies of one project and compares every persisted byte with the
+operation-clock fields normalized and a freshly minted ID substituted, plus every `data` field the two
+surfaces report. Paths are compared by their repository-relative form, because the two copies live at
+different roots.
+
+**Consequence:** the parity suite grew cases for the two settings the earlier ones avoided. A create
+whose partner belongs to someone else names that partner in `untouched` and writes only the new
+document, with and without consent; a `link remove` across a pair that arrived from outside records
+`other_untouched` with `owned: false` without consent, and is refused `OWNED_BY_OTHER` with consent.
+Both adapters now reach those states through the same domain calls, so a rule that lives in one adapter
+would show up as a byte difference in one of these tests.
+
+### `CASCADE_CONSENT_REQUIRED` stays registered without a producer, on purpose
+
+**Choice:** the registry keeps `CASCADE_CONSENT_REQUIRED` (class 4, not retryable) even though no
+operation raises it: every cross-item operation now writes one document without consent and reports
+the other, and the only refusal left is `OWNED_BY_OTHER`. `WaymarkError::cascade_consent_required` and
+its constructor test stay; the golden registry snapshot, the JSON-schema enum, and the exit-class
+mapping keep the row.
+
+**Why:** retiring a code costs a golden snapshot change, a schema change and a documentation sweep, and
+reinstating it the next time an operation needs to say "re-run with the consent option" costs exactly
+the same. The recovery it describes — the caller can fix the request alone, by adding the option — is
+still the one the rule will need. **This is not dead code to be deleted:** a reader who greps for a
+producer and finds none should read this entry, not remove the row. The map's "Cross-item write scope"
+section records the same decision.

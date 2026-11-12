@@ -60,6 +60,28 @@ sha_of() {
     fi
 }
 
+# Fetch one asset by the id GitHub gave it. The /releases/download/<tag>/<file>
+# URL answers 404 while the release is a draft, and a tag cannot be fetched
+# anonymously at all; the asset id plus the octet-stream header works for both
+# drafts and published releases.
+fetch_asset() {
+    local name="$1" id
+    # The release JSON lists "url" .../assets/<id>, then "id", then "name"; the
+    # id is the only stable handle for a draft's asset.
+    id="$(printf '%s' "$window" | tr -d '\n' \
+        | grep -oE "/assets/[0-9]+\",[^}]*\"name\": *\"${name}\"" \
+        | grep -oE '^/assets/[0-9]+' | tr -d '/' | sed 's/assets//' | head -1)"
+    if [[ -z "$id" ]]; then
+        info "  no asset named ${name} in ${tag}"
+        return 1
+    fi
+    curl -fsSL --proto '=https' --tlsv1.2 --retry 3 --max-time 1800 \
+        "${auth_args[@]+"${auth_args[@]}"}" \
+        -H 'Accept: application/octet-stream' \
+        -o "$dest/$name" \
+        "https://api.github.com/repos/${GITHUB_REPO}/releases/assets/${id}"
+}
+
 verify() {
     local file="$1" expected actual
     [[ -f "$dest/$file.sha256" ]] || { info "missing $file.sha256"; return 1; }
@@ -70,18 +92,30 @@ verify() {
 
 # The archives, one name per line. The .sha256 siblings are fetched with each
 # archive, so they are not part of the selection.
-# The tag page carries the asset names. Filters instead of `sed … sort | head`
-# on purpose: head exits early, the pipe closes, and curl dies of EPIPE with
-# "unexpected eof while reading" (exit 56).
-names="$(curl -fsSL --retry 3 --max-time 120 \
-    "https://github.com/${GITHUB_REPO}/releases/expanded_assets/${tag}")" \
-    || fail 3 "could not list the assets of ${tag} on GitHub"
-assets="$(printf '%s' "$names" \
-    | grep -o '\bwaymark[a-z-]*-v[0-9.]*-[a-z0-9_-]*\.\(tar\.gz\|zip\)' \
+# Resolve the tag to a release through the list endpoint. GitHub answers
+# /releases/tags/<tag> with 404 for a draft, and the tag page only lists a
+# published release's assets, so the list is the one call that covers both.
+auth_args=()
+if [[ -n "${GH_TOKEN:-}" ]]; then
+    auth_args=(-H "Authorization: Bearer ${GH_TOKEN}")
+fi
+list="$(curl -fsSL --retry 3 --max-time 120 "${auth_args[@]+"${auth_args[@]}"}" \
+    "https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=100")" \
+    || fail 3 "could not read the releases of ${GITHUB_REPO} on GitHub (a draft needs GH_TOKEN)"
+# One release object per array element. Split at the next tag_name (or the end)
+# so asset names are read only from the release being mirrored; grepping the
+# whole body collects every version's names.
+window="$(printf '%s' "$list" | tr -d '\n' \
+    | sed -e "s/\"tag_name\"/\n&/g" \
+    | grep -F "\"tag_name\": \"${tag}\"" || true)"
+[[ -n "$window" ]] || fail 3 "no release tagged ${tag} in ${GITHUB_REPO}"
+assets="$(printf '%s' "$window" \
+    | grep -oE '"name": *"(waymark|waymark-web|waymark-src)-v[0-9.][^"]*"' \
+    | cut -d'"' -f4 \
+    | grep -E '\.(tar\.gz|zip)$' \
+    | grep -v '\.sha256$' \
     | sort -u || true)"
-[[ -n "$assets" ]] || fail "could not list the assets of ${tag} on GitHub"
-
-selected="$(printf '%s\n' "$assets" | grep -E '^(waymark|waymark-web|waymark-src)-v[0-9.]+-' || true)"
+selected="$assets"
 [[ -n "$selected" ]] || fail "no archives in ${tag}"
 if [[ -n "$only" ]]; then
     selected="$(printf '%s\n' "$selected" | grep -E "$only" || true)"
@@ -100,14 +134,8 @@ for file in $selected; do
         continue
     fi
     info "  fetch $file"
-    curl -fsSL --proto '=https' --tlsv1.2 --retry 3 --max-time 1800 \
-        -o "$dest/$file" \
-        "https://github.com/${GITHUB_REPO}/releases/download/${tag}/${file}" \
-        || fail 3 "download failed: $file"
-    curl -fsSL --proto '=https' --tlsv1.2 --retry 3 --max-time 120 \
-        -o "$dest/$file.sha256" \
-        "https://github.com/${GITHUB_REPO}/releases/download/${tag}/${file}.sha256" \
-        || fail 3 "download failed: $file.sha256"
+    fetch_asset "$file" || fail 3 "download failed: $file"
+    fetch_asset "$file.sha256" || fail 3 "download failed: $file.sha256"
     verify "$file" || fail 4 "checksum mismatch: $file"
     fetched=$((fetched + 1))
 done

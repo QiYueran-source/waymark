@@ -63,6 +63,10 @@ fn project() -> (tempfile::TempDir, Utf8PathBuf) {
 }
 
 fn create(root: &Utf8PathBuf, title: &str) -> String {
+    create_owned_by(root, title, "frank")
+}
+
+fn create_owned_by(root: &Utf8PathBuf, title: &str, owner: &str) -> String {
     let result = run(waymark()
         .arg("--json")
         .arg("create")
@@ -73,12 +77,17 @@ fn create(root: &Utf8PathBuf, title: &str) -> String {
         .arg("--category")
         .arg("task")
         .arg("--owner")
-        .arg("frank"));
+        .arg(owner));
     assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
     result.json()["data"]["id"]
         .as_str()
         .expect("the envelope names the new id")
         .to_owned()
+}
+
+/// Make `operator` the acting identity, the way a person does.
+fn act_as(root: &Utf8PathBuf, operator: &str) {
+    json_ok(root, &["config", "set", "operator", operator]);
 }
 
 fn json_ok(root: &Utf8PathBuf, arguments: &[&str]) -> serde_json::Value {
@@ -101,6 +110,20 @@ fn json_err(root: &Utf8PathBuf, arguments: &[&str]) -> (i32, serde_json::Value) 
     let result = run(&mut command);
     assert_ne!(result.status(), 0, "stdout: {}", result.stdout());
     (result.status(), result.json())
+}
+
+/// Record a soft link on one side by editing the document, leaving the partner
+/// exactly as it is.
+fn seed_soft_link(root: &Utf8PathBuf, from: &str, to: &str) {
+    let path = root.join("work").join("task").join(format!("{from}.md"));
+    let mut text = std::fs::read_to_string(&path).expect("the document is readable");
+    if !text.contains("\nsoft_links:") {
+        // Insert the key in canonical position: after `updated_at` and any
+        // `closed_at`, before the closing fence.
+        let fence = text.rfind("\n---").expect("a frontmatter fence");
+        text.insert_str(fence, &format!("\nsoft_links:\n  - {to}"));
+    }
+    std::fs::write(&path, text).expect("the document is writable");
 }
 
 fn document(root: &Utf8PathBuf, id: &str) -> String {
@@ -152,13 +175,14 @@ fn archive_reports_the_marker_the_reason_and_the_unchanged_status() {
 }
 
 #[test]
-fn archive_cleans_inbound_edges_and_reports_each_removal() {
+fn archive_with_cascade_cleans_inbound_edges_and_reports_each_removal() {
     let (_dir, root) = project();
+    act_as(&root, "frank");
     let target = create(&root, "target");
     let dependent = create(&root, "dependent");
     json_ok(&root, &["dependency", "add", &dependent, &target]);
 
-    let envelope = json_ok(&root, &["archive", &target]);
+    let envelope = json_ok(&root, &["archive", &target, "--cascade"]);
 
     assert_eq!(
         envelope["data"]["removals"],
@@ -192,14 +216,237 @@ fn a_dry_run_reports_the_plan_and_writes_nothing() {
     assert!(envelope["data"]["archived_at"].is_string());
     assert_eq!(
         envelope["data"]["removals"],
-        serde_json::json!([{"from": dependent, "relation": "dependencies"}])
+        serde_json::json!([]),
+        "without consent nothing is removed, not even a preview"
     );
+    let untouched = envelope["data"]["untouched"]
+        .as_array()
+        .expect("untouched is a list");
+    assert_eq!(untouched.len(), 1);
+    assert_eq!(untouched[0]["id"], serde_json::json!(dependent));
+    let relations: Vec<&str> = untouched[0]["relations"]
+        .as_array()
+        .expect("relations is a list")
+        .iter()
+        .map(|value| value.as_str().expect("a relation literal"))
+        .collect();
+    assert_eq!(relations, vec!["dependencies"]);
     assert_eq!(
         document(&root, &target),
         target_before,
         "nothing was written"
     );
     assert_eq!(document(&root, &dependent), dependent_before);
+}
+
+#[test]
+fn cascade_is_accepted_on_a_dry_run_too() {
+    let (_dir, root) = project();
+    act_as(&root, "frank");
+    let target = create(&root, "target");
+    let dependent = create(&root, "dependent");
+    json_ok(&root, &["dependency", "add", &dependent, &target]);
+    let before = document(&root, &target);
+    let dependent_before = document(&root, &dependent);
+
+    let envelope = json_ok(&root, &["archive", &target, "--cascade", "--dry-run"]);
+
+    assert_eq!(envelope["data"]["written"], serde_json::json!(false));
+    assert_eq!(
+        envelope["data"]["removals"],
+        serde_json::json!([{"from": dependent, "relation": "dependencies"}])
+    );
+    assert_eq!(envelope["data"]["untouched"], serde_json::json!([]));
+    assert_eq!(document(&root, &target), before, "nothing was written");
+    assert_eq!(document(&root, &dependent), dependent_before);
+}
+
+#[test]
+fn cascade_never_rewrites_a_foreign_document_and_names_it() {
+    let (_dir, root) = project();
+    act_as(&root, "frank");
+    let target = create(&root, "target");
+    let theirs = create_owned_by(&root, "theirs", "alice");
+    let theirs_path = root.join("work").join("task").join(format!("{theirs}.md"));
+    let mut mine = std::fs::read_to_string(&theirs_path).expect("the document is readable");
+    let fence = mine.rfind("\n---").expect("a frontmatter fence");
+    mine.insert_str(fence, &format!("\nsoft_links:\n  - {target}"));
+    std::fs::write(&theirs_path, &mine).expect("the document is writable");
+
+    let envelope = json_ok(&root, &["archive", &target, "--cascade"]);
+
+    assert_eq!(envelope["data"]["written"], serde_json::json!(true));
+    assert_eq!(envelope["data"]["removals"], serde_json::json!([]));
+    assert_eq!(envelope["data"]["affected"], serde_json::json!([]));
+    assert_eq!(
+        envelope["data"]["untouched"],
+        serde_json::json!([{
+            "id": theirs,
+            "path": theirs_path.to_string(),
+            "relations": ["soft_links"],
+        }])
+    );
+    assert_eq!(
+        document(&root, &theirs),
+        mine,
+        "the foreign document keeps its bytes"
+    );
+}
+
+#[test]
+fn archive_without_cascade_leaves_a_foreign_document_alone_and_names_it() {
+    let (_dir, root) = project();
+    act_as(&root, "frank");
+    let target = create(&root, "target");
+    let theirs = create_owned_by(&root, "theirs", "alice");
+    let mine = create(&root, "mine");
+    json_ok(&root, &["dependency", "add", &theirs, &target]);
+    // A soft link is a cross-item write, so it is recorded by hand here: the
+    // relation under archive is what this test is about, not how the link got
+    // there.
+    seed_soft_link(&root, &mine, &target);
+    let theirs_before = document(&root, &theirs);
+    let mine_before = document(&root, &mine);
+
+    let envelope = json_ok(&root, &["archive", &target]);
+
+    assert_eq!(envelope["ok"], serde_json::json!(true));
+    assert_eq!(envelope["data"]["written"], serde_json::json!(true));
+    assert_eq!(envelope["data"]["removals"], serde_json::json!([]));
+    assert_eq!(
+        envelope["data"]["affected"],
+        serde_json::json!([]),
+        "not even my own document is rewritten without consent"
+    );
+    let untouched = envelope["data"]["untouched"]
+        .as_array()
+        .expect("untouched is a list");
+    // Untouched documents are ordered by stable ID, not by the order the
+    // fixtures were created in.
+    let mut expected = vec![theirs.as_str(), mine.as_str()];
+    expected.sort_unstable();
+    let ids: Vec<&str> = untouched
+        .iter()
+        .map(|item| item["id"].as_str().expect("an id"))
+        .collect();
+    assert_eq!(ids, expected);
+    let relation_of = |id: &str| {
+        let entry = untouched
+            .iter()
+            .find(|item| item["id"] == serde_json::json!(id))
+            .expect("the document is named");
+        let relations: Vec<&str> = entry["relations"]
+            .as_array()
+            .expect("relations is a list")
+            .iter()
+            .map(|value| value.as_str().expect("a relation literal"))
+            .collect();
+        (relations, entry["path"].clone())
+    };
+    let (relations, path) = relation_of(&theirs);
+    assert_eq!(relations, vec!["dependencies"]);
+    assert_eq!(
+        path,
+        serde_json::json!(root
+            .join("work")
+            .join("task")
+            .join(format!("{theirs}.md"))
+            .to_string())
+    );
+    let (relations, _) = relation_of(&mine);
+    assert_eq!(relations, vec!["soft_links"]);
+    assert_eq!(document(&root, &theirs), theirs_before);
+    assert_eq!(document(&root, &mine), mine_before);
+}
+
+#[test]
+fn archive_with_cascade_cleans_my_documents_and_names_the_foreign_ones() {
+    let (_dir, root) = project();
+    act_as(&root, "frank");
+    let target = create(&root, "target");
+    let theirs = create_owned_by(&root, "theirs", "alice");
+    let mine = create(&root, "mine");
+    json_ok(&root, &["dependency", "add", &theirs, &target]);
+    json_ok(&root, &["dependency", "add", &mine, &target]);
+    let theirs_before = document(&root, &theirs);
+
+    let envelope = json_ok(&root, &["archive", &target, "--cascade"]);
+
+    assert_eq!(
+        envelope["data"]["removals"],
+        serde_json::json!([{"from": mine, "relation": "dependencies"}])
+    );
+    assert_eq!(
+        envelope["data"]["affected"],
+        serde_json::json!([{
+            "id": mine,
+            "path": root.join("work").join("task").join(format!("{mine}.md")).to_string(),
+        }])
+    );
+    let untouched = envelope["data"]["untouched"]
+        .as_array()
+        .expect("untouched is a list");
+    assert_eq!(untouched.len(), 1);
+    assert_eq!(untouched[0]["id"], serde_json::json!(theirs));
+    assert!(!document(&root, &mine).contains(&target));
+    assert_eq!(document(&root, &theirs), theirs_before);
+}
+
+#[test]
+fn a_dry_run_predicts_exactly_what_the_real_run_does() {
+    for cascade in [false, true] {
+        let (_dir, root) = project();
+        act_as(&root, "frank");
+        let target = create(&root, "target");
+        let theirs = create_owned_by(&root, "theirs", "alice");
+        let mine = create(&root, "mine");
+        json_ok(&root, &["dependency", "add", &theirs, &target]);
+        json_ok(&root, &["dependency", "add", &mine, &target]);
+
+        let flags: &[&str] = if cascade { &["--cascade"] } else { &[] };
+        let mut preview_arguments = vec!["archive", target.as_str(), "--dry-run"];
+        preview_arguments.extend_from_slice(flags);
+        let preview = json_ok(&root, &preview_arguments);
+        assert_eq!(
+            preview["data"]["written"],
+            serde_json::json!(false),
+            "the preview wrote nothing"
+        );
+        let mine_before = document(&root, &mine);
+        let theirs_before = document(&root, &theirs);
+        assert_eq!(
+            document(&root, &mine),
+            mine_before,
+            "the preview wrote nothing"
+        );
+        assert_eq!(document(&root, &theirs), theirs_before);
+
+        let mut real_arguments = vec!["archive", target.as_str()];
+        real_arguments.extend_from_slice(flags);
+        let real = json_ok(&root, &real_arguments);
+        assert_eq!(preview["data"]["removals"], real["data"]["removals"]);
+        assert_eq!(preview["data"]["affected"], real["data"]["affected"]);
+        assert_eq!(preview["data"]["untouched"], real["data"]["untouched"]);
+        assert_eq!(document(&root, &theirs), theirs_before);
+        assert_eq!(real["data"]["written"], serde_json::json!(true));
+    }
+}
+
+#[test]
+fn a_child_refuses_the_archive_even_with_cascade() {
+    let (_dir, root) = project();
+    let parent = create(&root, "parent");
+    let child = create(&root, "child");
+    json_ok(&root, &["parent", "set", &child, &parent]);
+
+    let (code, envelope) = json_err(&root, &["archive", &parent, "--cascade"]);
+
+    assert_eq!(code, 4);
+    assert_eq!(
+        envelope["error"]["code"],
+        serde_json::json!("HAS_ACTIVE_CHILDREN")
+    );
+    assert!(!document(&root, &parent).contains("archived_at"));
 }
 
 #[test]
@@ -320,4 +567,47 @@ fn list_hides_archived_items_until_the_archived_range_is_asked_for() {
     let shown = json_ok(&root, &["show", &retired]);
     assert_eq!(shown["data"]["id"], serde_json::json!(retired));
     assert!(shown["data"]["item"]["archived_at"].is_string());
+}
+
+#[test]
+fn the_human_output_names_the_documents_left_for_their_owner() {
+    let (_dir, root) = project();
+    act_as(&root, "frank");
+    let target = create_owned_by(&root, "target", "alice");
+    let dependent = create_owned_by(&root, "dependent", "alice");
+    let mut command = waymark();
+    command
+        .arg("--project")
+        .arg(&root)
+        .arg("dependency")
+        .arg("add")
+        .arg(&dependent)
+        .arg(&target);
+    let added = run(&mut command);
+    assert_eq!(added.status(), 0, "stderr: {}", added.stderr());
+
+    // The operator is nobody who owns the dependent, so the archive leaves it
+    // alone and the human output has to say so in a sentence, not only in JSON.
+    let result = run(waymark()
+        .arg("--project")
+        .arg(&root)
+        .arg("archive")
+        .arg(&target));
+    assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
+
+    let stderr = result.stderr();
+    let summary = format!("{target} still referenced by 1 document left untouched");
+    assert!(
+        stderr.contains(&summary),
+        "the summary line counts the documents left alone: {stderr}"
+    );
+    let line = format!("{dependent}  left for its owner (dependencies)");
+    assert!(
+        stderr.contains(&line),
+        "the list names the document and the relation: {stderr}"
+    );
+    assert!(
+        stderr.find(&summary) < stderr.find(&line),
+        "the summary precedes the list it introduces: {stderr}"
+    );
 }

@@ -11,13 +11,23 @@
 //! - re-archiving is refused with `ALREADY_ARCHIVED` and replaces neither
 //!   marker, so the first archive is the durable answer;
 //! - an unarchived child blocks it with `HAS_ACTIVE_CHILDREN {children}`.
-//!   Archive never cascades: a caller retires children one at a time, moves
-//!   them, or clears their parent;
-//! - active files that point *at* the target lose the inbound edge
-//!   (`dependencies`, `parent`, `soft_links`). Those files changed, so they get
-//!   a new `updated_at`; their body and custom fields are untouched, and an
-//!   archived document is never rewritten, because its relationships are
-//!   historical.
+//!   Archive never cascades to children: a caller retires them one at a time,
+//!   moves them, or clears their parent. `cascade` is consent for inbound
+//!   cleanup, not for touching the hierarchy below the target, so the refusal
+//!   is the same with and without it;
+//! - inbound edges (`dependencies`, `parent`, `soft_links`) on another
+//!   document are stripped only with `options.cascade` and only when that
+//!   document's `owner` is the effective operator. A cleaned document really
+//!   changed, so it gets a new `updated_at`; its body and custom fields are
+//!   untouched, and an archived document is never rewritten, because its
+//!   relationships are historical. A document left alone — a foreign owner,
+//!   or no consent at all — keeps its bytes and its `updated_at`, and is
+//!   reported in [`ArchiveOutcome::untouched`] with the relation that still
+//!   points at the target;
+//! - a foreign reference never refuses the archive. Missing consent and a
+//!   foreign owner decide only which cleanup happens, and the leftover is
+//!   reported so its owner can act on it with their own `doctor` run. This
+//!   operation adds no ownership refusal of its own.
 //!
 //! # One batch
 //!
@@ -25,7 +35,8 @@
 //! all-or-nothing batch ([`crate::write::replace_batch`]), so a conflict on any
 //! one of them writes none of them. A project with nothing pointing at the
 //! target is a batch of one. `--dry-run` runs every check and reports every
-//! planned removal while writing nothing.
+//! planned removal and every leftover while writing nothing, so the preview and
+//! the real run answer the same question from the same scan.
 //!
 //! # Why the target is read without [`mediated::load_for_write`]
 //!
@@ -107,6 +118,27 @@ pub struct AffectedItem {
     pub path: Utf8PathBuf,
 }
 
+/// One document the archive leaves exactly as it is.
+///
+/// Consent never extends to another owner's document, so a reference from one
+/// is preserved and reported here instead of being cleaned up.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UntouchedItem {
+    /// The document that still references the archived item.
+    pub id: WorkItemId,
+    /// That document.
+    pub path: Utf8PathBuf,
+}
+
+/// The relation an untouched document still points at the archived item with.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct UntouchedRelation {
+    /// The item that still references the archived item.
+    pub from: WorkItemId,
+    /// The field that still names the archived ID.
+    pub relation: InboundRelation,
+}
+
 /// What an archive produced, or would produce on a dry run.
 #[derive(Debug, Clone)]
 pub struct ArchiveOutcome {
@@ -120,8 +152,16 @@ pub struct ArchiveOutcome {
     pub archive_reason: Option<String>,
     /// Every planned inbound removal, in stable-ID then relation order.
     pub removals: Vec<PlannedRemoval>,
-    /// Every active document cleaned up, sorted by stable ID.
+    /// Every active document cleaned up, sorted by stable ID. Empty without
+    /// `cascade`.
     pub affected: Vec<AffectedItem>,
+    /// Every document whose inbound reference was left exactly as it was,
+    /// sorted by stable ID: a foreign owner's document, and with no consent
+    /// every referencing document at all.
+    pub untouched: Vec<UntouchedItem>,
+    /// The relations each untouched document keeps, in stable-ID then relation
+    /// order. Empty alongside an empty `untouched`.
+    pub untouched_relations: Vec<UntouchedRelation>,
     /// Whether the batch was applied. Always `false` on a dry run.
     pub written: bool,
     /// One fingerprint per replaced document, target first then `affected`
@@ -138,6 +178,15 @@ impl ArchiveOutcome {
             .iter()
             .filter(|removal| &removal.from == from)
             .map(|removal| removal.relation)
+            .collect()
+    }
+
+    /// The relations one untouched document still keeps, in relation order.
+    pub fn untouched_relations_for(&self, from: &WorkItemId) -> Vec<InboundRelation> {
+        self.untouched_relations
+            .iter()
+            .filter(|relation| &relation.from == from)
+            .map(|relation| relation.relation)
             .collect()
     }
 }
@@ -199,7 +248,7 @@ fn apply(
     }
 
     // Children first: an active child means the hierarchy would be detached,
-    // and archive is one item per call, never a cascade.
+    // and archive is one item per call; consent never reaches children.
     let children = active_children(&documents, &target.item.id);
     if !children.is_empty() {
         return Err(WaymarkError::has_active_children(
@@ -213,8 +262,15 @@ fn apply(
     archived.archived_at = Some(archived_at);
     archived.archive_reason = reason.clone();
 
+    // Ownership is resolved before any staging: a broken local document is a
+    // configuration error even when this particular archive would clean
+    // nothing, because the answer decides whether a write would be allowed.
+    let operator = mediated::effective_operator_strict(project, options)?;
+
     let mut removals: Vec<PlannedRemoval> = Vec::new();
     let mut affected: Vec<AffectedItem> = Vec::new();
+    let mut untouched: Vec<UntouchedItem> = Vec::new();
+    let mut untouched_relations: Vec<UntouchedRelation> = Vec::new();
     let mut staged: Vec<StagedDocument> = Vec::new();
     staged.push(StagedDocument::new(
         &target.item.id,
@@ -231,6 +287,22 @@ fn apply(
         }
         let (mut cleaned, relations) = strip_inbound(&document.item, &target.item.id);
         if relations.is_empty() {
+            continue;
+        }
+        // Two independent conditions, both required: consent, and a document
+        // this operator owns. A foreign document is not refused, it is left
+        // and named.
+        if !options.cascade || !mediated::is_operators(&document.item.owner, operator.as_deref()) {
+            untouched.push(UntouchedItem {
+                id: document.id.clone(),
+                path: document.path.clone(),
+            });
+            for relation in &relations {
+                untouched_relations.push(UntouchedRelation {
+                    from: document.id.clone(),
+                    relation: *relation,
+                });
+            }
             continue;
         }
         // The file really changed, so it gets a new modification time. The
@@ -266,6 +338,8 @@ fn apply(
             archive_reason: reason,
             removals,
             affected,
+            untouched,
+            untouched_relations,
             written: false,
             fingerprints: Vec::new(),
             meta,
@@ -287,6 +361,8 @@ fn apply(
         archive_reason: reason,
         removals,
         affected,
+        untouched,
+        untouched_relations,
         written: true,
         fingerprints,
         meta,

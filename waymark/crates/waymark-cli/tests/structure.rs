@@ -173,14 +173,317 @@ fn parent_dry_run_reports_the_change_without_writing_it() {
     assert_eq!(shown["data"]["item"]["parent"], serde_json::Value::Null);
 }
 
+/// Create an item owned by `owner`.
+fn create_owned_by(root: &Utf8PathBuf, title: &str, owner: &str) -> String {
+    let result = run(waymark()
+        .arg("--json")
+        .arg("create")
+        .arg("--project")
+        .arg(root)
+        .arg("--title")
+        .arg(title)
+        .arg("--category")
+        .arg("task")
+        .arg("--owner")
+        .arg(owner));
+    assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
+    result.json()["data"]["id"]
+        .as_str()
+        .expect("the envelope names the new id")
+        .to_owned()
+}
+
+/// Make `operator` the acting identity, the way a person does.
+fn act_as(root: &Utf8PathBuf, operator: &str) {
+    json_ok(root, &["config", "set", "operator", operator]);
+}
+
+fn document(root: &Utf8PathBuf, id: &str) -> String {
+    std::fs::read_to_string(root.join("work").join("task").join(format!("{id}.md")))
+        .expect("the document is readable")
+}
+
 #[test]
-fn link_add_and_remove_touch_both_documents() {
+fn link_add_without_cascade_records_the_link_on_the_callers_side_only() {
+    let (_dir, root) = project();
+    act_as(&root, "frank");
+    let left = create(&root, "left");
+    let right = create(&root, "right");
+    let right_before = document(&root, &right);
+
+    let added = json_ok(&root, &["link", "add", &left, &right]);
+
+    assert_eq!(added["data"]["changed"], serde_json::json!(true));
+    assert_eq!(
+        added["data"]["item"]["soft_links"],
+        serde_json::json!([right])
+    );
+    assert_eq!(added["data"]["other_item"], serde_json::Value::Null);
+    assert_eq!(
+        added["data"]["partner_unsynchronised"],
+        serde_json::json!(true),
+        "the result says the pair is one-sided"
+    );
+    assert_eq!(
+        document(&root, &right),
+        right_before,
+        "the partner keeps its bytes and its updated_at"
+    );
+
+    // The same request with the option records both halves.
+    let consented = json_ok(&root, &["link", "add", &left, &right, "--cascade"]);
+    assert_eq!(
+        consented["data"]["other_item"]["soft_links"],
+        serde_json::json!([left])
+    );
+}
+
+#[test]
+fn link_add_against_another_owners_item_is_left_alone_without_consent() {
+    let (_dir, root) = project();
+    act_as(&root, "frank");
+    let mine = create(&root, "mine");
+    let theirs = create_owned_by(&root, "theirs", "alice");
+    let theirs_before = document(&root, &theirs);
+
+    // Without consent this is not a cross-item write: the caller's document
+    // records the link and the partner is reported as left alone.
+    let added = json_ok(&root, &["link", "add", &mine, &theirs]);
+    assert_eq!(
+        added["data"]["partner_unsynchronised"],
+        serde_json::json!(true)
+    );
+    assert_eq!(document(&root, &theirs), theirs_before);
+
+    // Consent is the request to write the partner, and ownership refuses it.
+    let mine_before = document(&root, &mine);
+    let (status, envelope) = json_err(&root, &["link", "add", &mine, &theirs, "--cascade"]);
+    assert_eq!(status, 4);
+    assert_eq!(
+        envelope["error"]["code"],
+        serde_json::json!("OWNED_BY_OTHER")
+    );
+    assert_eq!(envelope["error"]["retryable"], serde_json::json!(false));
+    assert_eq!(
+        envelope["error"]["details"]["id"],
+        serde_json::json!(theirs)
+    );
+    assert_eq!(envelope["error"]["details"]["owner"], "alice");
+    let message = envelope["error"]["message"]
+        .as_str()
+        .expect("the error carries a message");
+    assert!(
+        message.contains("re-running will not change the outcome"),
+        "the refusal says retrying cannot help: {message}"
+    );
+    assert_eq!(
+        document(&root, &mine),
+        mine_before,
+        "the refusal wrote nothing"
+    );
+    assert_eq!(document(&root, &theirs), theirs_before);
+}
+
+#[test]
+fn link_remove_without_cascade_reports_the_partner_left_alone() {
+    let (_dir, root) = project();
+    act_as(&root, "frank");
+    let left = create(&root, "left");
+    let right = create(&root, "right");
+    json_ok(&root, &["link", "add", &left, &right, "--cascade"]);
+    let partner = document(&root, &right);
+
+    let removed = json_ok(&root, &["link", "remove", &left, &right]);
+
+    assert_eq!(removed["data"]["soft_links"], serde_json::json!([]));
+    assert_eq!(removed["data"]["other_item"], serde_json::Value::Null);
+    assert_eq!(
+        removed["data"]["fingerprints"].as_array().map(|f| f.len()),
+        Some(1),
+        "only the caller's document was replaced"
+    );
+    assert_eq!(
+        removed["data"]["other_untouched"]["id"],
+        serde_json::json!(right)
+    );
+    assert_eq!(removed["data"]["other_untouched"]["owner"], "frank");
+    assert_eq!(
+        removed["data"]["other_untouched"]["owned"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        document(&root, &right),
+        partner,
+        "the partner keeps its bytes and its updated_at"
+    );
+}
+
+#[test]
+fn link_remove_cascade_against_another_owners_item_is_owned_by_other() {
+    let (_dir, root) = project();
+    act_as(&root, "frank");
+    let mine = create(&root, "mine");
+    let theirs = create_owned_by(&root, "theirs", "alice");
+    // Record the link on both sides by hand: `link add` against a foreign
+    // partner is refused now, so the fixture is the state under test.
+    for (from, to) in [(&mine, &theirs), (&theirs, &mine)] {
+        let path = root.join("work").join("task").join(format!("{from}.md"));
+        let text = std::fs::read_to_string(&path).expect("the document is readable");
+        let fence = text.rfind("\n---").expect("a frontmatter fence");
+        let mut seeded = text[..fence].to_owned();
+        seeded.push_str(&format!("\nsoft_links:\n  - {to}"));
+        seeded.push_str(&text[fence..]);
+        std::fs::write(&path, seeded).expect("the document is writable");
+    }
+    let before = (document(&root, &mine), document(&root, &theirs));
+
+    let (status, envelope) = json_err(&root, &["link", "remove", &mine, &theirs, "--cascade"]);
+
+    assert_eq!(status, 4);
+    assert_eq!(
+        envelope["error"]["code"],
+        serde_json::json!("OWNED_BY_OTHER")
+    );
+    assert_eq!(
+        (document(&root, &mine), document(&root, &theirs)),
+        before,
+        "a refused removal writes neither document"
+    );
+
+    // Without consent the removal is mine to make and always succeeds.
+    let removed = json_ok(&root, &["link", "remove", &mine, &theirs]);
+    assert_eq!(removed["data"]["soft_links"], serde_json::json!([]));
+    assert_eq!(document(&root, &theirs), before.1);
+}
+
+#[test]
+fn a_repeated_link_add_without_cascade_changes_nothing() {
+    let (_dir, root) = project();
+    act_as(&root, "frank");
+    let left = create(&root, "left");
+    let right = create(&root, "right");
+
+    json_ok(&root, &["link", "add", &left, &right]);
+    let after_first = (document(&root, &left), document(&root, &right));
+
+    // The caller's half already exists and the partner was told nothing, so the
+    // answer is that state: no write, no new timestamp, no error.
+    let again = json_ok(&root, &["link", "add", &left, &right]);
+    assert_eq!(again["data"]["changed"], serde_json::json!(false));
+    assert_eq!(again["data"]["written"], serde_json::json!(false));
+    assert_eq!(
+        again["data"]["partner_unsynchronised"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        (document(&root, &left), document(&root, &right)),
+        after_first
+    );
+}
+
+#[test]
+fn a_cross_item_write_with_no_operator_names_the_identity_source() {
     let (_dir, root) = project();
     let left = create(&root, "left");
     let right = create(&root, "right");
 
-    let added = json_ok(&root, &["link", "add", &left, &right]);
-    assert_eq!(added["data"]["other"], serde_json::json!(right));
+    let (status, envelope) = json_err(&root, &["link", "add", &left, &right, "--cascade"]);
+
+    assert_eq!(status, 3, "a missing identity is a configuration failure");
+    assert_eq!(
+        envelope["error"]["code"],
+        serde_json::json!("CONFIG_INVALID")
+    );
+    let message = envelope["error"]["message"]
+        .as_str()
+        .expect("the error carries a message");
+    assert!(
+        message.contains("no operator identity is configured"),
+        "the refusal names what is missing: {message}"
+    );
+    assert!(
+        message.contains("user.toml"),
+        "the refusal names the document that supplies it: {message}"
+    );
+    assert_eq!(envelope["error"]["location"]["key"], "user.toml");
+}
+
+#[test]
+fn the_human_output_says_the_partner_did_not_change() {
+    let (_dir, root) = project();
+    act_as(&root, "frank");
+    let left = create(&root, "left");
+    let right = create(&root, "right");
+
+    let result = run(waymark()
+        .arg("--project")
+        .arg(&root)
+        .arg("link")
+        .arg("add")
+        .arg(&left)
+        .arg(&right));
+
+    assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
+    let stderr = result.stderr();
+    assert!(
+        stderr.contains(&format!("{left} linked to {right}")),
+        "the caller's result is reported: {stderr}"
+    );
+    assert!(
+        stderr.contains(&format!(
+            "{right} left alone and still lists the link (frank)"
+        )),
+        "the partner is named as untouched, with its owner: {stderr}"
+    );
+    assert!(
+        stderr.contains("--cascade"),
+        "the message names the option that would record both sides: {stderr}"
+    );
+
+    // A consented write against somebody else's item is the refusal, and the
+    // human output leads with it.
+    let theirs = create_owned_by(&root, "theirs", "alice");
+    let refused = run(waymark()
+        .arg("--project")
+        .arg(&root)
+        .arg("link")
+        .arg("add")
+        .arg(&left)
+        .arg(&theirs)
+        .arg("--cascade"));
+    assert_eq!(refused.status(), 4, "stderr: {}", refused.stderr());
+    let message = refused.stderr();
+    assert!(
+        message.starts_with("error: "),
+        "human output leads with the failure: {message}"
+    );
+    assert!(
+        message.contains("re-running will not change the outcome"),
+        "the refusal says retrying cannot help: {message}"
+    );
+}
+
+#[test]
+fn link_remove_reports_an_absent_link_the_same_with_or_without_consent() {
+    let (_dir, root) = project();
+    let left = create(&root, "left");
+    let right = create(&root, "right");
+
+    let (plain, error) = json_err(&root, &["link", "remove", &left, &right]);
+    assert_eq!(error["error"]["code"], "INVALID_RELATIONSHIP");
+    let (cascaded, consenting) = json_err(&root, &["link", "remove", &left, &right, "--cascade"]);
+    assert_eq!(consenting["error"]["code"], "INVALID_RELATIONSHIP");
+    assert_eq!(plain, cascaded, "consent does not change the refusal");
+}
+
+#[test]
+fn link_accepts_cascade_on_both_subcommands_and_writes_both_sides() {
+    let (_dir, root) = project();
+    act_as(&root, "frank");
+    let left = create(&root, "left");
+    let right = create(&root, "right");
+
+    let added = json_ok(&root, &["link", "add", &left, &right, "--cascade"]);
     assert_eq!(
         added["data"]["item"]["soft_links"],
         serde_json::json!([right])
@@ -189,13 +492,8 @@ fn link_add_and_remove_touch_both_documents() {
         added["data"]["other_item"]["soft_links"],
         serde_json::json!([left])
     );
-    assert_eq!(
-        added["data"]["fingerprints"].as_array().map(|f| f.len()),
-        Some(2),
-        "both documents were replaced"
-    );
 
-    let removed = json_ok(&root, &["link", "remove", &left, &right]);
+    let removed = json_ok(&root, &["link", "remove", &left, &right, "--cascade"]);
     assert_eq!(removed["data"]["soft_links"], serde_json::json!([]));
     assert_eq!(
         removed["data"]["other_item"]["soft_links"],
@@ -204,13 +502,31 @@ fn link_add_and_remove_touch_both_documents() {
 }
 
 #[test]
-fn a_duplicate_link_is_an_invalid_relationship() {
+fn cascade_is_accepted_on_a_link_dry_run() {
     let (_dir, root) = project();
+    act_as(&root, "frank");
     let left = create(&root, "left");
     let right = create(&root, "right");
-    json_ok(&root, &["link", "add", &left, &right]);
 
-    let (status, envelope) = json_err(&root, &["link", "add", &left, &right]);
+    let preview = json_ok(
+        &root,
+        &["link", "add", &left, &right, "--cascade", "--dry-run"],
+    );
+
+    assert_eq!(preview["data"]["written"], serde_json::json!(false));
+    let shown = json_ok(&root, &["show", &left]);
+    assert_eq!(shown["data"]["item"]["soft_links"], serde_json::json!([]));
+}
+
+#[test]
+fn a_duplicate_link_is_an_invalid_relationship() {
+    let (_dir, root) = project();
+    act_as(&root, "frank");
+    let left = create(&root, "left");
+    let right = create(&root, "right");
+    json_ok(&root, &["link", "add", &left, &right, "--cascade"]);
+
+    let (status, envelope) = json_err(&root, &["link", "add", &left, &right, "--cascade"]);
 
     assert_eq!(
         envelope["error"]["code"],

@@ -25,7 +25,7 @@ The declared identity that created a work item, retained as provenance when owne
 _Avoid_: Owner, operator.
 
 **Operator**:
-The human identity a local project configuration declares as the one currently running Waymark-mediated operations. It is advisory only: it identifies the caller for reminders and warnings, never authorizes or blocks a write, and is neither authenticated identity nor a work item field.
+The human identity a local project configuration declares as the one currently running Waymark-mediated operations. It identifies the caller for warnings, and a cross-item write additionally compares it with the other work item's owner. It is not authenticated identity, not a work item field, and does not grant any authority over a single work-item write.
 _Avoid_: Authenticated user, actor (unless explicitly qualified as declared operator), owner.
 
 **Parent**:
@@ -56,9 +56,21 @@ _Avoid_: Persisted field (when describing the computed result).
 A derived condition indicating an open or in-progress work item has no unfinished or dangling hard dependencies.
 _Avoid_: Status (when referring to this derived condition).
 
+**Closed parent**:
+A derived observation that an active work item's direct parent is in the closed state. It is a read signal, not a lifecycle state of the item itself, and it changes nothing.
+_Avoid_: Unblocked, stale, cascade.
+
 **Soft link**:
-A non-blocking association between work items that does not affect readiness or lifecycle.
+A non-blocking association between work items that does not affect readiness or lifecycle. It is stored on both work items that it relates, so it can exist on one side only while the other side has not been updated.
 _Avoid_: Dependency.
+
+**Cross-item write**:
+A waymark-mediated write that changes a work item other than the one the command addresses, such as rewriting a soft-link partner or removing inbound references during archive. It requires explicit consent and an owner equal to the operator; a write that changes only its own target is not a cross-item write.
+_Avoid_: Cascade (as a general verb for any change that touches several files).
+
+**Consent**:
+The explicit per-operation agreement a caller gives for a cross-item write, carried by the `cascade` option. It permits writing the caller's own other work items and never another owner's.
+_Avoid_: Permission, authorization (those imply an authenticated privilege Waymark does not have).
 
 **Custom field**:
 A project-declared, uniquely named field for work-item data outside Waymark's stable core semantics. Its configured type defines only a generic value shape; it has no field-specific validation, relationship, authorization, or workflow behavior. It is optional unless the project schema explicitly requires it.

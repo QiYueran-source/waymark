@@ -1,14 +1,15 @@
 //! `waymark archive`: retire one item without deleting it.
 //!
-//! The rules — the marker, the child refusal, the inbound cleanup batch, the
-//! archived-write rejection — all live in `waymark_core::ops::archive`. This
-//! module parses the two flags and renders the result, including every planned
-//! relationship removal on a dry run.
+//! The rules — the marker, the child refusal, the consent-gated inbound cleanup
+//! batch, the archived-write rejection — all live in
+//! `waymark_core::ops::archive`. This module parses the flags and renders the
+//! result, including every planned relationship removal and every document the
+//! archive left untouched, on a dry run as well as a real one.
 
 use clap::Args;
 use waymark_core::envelope::success_envelope;
 use waymark_core::error::WaymarkError;
-use waymark_core::ops::archive::{self, ArchiveOutcome, PlannedRemoval};
+use waymark_core::ops::archive;
 use waymark_core::ops::OpOptions;
 use waymark_core::Project;
 
@@ -28,6 +29,11 @@ pub struct ArchiveArgs {
     /// Report the plan, including every relationship removal, without writing.
     #[arg(long)]
     pub dry_run: bool,
+
+    /// Consent to a cross-item write: also clean up inbound references from
+    /// other items you own.
+    #[arg(long)]
+    pub cascade: bool,
 }
 
 /// Run `waymark archive`.
@@ -37,15 +43,14 @@ pub fn run(
     options: &OpOptions,
     json: bool,
 ) -> Result<(), WaymarkError> {
-    let options = if args.dry_run {
-        options.clone().dry_run()
-    } else {
-        options.clone()
-    };
+    let options = options.clone().flags(args.cascade, args.dry_run);
     let outcome = archive::archive(project, &args.id, args.reason.as_deref(), &options)?;
 
     if json {
-        emit(&success_envelope(payload(&outcome), outcome.meta.clone()))?;
+        emit(&success_envelope(
+            waymark_core::view::archive_result_json(&outcome),
+            outcome.meta.clone(),
+        ))?;
         return Ok(());
     }
 
@@ -71,38 +76,29 @@ pub fn run(
     if outcome.removals.is_empty() {
         err_line("  no inbound relationships to remove");
     }
+    if let Some(summary) =
+        waymark_core::view::archive_leftovers_summary(&outcome.item.id, outcome.untouched.len())
+    {
+        err_line(&format!("  {summary}"));
+        for item in &outcome.untouched {
+            err_line(&format!(
+                "  {}  left for its owner ({})",
+                item.id,
+                relations_phrase(&outcome.untouched_relations_for(&item.id))
+            ));
+        }
+    }
     for warning in &outcome.meta.warnings {
         err_line(&format!("  {}: {}", warning.code, warning.message));
     }
     Ok(())
 }
 
-/// The `data` block of an archive result.
-fn payload(outcome: &ArchiveOutcome) -> serde_json::Value {
-    serde_json::json!({
-        "id": outcome.item.id.as_str(),
-        "path": outcome.path.to_string(),
-        "archived_at": outcome.archived_at.to_string(),
-        "archive_reason": outcome.archive_reason,
-        "status": outcome.item.status.as_str(),
-        "closed_at": outcome.item.closed_at.map(|value| value.to_string()),
-        "written": outcome.written,
-        "removals": outcome.removals.iter().map(removal_json).collect::<Vec<_>>(),
-        "affected": outcome
-            .affected
-            .iter()
-            .map(|item| serde_json::json!({
-                "id": item.id.as_str(),
-                "path": item.path.to_string(),
-            }))
-            .collect::<Vec<_>>(),
-        "item": waymark_core::view::item_fields(&outcome.item),
-    })
-}
-
-fn removal_json(removal: &PlannedRemoval) -> serde_json::Value {
-    serde_json::json!({
-        "from": removal.from.as_str(),
-        "relation": removal.relation.as_str(),
-    })
+/// The relation names of one leftover document, joined for a terminal line.
+fn relations_phrase(relations: &[archive::InboundRelation]) -> String {
+    relations
+        .iter()
+        .map(|relation| relation.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
 }

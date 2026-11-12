@@ -23,6 +23,7 @@ use std::collections::BTreeSet;
 
 use serde_json::{json, Value};
 use waymark_core::error::{Code, ExitClass, Severity};
+use waymark_core::location::LocationKind;
 
 const GOLDEN: &str = include_str!("golden/error_registry.json");
 
@@ -43,6 +44,8 @@ const FINDING_ONLY: &[Code] = &[
     Code::NotAGitRepository,
     Code::DanglingReference,
     Code::TimestampIncoherent,
+    Code::ClosedParent,
+    Code::OneSidedSoftLink,
     Code::AssetsVersionMismatch,
     Code::TimeZoneUndetected,
 ];
@@ -211,9 +214,35 @@ fn the_distribution_codes_are_registered_and_classified() {
     );
     assert_eq!(
         Code::ALL.len(),
-        42,
-        "the registry grew by exactly four codes"
+        46,
+        "the registry grows one code at a time, reviewed one at a time"
     );
+}
+
+#[test]
+fn the_two_cross_item_refusals_are_class_four_and_terminal() {
+    // A missing consent and a foreign owner are the same registry class and the
+    // same retryability — neither proceeds as issued — and different codes,
+    // because one is fixed by consent and the other only by the owner.
+    let consent = Code::from_str("CASCADE_CONSENT_REQUIRED").expect("registered");
+    assert_eq!(consent.exit_class(), Some(ExitClass::Conflict));
+    assert!(!consent.retryable());
+    assert_eq!(consent.finding(), None);
+    assert_eq!(
+        consent.details_keys(),
+        ["operation", "id", "other", "option"]
+    );
+    assert_eq!(
+        consent.location_kinds(),
+        [LocationKind::WorkItem, LocationKind::Relationship]
+    );
+
+    let owner = Code::from_str("OWNED_BY_OTHER").expect("registered");
+    assert_eq!(owner.exit_class(), Some(ExitClass::Conflict));
+    assert!(!owner.retryable());
+    assert_eq!(owner.finding(), None);
+    assert_eq!(owner.details_keys(), ["id", "owner", "operation"]);
+    assert_eq!(owner.location_kinds(), [LocationKind::WorkItem]);
 }
 
 #[test]
@@ -305,6 +334,8 @@ fn the_finding_only_codes_keep_their_pinned_severity() {
         (Code::NotAGitRepository, Severity::Info),
         (Code::DanglingReference, Severity::Error),
         (Code::TimestampIncoherent, Severity::Warning),
+        (Code::ClosedParent, Severity::Info),
+        (Code::OneSidedSoftLink, Severity::Warning),
         (Code::AssetsVersionMismatch, Severity::Error),
     ];
     for (code, severity) in expected {

@@ -1,18 +1,20 @@
 //! `waymark link add|remove`: symmetric soft links.
 //!
-//! A soft link is stored on both ends and both documents are replaced as one
-//! all-or-nothing batch; that rule lives in `waymark_core::ops::link`, and this
-//! module only parses the two IDs and renders the result.
+//! A soft link is stored on both ends, but only a consented change writes the
+//! other end: without it the pair is left one-sided and this module says so in
+//! both output modes, naming the partner it left alone and its owner. Those
+//! rules live in `waymark_core::ops::link`, the JSON block in
+//! `waymark_core::view::link_result_json`; this module only parses the IDs and
+//! flags and prints the result.
 
 use clap::{Args, Subcommand};
 use waymark_core::envelope::success_envelope;
 use waymark_core::error::WaymarkError;
-use waymark_core::ops::link::{self, LinkOutcome};
+use waymark_core::ops::link;
 use waymark_core::ops::OpOptions;
 use waymark_core::Project;
 
 use super::{emit, err_line};
-use waymark_core::view::item_json;
 
 /// Arguments of `waymark link`.
 #[derive(Debug, Args)]
@@ -22,17 +24,22 @@ pub struct LinkArgs {
 }
 
 /// The link family.
+///
+/// `add` and `remove` take their own argument sets instead of sharing one
+/// struct, because the two verbs carry different consent flags: `add` without
+/// `--cascade` records the caller's side only, while `remove` without it
+/// removes the caller's side only.
 #[derive(Debug, Subcommand)]
 pub enum LinkCommand {
     /// Associate two items with each other.
-    Add(LinkPair),
+    Add(LinkAddArgs),
     /// Drop the association.
-    Remove(LinkPair),
+    Remove(LinkRemoveArgs),
 }
 
-/// The two IDs a link is made of.
+/// Arguments of `waymark link add`.
 #[derive(Debug, Args)]
-pub struct LinkPair {
+pub struct LinkAddArgs {
     /// Stable ID of one end.
     #[arg(value_name = "ID")]
     pub id: String,
@@ -40,6 +47,32 @@ pub struct LinkPair {
     /// Stable ID of the other end.
     #[arg(value_name = "OTHER_ID")]
     pub other: String,
+
+    /// Consent to a cross-item write: also record the link on the other end
+    /// when you own it.
+    #[arg(long)]
+    pub cascade: bool,
+
+    /// Report the change without writing.
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+/// Arguments of `waymark link remove`.
+#[derive(Debug, Args)]
+pub struct LinkRemoveArgs {
+    /// Stable ID of one end.
+    #[arg(value_name = "ID")]
+    pub id: String,
+
+    /// Stable ID of the other end.
+    #[arg(value_name = "OTHER_ID")]
+    pub other: String,
+
+    /// Consent to a cross-item write: also drop the link from the other end
+    /// when you own it.
+    #[arg(long)]
+    pub cascade: bool,
 
     /// Report the change without writing.
     #[arg(long)]
@@ -61,31 +94,69 @@ pub fn run(
     json: bool,
 ) -> Result<(), WaymarkError> {
     match args.command {
-        LinkCommand::Add(pair) => apply(project, &pair, options, json, Verb::Add),
-        LinkCommand::Remove(pair) => apply(project, &pair, options, json, Verb::Remove),
+        LinkCommand::Add(args) => apply(project, &args, args.cascade, options, json, Verb::Add),
+        LinkCommand::Remove(args) => {
+            apply(project, &args, args.cascade, options, json, Verb::Remove)
+        }
+    }
+}
+
+/// The two ends and the two flags either verb accepts.
+trait LinkArguments {
+    fn id(&self) -> &str;
+    fn other(&self) -> &str;
+    fn dry_run(&self) -> bool;
+}
+
+impl LinkArguments for LinkAddArgs {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn other(&self) -> &str {
+        &self.other
+    }
+
+    fn dry_run(&self) -> bool {
+        self.dry_run
+    }
+}
+
+impl LinkArguments for LinkRemoveArgs {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn other(&self) -> &str {
+        &self.other
+    }
+
+    fn dry_run(&self) -> bool {
+        self.dry_run
     }
 }
 
 fn apply(
     project: &Project,
-    pair: &LinkPair,
+    pair: &impl LinkArguments,
+    cascade: bool,
     options: &OpOptions,
     json: bool,
     verb: Verb,
 ) -> Result<(), WaymarkError> {
-    let options = if pair.dry_run {
-        options.clone().dry_run()
-    } else {
-        options.clone()
-    };
+    let options = options.clone().flags(cascade, pair.dry_run());
     let outcome = match verb {
-        Verb::Add => link::add_soft_link(project, &pair.id, &pair.other, &options)?,
-        Verb::Remove => link::remove_soft_link(project, &pair.id, &pair.other, &options)?,
+        Verb::Add => link::add_soft_link(project, pair.id(), pair.other(), &options)?,
+        Verb::Remove => link::remove_soft_link(project, pair.id(), pair.other(), &options)?,
     };
 
     if json {
+        let verb = match verb {
+            Verb::Add => "add",
+            Verb::Remove => "remove",
+        };
         emit(&success_envelope(
-            payload(&outcome, verb),
+            waymark_core::view::link_result_json(&outcome, verb),
             outcome.meta.clone(),
         ))?;
         return Ok(());
@@ -100,7 +171,37 @@ fn apply(
         "{prefix}{} {relation} {}",
         outcome.item.id, outcome.other_id
     ));
-    if outcome.other.is_none() {
+    if let Some(untouched) = &outcome.other_untouched {
+        // A change without consent: the partner keeps its document, its bytes,
+        // and the link list it already had. The owner is printed because the
+        // next question is whose file still needs the other half.
+        err_line(&format!(
+            "  {} {owned} {unchanged} ({owner})",
+            untouched.id,
+            owned = if untouched.owned {
+                "left alone"
+            } else {
+                "left for its owner"
+            },
+            unchanged = if options.dry_run {
+                "and keeps the link it lists"
+            } else {
+                "and still lists the link"
+            },
+            owner = untouched.owner
+        ));
+        if outcome.partner_unsynchronised {
+            // The caller's document now records a link the partner does not.
+            err_line("  the link is recorded on one side only; re-run with --cascade to record it there too");
+        }
+    } else if outcome.partner_unsynchronised {
+        err_line(&format!(
+            "  {} was not changed: the link is recorded on one side only; re-run with --cascade to record it there too",
+            outcome.other_id
+        ));
+    } else if outcome.other.is_none() {
+        // Only a partnered change reaches here: the other document is missing
+        // or archived, so the caller's side is all there was to write.
         err_line(&format!(
             "  {} had no document; only {} was updated",
             outcome.other_id, outcome.item.id
@@ -110,25 +211,4 @@ fn apply(
         err_line(&format!("  {}: {}", warning.code, warning.message));
     }
     Ok(())
-}
-
-/// The `data` block of a link result.
-fn payload(outcome: &LinkOutcome, verb: Verb) -> serde_json::Value {
-    super::write_json(
-        &outcome.item,
-        &outcome.path,
-        outcome.changed,
-        outcome.written,
-        serde_json::json!({
-            "other": outcome.other_id.as_str(),
-            "other_path": outcome.other_path.as_ref().map(|path| path.to_string()),
-            "verb": match verb {
-                Verb::Add => "add",
-                Verb::Remove => "remove",
-            },
-            "soft_links": outcome.item.soft_links.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-            "fingerprints": outcome.fingerprints.iter().map(|f| f.as_str()).collect::<Vec<_>>(),
-            "other_item": outcome.other.as_ref().zip(outcome.other_path.as_ref()).map(|(item, path)| item_json(item, path)),
-        }),
-    )
 }

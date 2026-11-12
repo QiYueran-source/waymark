@@ -41,6 +41,10 @@ use crate::envelope::{Completeness, Freshness};
 use crate::id::{IdError, WorkItemId};
 use crate::location::{Location, LocationKind};
 
+/// The relation a cross-item write carries in its location: the caller's item
+/// as `from`, the document it would also write as `to`.
+const MEDIATED_BY: &str = "mediated_by";
+
 /// A registered error code.
 ///
 /// The literal is the `SCREAMING_SNAKE` string on the wire; the enum variant
@@ -133,6 +137,15 @@ pub enum Code {
     AssetsVersionMismatch,
     /// The machine-local time zone could not be determined.
     TimeZoneUndetected,
+    /// An active item's direct parent is in the closed lifecycle state.
+    ClosedParent,
+    /// A soft link is recorded on one side but not the other.
+    OneSidedSoftLink,
+    /// A cross-item write was asked for without the `cascade` consent option.
+    CascadeConsentRequired,
+    /// The second document a cross-item write would rewrite belongs to another
+    /// owner.
+    OwnedByOther,
 }
 
 /// The process exit class of a failure.
@@ -305,6 +318,10 @@ impl Code {
         Code::TimestampIncoherent,
         Code::AssetsVersionMismatch,
         Code::TimeZoneUndetected,
+        Code::ClosedParent,
+        Code::OneSidedSoftLink,
+        Code::CascadeConsentRequired,
+        Code::OwnedByOther,
     ];
 
     /// The registry row for this code.
@@ -552,6 +569,34 @@ impl Code {
                 &[],
             ),
             Self::TimeZoneUndetected => spec(None, false, Some(Severity::Info), &[], &[]),
+            Self::ClosedParent => spec(
+                None,
+                false,
+                Some(Severity::Info),
+                &["id", "parent"],
+                &[WorkItem],
+            ),
+            Self::OneSidedSoftLink => spec(
+                None,
+                false,
+                Some(Severity::Warning),
+                &["from", "to", "missing"],
+                &[WorkItem, Relationship],
+            ),
+            Self::CascadeConsentRequired => spec(
+                Some(ExitClass::Conflict),
+                false,
+                None,
+                &["operation", "id", "other", "option"],
+                &[WorkItem, Relationship],
+            ),
+            Self::OwnedByOther => spec(
+                Some(ExitClass::Conflict),
+                false,
+                None,
+                &["id", "owner", "operation"],
+                &[WorkItem],
+            ),
         }
     }
 
@@ -600,6 +645,10 @@ impl Code {
             Self::TimestampIncoherent => "TIMESTAMP_INCOHERENT",
             Self::AssetsVersionMismatch => "ASSETS_VERSION_MISMATCH",
             Self::TimeZoneUndetected => "TIME_ZONE_UNDETECTED",
+            Self::ClosedParent => "CLOSED_PARENT",
+            Self::OneSidedSoftLink => "ONE_SIDED_SOFT_LINK",
+            Self::CascadeConsentRequired => "CASCADE_CONSENT_REQUIRED",
+            Self::OwnedByOther => "OWNED_BY_OTHER",
         }
     }
 
@@ -657,6 +706,10 @@ impl Code {
             "TIMESTAMP_INCOHERENT" => Ok(Self::TimestampIncoherent),
             "ASSETS_VERSION_MISMATCH" => Ok(Self::AssetsVersionMismatch),
             "TIME_ZONE_UNDETECTED" => Ok(Self::TimeZoneUndetected),
+            "CLOSED_PARENT" => Ok(Self::ClosedParent),
+            "ONE_SIDED_SOFT_LINK" => Ok(Self::OneSidedSoftLink),
+            "CASCADE_CONSENT_REQUIRED" => Ok(Self::CascadeConsentRequired),
+            "OWNED_BY_OTHER" => Ok(Self::OwnedByOther),
             other => Err(UnknownCode(other.to_owned())),
         }
     }
@@ -1077,6 +1130,92 @@ impl WaymarkError {
         .with_location(Location::work_item(id))
     }
 
+    /// A cross-item write was asked for without the consent option.
+    ///
+    /// Deliberately kept registered although no operation produces it: every
+    /// cross-item operation leaves a document it may not write alone and reports
+    /// it, and the one refusal that survives (`OWNED_BY_OTHER`) is about the
+    /// owner, not about missing consent. Retiring and later reinstating a code
+    /// costs a golden snapshot, a schema change and a documentation sweep, so the
+    /// recovery unit stays available for the next operation that needs it. Do not
+    /// delete it as dead code.
+    ///
+    /// `consent_hint` names the option to re-run with, so the caller can correct
+    /// its own request without guessing. Class 4: the request cannot proceed as
+    /// issued, and the same request with the same flags will fail again.
+    pub fn cascade_consent_required(
+        operation: impl Into<String>,
+        id: &WorkItemId,
+        other: &WorkItemId,
+        consent_hint: impl Into<String>,
+    ) -> Self {
+        let operation = operation.into();
+        let consent_hint = consent_hint.into();
+        Self::new(
+            Code::CascadeConsentRequired,
+            format!("{operation} would write {other} too: {consent_hint}"),
+        )
+        .with_details(json!({
+            "operation": operation,
+            "id": id.as_str(),
+            "other": other.as_str(),
+            "option": "cascade",
+        }))
+        .with_location(Location::relationship(id, MEDIATED_BY, other))
+    }
+
+    /// The second document of a cross-item write belongs to another owner.
+    ///
+    /// The message says outright that re-running cannot help: consent is not
+    /// what is missing, the owner is. `operation` is carried both in the message
+    /// and in the details, so an adapter can say which command was refused.
+    pub fn owned_by_other(id: &WorkItemId, owner: impl Into<String>, operation: &str) -> Self {
+        let owner = owner.into();
+        Self::new(
+            Code::OwnedByOther,
+            format!(
+                "{id} is owned by {owner}, not by the operator, so {operation} cannot rewrite it; \
+                 re-running will not change the outcome — ask the owner to make the change, or \
+                 transfer ownership first"
+            ),
+        )
+        .with_details(json!({
+            "id": id.as_str(),
+            "owner": owner,
+            "operation": operation,
+        }))
+        .with_location(Location::work_item(id))
+    }
+
+    /// A cross-item write needs an owner decision but no operator resolves.
+    ///
+    /// A configuration failure (`CONFIG_INVALID`) at the local document, which
+    /// is the identity source that has to supply the operator. It is never
+    /// downgraded to a warning: a cross-item write that cannot show who is
+    /// entitled to it does not pass silently.
+    pub fn missing_operator_source(
+        operation: &str,
+        other: &WorkItemId,
+        source: impl Into<String>,
+    ) -> Self {
+        let source = source.into();
+        let mut error = Self::config_invalid(
+            source.as_str(),
+            vec![format!(
+                "operator: {operation} needs the operator identity to decide whether {other} may \
+                 be rewritten, and no operator is configured (no operation override, no user \
+                 document, no Git user.name)"
+            )],
+        );
+        let message = format!(
+            "{operation} cannot decide whether it may rewrite {other}: no operator identity is \
+             configured; set one (for example `waymark config set operator <name>`), which writes \
+             {source}"
+        );
+        error.message = message;
+        error.with_location(Location::config_key(crate::user_config::USER_CONFIG_FILE))
+    }
+
     // -- filesystem, Git, environment (class 5) ---------------------------
 
     /// No project was found while walking up from `searched`.
@@ -1408,6 +1547,42 @@ impl WaymarkError {
             "reason": reason,
         }))
         .with_location(Location::work_item(id))
+    }
+
+    /// An active item's direct parent is closed.
+    ///
+    /// An observation, not a fault: the item is still valid and still ready,
+    /// so the code carries no exit class and no suggested command.
+    pub fn closed_parent(id: &WorkItemId, parent: &WorkItemId) -> Self {
+        Self::new(
+            Code::ClosedParent,
+            format!("{id} has the closed parent {parent}"),
+        )
+        .with_details(json!({
+            "id": id.as_str(),
+            "parent": parent.as_str(),
+        }))
+        .with_location(Location::work_item(id))
+    }
+
+    /// A soft link is recorded on one side but not the other.
+    ///
+    /// `from` is the document that records the link and `to` is the partner
+    /// that does not. The message states the fact and names the side that would
+    /// have to record it; it never spells out a command to run, because the
+    /// document that needs the link belongs to somebody who may not have
+    /// consented to it being written.
+    pub fn one_sided_soft_link(from: &WorkItemId, to: &WorkItemId) -> Self {
+        Self::new(
+            Code::OneSidedSoftLink,
+            format!("{from} soft_links {to}, but {to} does not record the link back"),
+        )
+        .with_details(json!({
+            "from": from.as_str(),
+            "to": to.as_str(),
+            "missing": to.as_str(),
+        }))
+        .with_location(Location::work_item(from))
     }
 
     /// The embedded frontend manifest disagrees with this build.

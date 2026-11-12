@@ -134,6 +134,16 @@ fn create_accepts_the_complete_initial_state() {
     let (_dir, root) = project();
     let parent = create_one(&root);
     let linked = create_one(&root);
+    // Both fixtures belong to frank; with `--cascade` he is the operator that
+    // may rewrite the partner.
+    let set = run(waymark()
+        .arg("--project")
+        .arg(&root)
+        .arg("config")
+        .arg("set")
+        .arg("operator")
+        .arg("frank"));
+    assert_eq!(set.status(), 0, "stderr: {}", set.stderr());
 
     let result = create(
         &root,
@@ -153,6 +163,7 @@ fn create_accepts_the_complete_initial_state() {
             &parent,
             "--link",
             &linked,
+            "--cascade",
         ],
     );
     assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
@@ -254,4 +265,260 @@ fn create_dry_run_performs_every_check_and_writes_nothing() {
         "custom_fields.points"
     );
     assert_eq!(snapshot(&root), before);
+}
+
+#[test]
+fn create_link_without_cascade_leaves_the_partner_byte_identical_and_names_it() {
+    let (_dir, root) = project();
+    let linked = create_one(&root);
+    let partner_path = root.join("work").join("task").join(format!("{linked}.md"));
+    let before = std::fs::read(&partner_path).expect("the partner document reads");
+
+    let result = create(&root, "linked", &["--link", &linked]);
+    assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
+    let envelope = result.json();
+    let id = envelope["data"]["id"].as_str().expect("the new id");
+
+    assert_eq!(envelope["data"]["written"], true);
+    assert_eq!(envelope["data"]["partners"], serde_json::json!([]));
+    assert_eq!(
+        envelope["data"]["untouched"],
+        serde_json::json!([{ "id": linked, "path": partner_path.to_string() }])
+    );
+    assert_eq!(
+        std::fs::read(&partner_path).expect("the partner document reads"),
+        before,
+        "the partner is never silently edited"
+    );
+    let new_document = std::fs::read_to_string(root.join(format!("work/task/{id}.md")))
+        .expect("the new document reads");
+    assert!(
+        new_document.contains(&format!("  - {linked}")),
+        "{new_document}"
+    );
+}
+
+#[test]
+fn create_link_with_cascade_rewrites_a_partner_the_operator_owns_and_reports_it() {
+    let (_dir, root) = project();
+    let linked = create_one(&root);
+    let partner_path = root.join("work").join("task").join(format!("{linked}.md"));
+
+    // The partner is frank's; the operator is recorded the way a person records
+    // one, so Git's `user.name` cannot decide the answer.
+    let set = run(waymark()
+        .arg("--project")
+        .arg(&root)
+        .arg("config")
+        .arg("set")
+        .arg("operator")
+        .arg("frank"));
+    assert_eq!(set.status(), 0, "stderr: {}", set.stderr());
+
+    let result = create(&root, "linked", &["--link", &linked, "--cascade"]);
+    assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
+    let envelope = result.json();
+    let id = envelope["data"]["id"].as_str().expect("the new id");
+
+    assert_eq!(
+        envelope["data"]["partners"][0]["id"],
+        serde_json::json!(linked)
+    );
+    assert_eq!(
+        envelope["data"]["partners"][0]["path"],
+        partner_path.to_string()
+    );
+    assert_eq!(envelope["data"]["untouched"], serde_json::json!([]));
+    let partner_document = std::fs::read_to_string(&partner_path).expect("the partner reads");
+    assert!(
+        partner_document.contains(&format!("  - {id}")),
+        "the partner records the link when it was rewritten: {partner_document}"
+    );
+}
+
+#[test]
+fn create_link_with_cascade_leaves_a_partner_owned_by_someone_else_alone() {
+    let (_dir, root) = project();
+    let linked = create_one(&root);
+    let partner_path = root.join(format!("work/task/{linked}.md"));
+    let before = std::fs::read(&partner_path).expect("the partner document reads");
+    // Recorded after the partner exists, so the fixture stays the operator's.
+    let set = run(waymark()
+        .arg("--project")
+        .arg(&root)
+        .arg("config")
+        .arg("set")
+        .arg("operator")
+        .arg("alice"));
+    assert_eq!(set.status(), 0, "stderr: {}", set.stderr());
+
+    let result = create(&root, "linked", &["--link", &linked, "--cascade"]);
+    assert_eq!(
+        result.status(),
+        0,
+        "a foreign partner is named, not refused: {}",
+        result.stderr()
+    );
+    let envelope = result.json();
+    assert_eq!(envelope["data"]["partners"], serde_json::json!([]));
+    assert_eq!(
+        envelope["data"]["untouched"][0]["id"],
+        serde_json::json!(linked)
+    );
+    assert_eq!(
+        std::fs::read(&partner_path).expect("the partner document reads"),
+        before,
+        "consent never reaches another owner's document"
+    );
+}
+
+#[test]
+fn create_link_dry_run_reports_the_same_partners_as_the_write() {
+    let (_dir, root) = project();
+    let linked = create_one(&root);
+    let before = snapshot(&root);
+
+    let preview = create(&root, "linked", &["--link", &linked, "--dry-run"]);
+    assert_eq!(preview.status(), 0, "stderr: {}", preview.stderr());
+    let envelope = preview.json();
+    assert_eq!(envelope["data"]["written"], false);
+    assert_eq!(envelope["data"]["partners"], serde_json::json!([]));
+    assert_eq!(
+        envelope["data"]["untouched"][0]["id"],
+        serde_json::json!(linked)
+    );
+    assert_eq!(snapshot(&root), before, "a dry run writes nothing");
+}
+
+#[test]
+fn the_human_output_names_the_partner_it_left_alone() {
+    let (_dir, root) = project();
+    let linked = create_one(&root);
+    let partner_path = root.join(format!("work/task/{linked}.md"));
+    let before = std::fs::read(&partner_path).expect("the partner document reads");
+
+    let result = run(waymark()
+        .arg("--project")
+        .arg(&root)
+        .arg("create")
+        .arg("--title")
+        .arg("linked")
+        .arg("--category")
+        .arg("task")
+        .arg("--owner")
+        .arg("frank")
+        .arg("--link")
+        .arg(&linked));
+    assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
+
+    let stderr = result.stderr();
+    let line = format!("{linked} left alone (it did not record the link)");
+    assert!(
+        stderr.contains("created wm-"),
+        "the new item leads the report: {stderr}"
+    );
+    assert!(
+        stderr.contains(&line),
+        "the partner is named as untouched: {stderr}"
+    );
+    assert!(
+        !stderr.contains("updated "),
+        "nothing but the new document was written: {stderr}"
+    );
+    assert_eq!(
+        std::fs::read(&partner_path).expect("the partner document reads"),
+        before,
+        "the sentence describes the bytes that did not move"
+    );
+}
+
+#[test]
+fn a_create_with_a_link_and_no_operator_is_refused_and_writes_nothing() {
+    let (_dir, root) = project();
+    let linked = create_one(&root);
+    let before = snapshot(&root);
+
+    // No local document and no Git identity in an isolated checkout: nobody can
+    // be shown entitled to rewrite the partner, so the create fails the way
+    // `link add --cascade` fails rather than silently leaving the partner.
+    let result = run(waymark()
+        .arg("--json")
+        .arg("create")
+        .arg("--project")
+        .arg(&root)
+        .arg("--title")
+        .arg("linked")
+        .arg("--category")
+        .arg("task")
+        .arg("--owner")
+        .arg("frank")
+        .arg("--link")
+        .arg(&linked)
+        .arg("--cascade"));
+    assert_eq!(
+        result.status(),
+        3,
+        "a missing identity is a configuration failure: {}",
+        result.stderr()
+    );
+    let envelope = result.json();
+    assert_eq!(envelope["error"]["code"], "CONFIG_INVALID");
+    let message = envelope["error"]["message"]
+        .as_str()
+        .expect("the error carries a message");
+    assert!(
+        message.contains("no operator identity is configured"),
+        "the refusal names what is missing: {message}"
+    );
+    assert!(
+        message.contains("user.toml"),
+        "the refusal names the document that supplies it: {message}"
+    );
+    assert_eq!(
+        envelope["error"]["location"]["key"], "user.toml",
+        "the refusal is located where the identity is recorded"
+    );
+    assert_eq!(snapshot(&root), before, "a refusal writes nothing");
+}
+
+#[test]
+fn create_link_with_cascade_rewrites_the_partner_of_a_user_identified_only_by_git() {
+    if waymark_core::git::find_executable().is_none() {
+        eprintln!("skipping: no `git` executable on PATH");
+        return;
+    }
+    let (_dir, root) = project();
+    let linked = create_one(&root);
+    let partner_path = root.join(format!("work/task/{linked}.md"));
+    // A fresh clone on a machine that never ran `waymark config set`: Git's
+    // `user.name` is the only identity, and it still makes frank the operator.
+    let repository = Command::new("git")
+        .current_dir(&root)
+        .args(["init", "--quiet"])
+        .output()
+        .expect("the git binary runs");
+    assert!(repository.status.success(), "git init failed");
+    let identity = Command::new("git")
+        .current_dir(&root)
+        .args(["config", "user.name", "frank"])
+        .output()
+        .expect("the git binary runs");
+    assert!(identity.status.success(), "git config failed");
+
+    let result = create(&root, "linked", &["--link", &linked, "--cascade"]);
+    assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
+    let envelope = result.json();
+    let id = envelope["data"]["id"].as_str().expect("the new id");
+
+    assert_eq!(
+        envelope["data"]["partners"][0]["id"],
+        serde_json::json!(linked),
+        "Git's user.name owns the partner, so consent rewrites it"
+    );
+    assert!(
+        std::fs::read_to_string(&partner_path)
+            .expect("the partner reads")
+            .contains(&format!("  - {id}")),
+        "the partner records the link"
+    );
 }

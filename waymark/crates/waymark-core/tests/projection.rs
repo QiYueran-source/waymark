@@ -384,6 +384,35 @@ fn a_projection_loaded_with_a_configured_cache_uses_that_capacity() {
     assert_eq!(LoadOptions::default().max_attempts, 3);
 }
 
+#[test]
+fn a_scoped_read_reports_a_soft_link_the_partner_never_recorded() {
+    let (_dir, project) = project();
+    let here = make(&project, "records the link");
+    let silent = make(&project, "never records it");
+
+    // A document written by hand or by a non-cascading remove can record a
+    // soft link its partner does not carry.
+    let path = task_path(&project, &here);
+    let mut item = waymark_core::parse::parse_item_file(&path).unwrap();
+    item.soft_links = vec![id(&silent)];
+    std::fs::write(&path, waymark_core::serialize::to_document(&item)).unwrap();
+
+    let projection = Projection::load(&project).unwrap();
+    let scoped = projection.scoped_read(&id(&here)).unwrap();
+    assert_eq!(scoped.soft_link_findings.len(), 1, "{scoped:?}");
+    assert_eq!(scoped.soft_link_findings[0].partner, id(&silent));
+    assert_eq!(
+        scoped.soft_link_findings[0].kind,
+        waymark_core::view::Displacement::PartnerSilent,
+        "the partner is live; it is the link that is missing"
+    );
+
+    // The side that never recorded it does not carry the link at all, so a
+    // read of that document reports nothing about it.
+    let partner = projection.scoped_read(&id(&silent)).unwrap();
+    assert!(partner.soft_link_findings.is_empty(), "{partner:?}");
+}
+
 // Two stems that differ only in case are two files only on a
 // case-sensitive filesystem; Windows owns that difference with the platform
 // effort.

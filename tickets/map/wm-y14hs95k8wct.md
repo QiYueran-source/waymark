@@ -769,6 +769,57 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - Confirmed by the user on 2026-11-06: show active work-item summaries, paginated 50 rows per page, stable ID ascending, with previous/next navigation and no search/filter in v1. Rows contain only ID, title, category, lifecycle status, and project-relative path. Exclude archived items from rows and counts. Never expose absolute paths, owner, relationships, Markdown bodies or arbitrary custom fields.
 - Confirmed by the user on 2026-11-06: incomplete or stale projections may supply parseable rows for diagnosis only when the dashboard prominently labels incomplete/stale state, reports failure count and diagnostic summary, and states the list is not a complete/current index. No partial or stale result may be represented as complete/current.
 
+### Cross-item write scope and the `--cascade` consent flag
+
+> Opened on 2026-11-12, settled by the user in the same session. Verified against the 0.1.4 build: closing a parent does not change its children; adding or removing a hard dependency writes only the caller's document; a soft link rewrites both documents and updates the `updated_at` of the other owner's file; creating an item with `--link` rewrites the partner without emitting any warning; archive strips inbound `dependencies`, `parent`, and `soft_links` from every other owner's documents and moves their `updated_at`; closing a parent leaves its children `open` and reported `ready` with no signal.
+
+Settled:
+
+- Default remains no automatic cross-item write. Closing an item never changes its children's status, and a dependency edge never rewrites the target. This confirms the earlier "parent lifecycle does not cascade".
+- A non-cascading write is never a silent one. Whenever a command rewrites a document other than its main target — including my own second document — the result reports every document it wrote. Writes with nothing to report are unchanged.
+- Cross-item writes are governed by one consent flag, `cascade` (`--cascade` on the CLI, a boolean field of the same name in the MCP tools). It appears on exactly the operations that can touch a second document: `link add`, `link remove`, `archive`, and `create` with `--link`. `dependency add/remove`, `create --dependency`, and `create --parent` never rewrite their target and take no such flag. MCP exposes the same field with the same meaning and does not add a second rule.
+- Two independent conditions must both hold before a write touches a second document:
+  1. Ownership: the other document's `owner` equals the effective operator. `creator` is provenance and never counts.
+  2. Consent: `cascade` was explicitly given.
+  `cascade` authorizes writing my own linked documents only. It never authorizes writing someone else's, so a call carrying `cascade` and naming another owner's document is still refused.
+- Every cross-item operation leaves a document it may not write alone and reports it; none of them fails for that reason. `link add` without `cascade` writes the caller's document and reports the partner as unsynchronised, exactly as `create --link` names it and `archive` names a foreign reference.
+- One refusal survives, because there the caller did ask for the second write: a consented `link add` or `link remove --cascade` against another owner's document is `OWNED_BY_OTHER` (class 4), and re-running cannot help — the owner must make the change or ownership is transferred first. `CASCADE_CONSENT_REQUIRED` stays registered but has no producer; removing a code costs a snapshot, a schema change and a documentation sweep, and reinstating it costs the same.
+- The behaviour, by operation and consent:
+
+| Operation | No consent | Consent, partner mine | Consent, partner foreign |
+|---|---|---|---|
+| `link add` | writes the caller's document, reports the partner unsynchronised | writes both as one batch | `OWNED_BY_OTHER`, writes nothing |
+| `link remove` | drops the caller's link, reports the partner left alone | drops both | `OWNED_BY_OTHER`, writes nothing |
+| `create` with a soft link | writes the new item, names the partner in `untouched` | rewrites the partner | leaves the partner, names it in `untouched` |
+| `archive` | writes the target, names every referencing document | cleans the operator's own inbound references | leaves foreign references, names them |
+| `dependency`, `parent` | writes the caller's document only | — | — |
+
+- This supersedes the earlier wording in this section that made `link add` and `link remove` exceptions and that refused a non-consenting add outright. The refusal came from a spec user story that contradicted its own implementation decisions; the table above is the single rule, and `docs/implementation-decisions.md` records it as well.
+- Single-document writes to an item owned by someone else keep today's semantics: an `OWNER_MISMATCH` warning and the write proceeds. Only cross-item writes are refused. No global permission model is introduced: documents are plain files anyone can hand-edit, so a blanket refusal would enforce nothing while breaking ordinary collaboration and every project that has no operator configured.
+- No `--force` flag exists. Writing another owner's document is not something to force; if the item should be mine, ownership is transferred first. A consent flag plus a bypass would be two overlapping doors to the same write.
+- The ownership condition uses the same effective operator resolution every other check uses: the local `user.toml` value, then Git `user.name`, then nothing. Ownership checks resolve it strictly rather than through the lenient path that warning generation uses, so a broken `user.toml` fails as a configuration problem rather than silently degrading to "no operator". When no operator resolves at all, a cross-item write is refused with a message saying which source is missing and how to set one; there is no silent pass-through.
+- `link remove` is the exception that keeps it usable: without `cascade` it removes only my own side and leaves the other document untouched. Removing a link is a unilateral statement about my own item; adding one is a claim about both. With `cascade` and my own document on the other side, both sides are removed as today.
+- No cross-item operation can produce a half state that the other side must repair except by leaving a reference untouched. Every such leftover is reported, never silently dropped, and never cleaned up by the side that did not create it.
+- A soft link stored on one side only is a normal, reachable state: a non-cascading add, a non-cascading remove, or a refused write leaves it. It is found by the reads that already have both documents, reported by `show` and as a fixable finding by `doctor`, naming which side lacks the link. It is never completed automatically: no read rewrites a document, and there is no background process or network step.
+- Completion is manual and follows Git. `doctor` reports the missing side as a statement of fact, not as a runnable repair command, and the human output points the reader at the clone that owns the missing side. MCP and JSON return the finding without a suggested command, so an agent cannot lift a repair out of a diagnosis and run it against someone else's document. The pair converges on the next commit/pull, not on a timer.
+- "Parent is closed" on an active item is a derived read signal shown in `list`, `ready`, and `doctor`: an item whose parent is `closed` is labelled as having a closed parent. It is not a lifecycle change, writes nothing, and is not behind `cascade`. Only the direct parent is inspected; ancestors further up are not walked. The reverse case, a closed child under an open parent, is not signalled.
+- `create --link` with `cascade` is judged on all three identities: the new item's `owner`, the partner's `owner`, and the operator must agree, and the partner is only rewritten when all three match. Without `cascade`, the new item is created with the link recorded on its own side only.
+
+#### Archive never touches another owner's document
+
+- Archive writes two kinds of document: the target, and — only with `cascade`, and only when they belong to the operator — other documents whose inbound edges reference the target. Without `cascade`, archive rewrites nothing but the target; the target's own inbound edges on other documents are left exactly as they are.
+- Archive is never refused because another owner's document references the target. Missing consent and a foreign owner do not block archiving; they decide only which cleanup happens. The result names every document it left untouched and who still references the target, so the reader can act on it.
+- `HAS_ACTIVE_CHILDREN` is unchanged: an unarchived child still prevents archiving its parent, because that rejection is about the archived item's own hierarchy, not about rewriting someone else's file. A foreign `dependencies` or `soft_links` reference never blocks.
+- The consequence is accepted deliberately: after archiving, an active item can carry `dependencies`, `soft_links`, or `parent` that point at an archived item. That is a stale reference somebody else must repair, not something Waymark repairs for them.
+- Derived state never changes because of someone else's archive. A dependency on an archived item does not flip the dependent to blocked, a parent on an archived item does not change a child's status, and an archived soft-link partner does not alter readiness. `ready`, `blocked`, and lifecycle state of other items stay exactly as they were; the mismatch is found by that person's own `doctor` run, not by everyone's `ready` list. This keeps one rule consistent: archive changes only the archiver's files, and every other change is triggered by the person it affects.
+- `tree` already reports a live item whose parent is archived as unresolved with an archived-parent reason, so an orphaned subtree stays visible as a dangling structure rather than disappearing or being promoted to a root.
+- `doctor` is the only surface that reports these leftovers, and it reports them by relation kind, one finding per kind per item, because the repair differs: `dependencies` pointing at an archived item, `parent` pointing at an archived item, and `soft_links` pointing at an archived item are each `DANGLING_REFERENCE` naming the archived target. A soft link half whose partner is archived is worded differently from a soft link that exists on one side only, since one is "the partner is gone" and the other is "the partner never recorded it".
+- These findings never carry a runnable repair command. The owner of the affected item repairs their own document: point the dependency somewhere else, drop it, move the child under a live parent, or drop the link.
+
+Open:
+
+- Final spelling of the diagnostic code for a one-sided soft link, and its exact place in the registry alongside `DANGLING_REFERENCE`.
+- Whether the "parent is closed" label is a rendered field on list/ready rows or a finding attached to the result metadata; the visibility requirement is settled, its representation is not.
 
 ## Not yet specified
 

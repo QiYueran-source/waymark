@@ -26,8 +26,17 @@
 //! - [`listing_json`] — the complete collection page (summary, rows, projection).
 //! - [`write_result_json`] / [`write_result_json_with`] — the shared
 //!   `{id, path, …, changed, written, item}` core of every write result.
-//! - [`DisplayState`] / [`display_state`] / [`blocked_reason`] — the one
-//!   derivation of the display state and the human blocked-reason prose.
+//! - [`archive_leftovers_json`] — the documents an archive deliberately did
+//!   not rewrite, each with the relations that still point at the target.
+//! - [`archive_leftovers_summary`] — the one human sentence that precedes them.
+//! - [`soft_link_findings`] / [`SoftLinkDisplacement`] / [`Displacement`] — the
+//!   one diagnosis of a soft link that is stale (its partner is archived) or
+//!   one-sided (its partner never recorded it). `doctor` turns it into
+//!   registry findings, `show` renders it under `relationships.soft_link_issues`,
+//!   and neither ever offers a command.
+//! - [`DisplayState`] / [`display_state`] / [`blocked_reason`] /
+//!   [`closed_parent_reason`] — the one derivation of the display state and the
+//!   human blocked-reason and closed-parent prose.
 //!
 //! # The derived display state
 //!
@@ -45,6 +54,8 @@ use camino::Utf8Path;
 use serde_json::{json, Map, Value};
 
 use crate::config::Config;
+use crate::envelope::Finding;
+use crate::id::WorkItemId;
 use crate::model::{Status, WorkItem};
 use crate::ops::list::Listing;
 use crate::ops::tree::{DependencyRow, TreeNode};
@@ -146,6 +157,147 @@ pub fn blocked_reason(graph: &Graph, readiness: &Readiness) -> Option<String> {
         })
         .collect();
     Some(format!("waiting on {}", parts.join(", ")))
+}
+
+/// The human line for a list-family row whose direct parent is closed.
+///
+/// One adapter (the CLI listing) prints it and no machine form carries prose,
+/// so the sentence lives here rather than in the adapter: a second surface that
+/// wants to say the same thing says it the same way. `None` when the row has no
+/// closed parent, which is the ordinary case.
+pub fn closed_parent_reason(closed_parent: &Option<crate::id::WorkItemId>) -> Option<String> {
+    closed_parent
+        .as_ref()
+        .map(|parent| format!("parent {} is closed", parent.as_str()))
+}
+
+/// What is wrong with one soft link, as one diagnosis.
+///
+/// A soft link is stored on both documents, and the two are written by two
+/// owners under the consent rules, so the pair can disagree. These are the two
+/// ways it does, and they are different facts:
+///
+/// - [`Displacement::PartnerArchived`] — the link is intact but its partner has
+///   been archived: the association is history, and stale.
+/// - [`Displacement::PartnerSilent`] — the link is recorded here and not on the
+///   partner's document: the partner never recorded it, and is still live.
+///
+/// `partner_owner` is the partner's `owner` as recorded on its own document,
+/// so a reader knows whose document is missing the link without opening it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SoftLinkDisplacement {
+    /// The partner the link points at.
+    pub partner: WorkItemId,
+    /// Which of the two disagreements this is.
+    pub kind: Displacement,
+    /// Who owns the partner document.
+    pub partner_owner: String,
+}
+
+/// The two ways a soft link's two sides can disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Displacement {
+    /// The partner document is archived and holds the link as history.
+    PartnerArchived,
+    /// The partner document is live but does not record the link back.
+    PartnerSilent,
+}
+
+impl Displacement {
+    /// Which side of the pair is not there.
+    ///
+    /// `"link"` is the ordinary one-sided state, where the partner document is
+    /// live and simply never recorded the association; `"archived"` is the
+    /// partner itself. Machine callers read this, not the prose.
+    pub fn missing_side(self) -> &'static str {
+        match self {
+            Self::PartnerArchived => "archived",
+            Self::PartnerSilent => "link",
+        }
+    }
+
+    /// The prose for this kind, naming the partner.
+    pub fn reason(self, partner: &WorkItemId) -> String {
+        match self {
+            Self::PartnerArchived => {
+                format!("{partner} is archived and keeps the association as history only")
+            }
+            Self::PartnerSilent => {
+                format!("the soft link exists on one side only: {partner} never recorded it")
+            }
+        }
+    }
+}
+
+/// Every soft link of one document whose two sides disagree.
+///
+/// Returned in the document's stored soft-link order. A partner that does not
+/// exist at all is not included: the missing-target check owns that case, and a
+/// document that cannot be read is left alone rather than guessed about.
+pub fn soft_link_findings(
+    item: &WorkItem,
+    projection: &crate::projection::Projection,
+) -> Vec<SoftLinkDisplacement> {
+    item.soft_links
+        .iter()
+        .filter_map(|partner| {
+            let partner_item = &projection.entry(partner)?.item;
+            let kind = if partner_item.is_archived() {
+                Displacement::PartnerArchived
+            } else if !partner_item.soft_links.contains(&item.id) {
+                Displacement::PartnerSilent
+            } else {
+                return None;
+            };
+            Some(SoftLinkDisplacement {
+                partner: partner.clone(),
+                kind,
+                partner_owner: partner_item.owner.clone(),
+            })
+        })
+        .collect()
+}
+
+/// Read one displacement as the registry finding it is.
+///
+/// This is the one place the two disagreements become codes, so `doctor` and
+/// any future surface cannot disagree about which code a case gets. Neither
+/// finding is fixable: completing or dropping the other side rewrites a
+/// document its owner may not have consented to, so the diagnosis states the
+/// fact and stops there.
+pub fn soft_link_finding(item: &WorkItem, displacement: &SoftLinkDisplacement) -> Finding {
+    match displacement.kind {
+        Displacement::PartnerArchived => Finding::new(
+            crate::error::Code::DanglingReference,
+            format!(
+                "{} soft_links the archived item {}",
+                item.id.as_str(),
+                displacement.partner.as_str()
+            ),
+        )
+        .with_location(crate::location::Location::work_item(&item.id)),
+        Displacement::PartnerSilent => Finding::from_error(
+            &crate::error::WaymarkError::one_sided_soft_link(&item.id, &displacement.partner),
+        ),
+    }
+}
+
+/// The machine form of one soft-link disagreement, without any command.
+///
+/// The same shape is rendered by `show` and named by `doctor`, so an adapter
+/// only decides where to print it:
+///
+/// ```json
+/// {"partner": "wm-…", "partner_owner": "frank", "missing": "link",
+///  "reason": "the soft link exists on one side only: wm-… never recorded it"}
+/// ```
+fn soft_link_issue_json(displacement: &SoftLinkDisplacement) -> Value {
+    json!({
+        "partner": displacement.partner.as_str(),
+        "partner_owner": displacement.partner_owner,
+        "missing": displacement.kind.missing_side(),
+        "reason": displacement.kind.reason(&displacement.partner),
+    })
 }
 
 /// The persisted fields of one item, without the file that happens to hold it.
@@ -459,6 +611,15 @@ pub fn read_json(read: &ScopedRead) -> Value {
             "soft_links": read.item.soft_links.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
             "children": read.children.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
             "dependents": read.dependents.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
+            // A soft link whose two sides disagree. `missing` names the
+            // document that does not record the link: "archived" means the
+            // partner is gone, "link" means it is live and never recorded it.
+            // The diagnosis is the whole answer; no repair command is offered.
+            "soft_link_issues": read
+                .soft_link_findings
+                .iter()
+                .map(soft_link_issue_json)
+                .collect::<Vec<_>>(),
         },
         "ready": read.readiness.as_ref().map(|readiness| readiness.ready),
         "blocked": read.readiness.as_ref().map(|readiness| readiness.blocked),
@@ -506,6 +667,231 @@ pub fn write_result_json_with(
     Value::Object(value)
 }
 
+/// The documents an archive deliberately left as they are.
+///
+/// One entry per document, in the outcome's stable-ID order, each carrying the
+/// relation kinds it still points at the archived item with:
+///
+/// ```json
+/// [{"id": "wm-…", "path": "work/task/wm-….md",
+///   "relations": ["dependencies", "soft_links"]}]
+/// ```
+///
+/// The document comes first and its relations second because the reader's
+/// question is "whose file", then "why it matters". The path is the document
+/// the reader has to open; the relations are persisted field names, so the
+/// same literals appear here as in `removals`. An archive that left nothing
+/// alone renders an empty list, which is the ordinary quiet result.
+pub fn archive_leftovers_json(
+    untouched: &[crate::ops::archive::UntouchedItem],
+    relations: &[crate::ops::archive::UntouchedRelation],
+) -> Value {
+    Value::Array(
+        untouched
+            .iter()
+            .map(|item| {
+                let kinds: Vec<&str> = relations
+                    .iter()
+                    .filter(|relation| relation.from == item.id)
+                    .map(|relation| relation.relation.as_str())
+                    .collect();
+                json!({
+                    "id": item.id.as_str(),
+                    "path": item.path.as_str(),
+                    "relations": kinds,
+                })
+            })
+            .collect(),
+    )
+}
+
+/// The soft-link partners a creation deliberately left as they are.
+///
+/// The create twin of [`archive_leftovers_json`]: one entry per partner, in the
+/// outcome's stable-ID order, with the document and the path its owner would
+/// open. No relation list, because a creation references a partner one way only
+/// — the new item's `soft_links` — and that side is always written. A creation
+/// that left nothing alone renders an empty list.
+pub fn leftover_partners_json(untouched: &[crate::ops::create::UntouchedPartner]) -> Value {
+    Value::Array(
+        untouched
+            .iter()
+            .map(|partner| {
+                json!({
+                    "id": partner.item.id.as_str(),
+                    "path": partner.path.as_str(),
+                })
+            })
+            .collect(),
+    )
+}
+
+/// The `data` block of one archive, shared by every adapter.
+///
+/// It describes the archive itself — the marker, the reason, the status it left
+/// alone, whether it was applied — then the three footprint lists: the
+/// relationships `removals` dropped, the documents `affected` it rewrote, and
+/// the documents `untouched` it left exactly as they were with the relations
+/// that still name the target. The lists are rendered from the outcome alone,
+/// so an adapter never re-reads the project to describe what just happened, and
+/// a dry run carries the same block with `written: false`.
+pub fn archive_result_json(outcome: &crate::ops::archive::ArchiveOutcome) -> Value {
+    json!({
+        "id": outcome.item.id.as_str(),
+        "path": outcome.path.as_str(),
+        "archived_at": outcome.archived_at.to_string(),
+        "archive_reason": outcome.archive_reason,
+        "status": outcome.item.status.as_str(),
+        "closed_at": outcome.item.closed_at.map(|value| value.to_string()),
+        "written": outcome.written,
+        "removals": outcome.removals.iter().map(|removal| json!({
+            "from": removal.from.as_str(),
+            "relation": removal.relation.as_str(),
+        })).collect::<Vec<_>>(),
+        "affected": outcome
+            .affected
+            .iter()
+            .map(|item| json!({
+                "id": item.id.as_str(),
+                "path": item.path.as_str(),
+            }))
+            .collect::<Vec<_>>(),
+        "untouched": archive_leftovers_json(&outcome.untouched, &outcome.untouched_relations),
+        "item": item_fields(&outcome.item),
+    })
+}
+
+/// The one human sentence that precedes an archive's leftover list.
+///
+/// It names the target and the count so the line stands on its own in a
+/// terminal where the list below it may scroll away, and it says "left alone"
+/// rather than "skipped", which sounds like a failure: the documents were
+/// deliberately preserved, not neglected. `None` when nothing was left alone,
+/// because a write with nothing to report stays quiet.
+pub fn archive_leftovers_summary(target: &WorkItemId, untouched: usize) -> Option<String> {
+    match untouched {
+        0 => None,
+        1 => Some(format!(
+            "{} still referenced by 1 document left untouched",
+            target.as_str()
+        )),
+        count => Some(format!(
+            "{} still referenced by {count} documents left untouched",
+            target.as_str()
+        )),
+    }
+}
+
+/// The partner a one-sided soft-link change left as it is.
+///
+/// `None` when the change wrote both sides, or when the partner's document is
+/// missing or archived and there was nothing to leave alone:
+///
+/// ```json
+/// {"id": "wm-…", "path": "work/task/wm-….md", "owner": "frank", "owned": true}
+/// ```
+///
+/// `owned` says whether consent would have been enough to rewrite it, which is
+/// the question a caller asks after seeing that the partner was left alone.
+pub fn link_untouched_json(untouched: &crate::ops::link::UntouchedLink) -> Value {
+    json!({
+        "id": untouched.id.as_str(),
+        "path": untouched.path.as_str(),
+        "owner": untouched.owner,
+        "owned": untouched.owned,
+    })
+}
+
+/// The `data` block of one soft-link change, shared by every adapter.
+///
+/// A link change writes one document or two, and either way the reader needs
+/// the same facts: the caller's new `soft_links`, the fingerprints of every
+/// document that moved, whether the pair is complete, the partner as written
+/// when it was, and the partner as it still stands when it was deliberately
+/// left alone. The two adapters call this one function, so a field added to a
+/// link result cannot reach one of them first.
+pub fn link_result_json(outcome: &crate::ops::link::LinkOutcome, verb: &str) -> Value {
+    write_result_json_with(
+        &outcome.item,
+        &outcome.path,
+        outcome.changed,
+        outcome.written,
+        [
+            ("other".to_owned(), json!(outcome.other_id.as_str())),
+            (
+                "other_path".to_owned(),
+                json!(outcome.other_path.as_ref().map(|path| path.as_str())),
+            ),
+            (
+                "partner_unsynchronised".to_owned(),
+                json!(outcome.partner_unsynchronised),
+            ),
+            ("verb".to_owned(), json!(verb)),
+            (
+                "soft_links".to_owned(),
+                json!(outcome
+                    .item
+                    .soft_links
+                    .iter()
+                    .map(|id| id.as_str())
+                    .collect::<Vec<_>>()),
+            ),
+            (
+                "fingerprints".to_owned(),
+                json!(outcome
+                    .fingerprints
+                    .iter()
+                    .map(|fingerprint| fingerprint.as_str())
+                    .collect::<Vec<_>>()),
+            ),
+            (
+                "other_item".to_owned(),
+                json!(outcome
+                    .other
+                    .as_ref()
+                    .zip(outcome.other_path.as_ref())
+                    .map(|(item, path)| item_json(item, path))),
+            ),
+            (
+                "other_untouched".to_owned(),
+                outcome
+                    .other_untouched
+                    .as_ref()
+                    .map(link_untouched_json)
+                    .unwrap_or(Value::Null),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    )
+}
+
+/// The `data` block of one creation, shared by every adapter.
+///
+/// It lists what was written — the new document, then every soft-link partner
+/// that was rewritten — and, through [`leftover_partners_json`], every partner
+/// deliberately left as it was. `fingerprints` is `[new, partners…]`, so a
+/// create that rewrote nothing carries exactly one.
+pub fn create_result_json(created: &crate::ops::create::Created) -> Value {
+    json!({
+        "id": created.item.id.as_str(),
+        "path": created.path.as_str(),
+        "written": created.written,
+        "item": item_json(&created.item, &created.path),
+        "partners": created
+            .partners
+            .iter()
+            .map(|partner| item_json(&partner.item, &partner.path))
+            .collect::<Vec<_>>(),
+        "untouched": leftover_partners_json(&created.untouched),
+        "fingerprints": created
+            .fingerprints
+            .iter()
+            .map(|fingerprint| fingerprint.as_str())
+            .collect::<Vec<_>>(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -535,6 +921,94 @@ mod tests {
             blocked: true,
             blocked_by: vec![id("wm-000000000003")],
         }
+    }
+
+    fn link_outcome(
+        other_untouched: Option<crate::ops::link::UntouchedLink>,
+    ) -> crate::ops::link::LinkOutcome {
+        let partner_unsynchronised = other_untouched.is_some();
+        crate::ops::link::LinkOutcome {
+            item: item_with_status(Status::Open),
+            other: None,
+            other_id: id("wm-000000000002"),
+            other_untouched,
+            partner_unsynchronised,
+            path: Utf8Path::new("work/task/wm-000000000001.md").to_path_buf(),
+            other_path: None,
+            changed: true,
+            written: true,
+            fingerprints: Vec::new(),
+            meta: Meta::direct_file_scoped(),
+        }
+    }
+
+    #[test]
+    fn a_one_sided_link_renders_the_partner_it_left_alone() {
+        let left_alone = crate::ops::link::UntouchedLink {
+            id: id("wm-000000000002"),
+            path: Utf8Path::new("work/task/wm-000000000002.md").to_path_buf(),
+            owner: "alice".to_owned(),
+            owned: false,
+        };
+        let rendered = link_result_json(&link_outcome(Some(left_alone)), "add");
+
+        assert_eq!(
+            rendered["other_untouched"],
+            json!({
+                "id": "wm-000000000002",
+                "path": "work/task/wm-000000000002.md",
+                "owner": "alice",
+                "owned": false,
+            })
+        );
+        assert_eq!(rendered["verb"], "add");
+        assert_eq!(rendered["other"], "wm-000000000002");
+        assert_eq!(rendered["other_item"], Value::Null);
+        assert_eq!(rendered["partner_unsynchronised"], true);
+        assert_eq!(rendered["soft_links"], json!([]));
+
+        // An add that wrote both sides reports no untouched partner at all.
+        let both = link_result_json(&link_outcome(None), "remove");
+        assert_eq!(both["other_untouched"], Value::Null);
+        assert_eq!(both["verb"], "remove");
+    }
+
+    #[test]
+    fn a_creation_renders_the_partners_it_rewrote_and_the_ones_it_left_alone() {
+        let partner = fixtures::work_item("wm-000000000002", "task", "Partner").build();
+        let untouched = fixtures::work_item("wm-000000000003", "task", "Hers").build();
+        let mut created_item = fixtures::work_item("wm-000000000001", "task", "New").build();
+        created_item.soft_links = vec![id("wm-000000000002"), id("wm-000000000003")];
+        let created = crate::ops::create::Created {
+            path: Utf8Path::new("work/task/wm-000000000001.md").to_path_buf(),
+            partners: vec![crate::ops::create::ChangedPartner {
+                path: Utf8Path::new("work/task/wm-000000000002.md").to_path_buf(),
+                item: partner,
+                fingerprint: None,
+            }],
+            untouched: vec![crate::ops::create::UntouchedPartner {
+                path: Utf8Path::new("work/task/wm-000000000003.md").to_path_buf(),
+                item: untouched,
+            }],
+            item: created_item,
+            fingerprint: None,
+            fingerprints: Vec::new(),
+            written: false,
+            meta: Meta::direct_file_scoped(),
+        };
+
+        let rendered = create_result_json(&created);
+
+        assert_eq!(rendered["written"], false);
+        assert_eq!(rendered["partners"][0]["id"], "wm-000000000002");
+        assert_eq!(
+            rendered["untouched"],
+            json!([{
+                "id": "wm-000000000003",
+                "path": "work/task/wm-000000000003.md",
+            }])
+        );
+        assert_eq!(rendered["fingerprints"], json!([]));
     }
 
     #[test]
@@ -633,6 +1107,7 @@ mod tests {
             children: vec![id("wm-000000000005")],
             dependents: vec![],
             needs_migration: false,
+            closed_parent: None,
         }
     }
 
@@ -962,6 +1437,7 @@ mod tests {
             readiness: None,
             children: vec![id("wm-000000000005")],
             dependents: vec![id("wm-000000000006")],
+            soft_link_findings: vec![],
             meta: Meta::direct_file_scoped(),
         };
         let value = read_json(&read);
@@ -985,6 +1461,52 @@ mod tests {
         assert_eq!(value["ready"], Value::Null);
         assert_eq!(value["blocked"], Value::Null);
         assert_eq!(value["blocked_by"], json!([]));
+        assert_eq!(value["relationships"]["soft_link_issues"], json!([]));
+    }
+
+    #[test]
+    fn a_soft_link_issue_names_the_missing_side_and_never_a_command() {
+        let partner = id("wm-000000000007");
+        let read = ScopedRead {
+            item: item(),
+            path: Utf8Path::new("work/task/wm-000000000001.md").to_path_buf(),
+            category: crate::model::CategoryKey::parse("task").unwrap(),
+            fingerprint: Fingerprint::of(b"document"),
+            readiness: None,
+            children: vec![],
+            dependents: vec![],
+            soft_link_findings: vec![
+                SoftLinkDisplacement {
+                    partner: partner.clone(),
+                    kind: Displacement::PartnerSilent,
+                    partner_owner: "robin".to_owned(),
+                },
+                SoftLinkDisplacement {
+                    partner: id("wm-000000000008"),
+                    kind: Displacement::PartnerArchived,
+                    partner_owner: "frank".to_owned(),
+                },
+            ],
+            meta: Meta::direct_file_scoped(),
+        };
+        let issues = read_json(&read)["relationships"]["soft_link_issues"].clone();
+        assert_eq!(
+            issues,
+            json!([
+                {
+                    "partner": "wm-000000000007",
+                    "partner_owner": "robin",
+                    "missing": "link",
+                    "reason": "the soft link exists on one side only: wm-000000000007 never recorded it",
+                },
+                {
+                    "partner": "wm-000000000008",
+                    "partner_owner": "frank",
+                    "missing": "archived",
+                    "reason": "wm-000000000008 is archived and keeps the association as history only",
+                },
+            ])
+        );
     }
 
     #[test]
@@ -1008,5 +1530,143 @@ mod tests {
             "an extra key never overrides the shared written flag"
         );
         assert_eq!(value["changed"], json!(true));
+    }
+
+    #[test]
+    fn archive_leftovers_pair_each_document_with_the_relations_it_keeps() {
+        use crate::ops::archive::{InboundRelation, UntouchedItem, UntouchedRelation};
+
+        let first = id("wm-000000000002");
+        let second = id("wm-000000000003");
+        let untouched = vec![
+            UntouchedItem {
+                id: first.clone(),
+                path: Utf8Path::new("work/task/wm-000000000002.md").to_owned(),
+            },
+            UntouchedItem {
+                id: second.clone(),
+                path: Utf8Path::new("work/task/wm-000000000003.md").to_owned(),
+            },
+        ];
+        let relations = vec![
+            UntouchedRelation {
+                from: first.clone(),
+                relation: InboundRelation::Dependencies,
+            },
+            UntouchedRelation {
+                from: second.clone(),
+                relation: InboundRelation::Parent,
+            },
+            UntouchedRelation {
+                from: second.clone(),
+                relation: InboundRelation::SoftLinks,
+            },
+        ];
+
+        let value = archive_leftovers_json(&untouched, &relations);
+
+        assert_eq!(
+            value,
+            json!([
+                {
+                    "id": "wm-000000000002",
+                    "path": "work/task/wm-000000000002.md",
+                    "relations": ["dependencies"],
+                },
+                {
+                    "id": "wm-000000000003",
+                    "path": "work/task/wm-000000000003.md",
+                    "relations": ["parent", "soft_links"],
+                },
+            ])
+        );
+        assert_eq!(archive_leftovers_json(&[], &[]), json!([]));
+    }
+
+    #[test]
+    fn the_archive_result_block_carries_the_footprint_lists() {
+        use crate::ops::archive::{
+            AffectedItem, ArchiveOutcome, InboundRelation, PlannedRemoval, UntouchedItem,
+            UntouchedRelation,
+        };
+        use crate::ops::mediated::write_meta;
+        use crate::testing::fixtures;
+        use camino::Utf8PathBuf;
+
+        let mut item = fixtures::work_item("wm-000000000001", "task", "Retire me")
+            .with_status(Status::Open)
+            .build();
+        item.archived_at = Some(instant());
+        let mut outcome = ArchiveOutcome {
+            item,
+            path: Utf8PathBuf::from("work/task/wm-000000000001.md"),
+            archived_at: instant(),
+            archive_reason: Some("superseded".to_owned()),
+            removals: vec![PlannedRemoval {
+                from: id("wm-000000000002"),
+                relation: InboundRelation::Dependencies,
+            }],
+            affected: vec![AffectedItem {
+                id: id("wm-000000000002"),
+                path: Utf8PathBuf::from("work/task/wm-000000000002.md"),
+            }],
+            untouched: vec![UntouchedItem {
+                id: id("wm-000000000003"),
+                path: Utf8PathBuf::from("work/task/wm-000000000003.md"),
+            }],
+            untouched_relations: vec![UntouchedRelation {
+                from: id("wm-000000000003"),
+                relation: InboundRelation::SoftLinks,
+            }],
+            written: true,
+            fingerprints: Vec::new(),
+            meta: write_meta(Vec::new()),
+        };
+
+        let value = archive_result_json(&outcome);
+
+        assert_eq!(value["id"], "wm-000000000001");
+        assert_eq!(value["path"], "work/task/wm-000000000001.md");
+        assert_eq!(value["archive_reason"], "superseded");
+        assert_eq!(value["status"], "open", "archive is not a status");
+        assert_eq!(value["written"], true);
+        assert_eq!(
+            value["removals"],
+            json!([{"from": "wm-000000000002", "relation": "dependencies"}])
+        );
+        assert_eq!(
+            value["affected"],
+            json!([{
+                "id": "wm-000000000002",
+                "path": "work/task/wm-000000000002.md",
+            }])
+        );
+        assert_eq!(
+            value["untouched"],
+            json!([{
+                "id": "wm-000000000003",
+                "path": "work/task/wm-000000000003.md",
+                "relations": ["soft_links"],
+            }])
+        );
+        assert_eq!(value["item"]["id"], "wm-000000000001");
+
+        // A dry run carries the same block and says so.
+        outcome.written = false;
+        assert_eq!(archive_result_json(&outcome)["written"], false);
+    }
+
+    #[test]
+    fn the_leftover_summary_counts_documents_and_stays_quiet_at_zero() {
+        let target = id("wm-000000000001");
+        assert_eq!(archive_leftovers_summary(&target, 0), None);
+        assert_eq!(
+            archive_leftovers_summary(&target, 1).as_deref(),
+            Some("wm-000000000001 still referenced by 1 document left untouched")
+        );
+        assert_eq!(
+            archive_leftovers_summary(&target, 3).as_deref(),
+            Some("wm-000000000001 still referenced by 3 documents left untouched")
+        );
     }
 }

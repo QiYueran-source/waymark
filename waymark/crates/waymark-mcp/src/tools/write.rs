@@ -22,7 +22,6 @@ use rmcp::tool_router;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use waymark_core::envelope::Meta;
 use waymark_core::model::FieldKey;
 use waymark_core::ops::edit::{self, EditOutcome, FieldOutcome};
 use waymark_core::ops::{archive, create, link, owner, parent, r#move, relationship, status};
@@ -30,7 +29,6 @@ use waymark_core::ops::{archive, create, link, owner, parent, r#move, relationsh
 use crate::envelope::{self, ToolResult};
 use crate::server::WaymarkServer;
 use crate::tools::params;
-use waymark_core::view::{item_fields, item_json};
 
 /// Inputs of `waymark_create_work_item`.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -66,9 +64,17 @@ pub struct CreateWorkItemArgs {
     #[serde(default)]
     pub dependencies: Vec<String>,
 
-    /// Stable IDs to soft-link to. Stored symmetrically on both sides.
+    /// Stable IDs to soft-link to. The link is stored on the new item; the
+    /// other side records it only with `cascade`.
     #[serde(default)]
     pub soft_links: Vec<String>,
+
+    /// Consent to a cross-item write: also record the links on the other side,
+    /// which requires you to own those items. Defaults to off, which writes
+    /// nothing but the new document; a partner left alone is reported in
+    /// `untouched`.
+    #[serde(default)]
+    pub cascade: bool,
 
     /// Validate and report what would be written, without writing.
     #[serde(default)]
@@ -164,10 +170,15 @@ impl WaymarkServer {
     /// callers cannot supply them. The request may also carry a creator, custom
     /// fields, a parent, dependencies, and soft links, all written as one
     /// atomic operation. Returns the complete created item, its path, every
-    /// rewritten soft-link partner, one fingerprint per written document, and
-    /// whether the store changed. `dry_run` performs every check and reports the
-    /// same shape without writing.
+    /// rewritten soft-link partner, every partner left alone, one fingerprint per
+    /// written document, and whether the store changed. `dry_run` performs every
+    /// check and reports the same shape without writing.
     ///
+    /// `cascade` is the consent flag for a cross-item write: off by default,
+    /// which records the soft links on the new item only and leaves every
+    /// partner byte-identical. With it, a partner is also rewritten when the new
+    /// item's owner, the partner's owner, and the operator are the same
+    /// identity; any other partner is left alone and named in `untouched`.
     /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
     /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
@@ -206,20 +217,11 @@ impl WaymarkServer {
             let created = create::create(
                 &project,
                 request,
-                &params::options(args.dry_run, args.lock_timeout_ms),
+                &params::write_options(args.dry_run, args.cascade, args.lock_timeout_ms),
             )?;
             Ok(envelope::success(
-                json!({
-                    "id": created.item.id.as_str(),
-                    "path": created.path.to_string(),
-                    "written": created.written,
-                    "item": item_json(&created.item, &created.path),
-                    "partners": created.partners.iter().map(|partner| {
-                        item_json(&partner.item, &partner.path)
-                    }).collect::<Vec<_>>(),
-                    "fingerprints": created.fingerprints.iter().map(|fingerprint| fingerprint.as_str()).collect::<Vec<_>>(),
-                }),
-                Meta::direct_file_scoped(),
+                waymark_core::view::create_result_json(&created),
+                created.meta.clone(),
             ))
         })
     }
@@ -520,11 +522,16 @@ impl WaymarkServer {
         })
     }
 
-    /// Associate two items with a symmetric, non-blocking soft link. Both
-    /// documents are replaced as one all-or-nothing batch.
+    /// Associate two items with a symmetric, non-blocking soft link.
     ///
-    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
-    /// fails immediately with retryable `LOCK_TIMEOUT`.
+    /// Without `cascade` only the item named by `id` is written; the other item
+    /// keeps its bytes and the result reports `partner_unsynchronised: true`.
+    /// With `cascade` both documents are replaced as one all-or-nothing batch,
+    /// and the other item's document must belong to the operator, or the call
+    /// fails with `OWNED_BY_OTHER`, which re-running cannot change; give both
+    /// items the same owner or transfer ownership first. `lock_timeout_ms`
+    /// bounds the wait for the project write lock; `0` fails immediately with
+    /// retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_add_soft_link",
         annotations(
@@ -543,7 +550,7 @@ impl WaymarkServer {
                 &project,
                 &args.id,
                 &args.other,
-                &params::options(args.dry_run, args.lock_timeout_ms),
+                &params::write_options(args.dry_run, args.cascade, args.lock_timeout_ms),
             )?;
             Ok(link_result(&outcome, LinkVerb::Add))
         })
@@ -553,8 +560,12 @@ impl WaymarkServer {
     /// is `INVALID_RELATIONSHIP`; when the other document is missing or
     /// archived, the surviving side alone is cleaned up.
     ///
-    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
-    /// fails immediately with retryable `LOCK_TIMEOUT`.
+    /// Without `cascade` only this item's document is rewritten and the other
+    /// stays as it is, so a removal always succeeds. With `cascade` the other
+    /// item's document is rewritten too, which requires it to belong to the
+    /// operator: otherwise the call fails with `OWNED_BY_OTHER`.
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0` fails
+    /// immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_remove_soft_link",
         annotations(
@@ -573,7 +584,7 @@ impl WaymarkServer {
                 &project,
                 &args.id,
                 &args.other,
-                &params::options(args.dry_run, args.lock_timeout_ms),
+                &params::write_options(args.dry_run, args.cascade, args.lock_timeout_ms),
             )?;
             Ok(link_result(&outcome, LinkVerb::Remove))
         })
@@ -584,6 +595,8 @@ impl WaymarkServer {
     /// the same all-or-nothing batch. Re-archiving is `ALREADY_ARCHIVED`, and an
     /// active child blocks it with `HAS_ACTIVE_CHILDREN`.
     ///
+    /// `cascade` is the consent flag for a cross-item write: off by default,
+    /// it also cleans up inbound references from other items you own.
     /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
     /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
@@ -604,7 +617,7 @@ impl WaymarkServer {
                 &project,
                 &args.id,
                 args.reason.as_deref(),
-                &params::options(args.dry_run, args.lock_timeout_ms),
+                &params::write_options(args.dry_run, args.cascade, args.lock_timeout_ms),
             )?;
             Ok(archive_result(&outcome))
         })
@@ -850,6 +863,14 @@ pub struct SoftLinkArgs {
     /// Stable ID of the other end.
     pub other: String,
 
+    /// Consent to a cross-item write: also rewrite the other item's document,
+    /// which requires you to own it. Required by `waymark_add_soft_link` (a
+    /// link is a claim about both ends) and optional for
+    /// `waymark_remove_soft_link`, where without it only this item's side is
+    /// dropped. Defaults to off.
+    #[serde(default)]
+    pub cascade: bool,
+
     /// Report the change without writing it.
     #[serde(default)]
     pub dry_run: bool,
@@ -871,6 +892,13 @@ pub struct ArchiveWorkItemArgs {
     /// stores no reason.
     #[serde(default)]
     pub reason: Option<String>,
+
+    /// Consent to a cross-item write: also clean up inbound references from
+    /// other items you own. Defaults to off, which rewrites nothing but the
+    /// archived item. Another owner's document is never rewritten; it is
+    /// reported in `untouched` either way.
+    #[serde(default)]
+    pub cascade: bool,
 
     /// Report the archive and every planned relationship removal without
     /// writing.
@@ -973,53 +1001,24 @@ fn dependency_result(outcome: &relationship::RelationshipOutcome) -> ToolResult 
 
 /// One soft-link change as a successful tool result.
 fn link_result(outcome: &link::LinkOutcome, verb: LinkVerb) -> ToolResult {
+    let verb = match verb {
+        LinkVerb::Add => "add",
+        LinkVerb::Remove => "remove",
+    };
     envelope::success(
-        write_data(
-            &outcome.item,
-            &outcome.path,
-            outcome.changed,
-            outcome.written,
-            json!({
-                "other": outcome.other_id.as_str(),
-                "other_path": outcome.other_path.as_ref().map(|path| path.to_string()),
-                "verb": match verb {
-                    LinkVerb::Add => "add",
-                    LinkVerb::Remove => "remove",
-                },
-                "soft_links": outcome.item.soft_links.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-                "fingerprints": outcome.fingerprints.iter().map(|fingerprint| fingerprint.as_str()).collect::<Vec<_>>(),
-                "other_item": outcome.other.as_ref().zip(outcome.other_path.as_ref()).map(|(item, path)| item_json(item, path)),
-            }),
-        ),
+        waymark_core::view::link_result_json(outcome, verb),
         outcome.meta.clone(),
     )
 }
 
 /// One archive as a successful tool result.
+///
+/// The `data` block comes from the shared [`waymark_core::view`] renderer, the
+/// same one the CLI prints, so the two adapters cannot describe one archive
+/// differently.
 fn archive_result(outcome: &archive::ArchiveOutcome) -> ToolResult {
     envelope::success(
-        json!({
-            "id": outcome.item.id.as_str(),
-            "path": outcome.path.to_string(),
-            "archived_at": outcome.archived_at.to_string(),
-            "archive_reason": outcome.archive_reason,
-            "status": outcome.item.status.as_str(),
-            "closed_at": outcome.item.closed_at.map(|value| value.to_string()),
-            "written": outcome.written,
-            "removals": outcome.removals.iter().map(|removal| json!({
-                "from": removal.from.as_str(),
-                "relation": removal.relation.as_str(),
-            })).collect::<Vec<_>>(),
-            "affected": outcome
-                .affected
-                .iter()
-                .map(|item| json!({
-                    "id": item.id.as_str(),
-                    "path": item.path.to_string(),
-                }))
-                .collect::<Vec<_>>(),
-            "item": item_fields(&outcome.item),
-        }),
+        waymark_core::view::archive_result_json(outcome),
         outcome.meta.clone(),
     )
 }

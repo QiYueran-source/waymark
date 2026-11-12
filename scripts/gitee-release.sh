@@ -17,6 +17,8 @@
 #   --version VERSION  Release to publish, with or without the `v` prefix.
 #   --src DIR          Directory holding the archives and their .sha256 files.
 #   --repo OWNER/NAME  Gitee repository. Default: the `gitee` remote's repository.
+#   --body TEXT        Release description for a release this creates.
+#                      Default: a one-line pointer to the GitHub release.
 #   --dry-run          Show what would be created and uploaded.
 #   --only PATTERN     Upload only archives whose name matches the pattern.
 #
@@ -35,6 +37,7 @@ readonly GITEE_WEB="https://gitee.com"
 version=""
 src=""
 gitee_repo=""
+body=""
 dry_run=0
 only=""
 
@@ -43,6 +46,7 @@ while [[ $# -gt 0 ]]; do
         --version) [[ $# -ge 2 ]] || fail "--version needs a value"; version="$2"; shift 2 ;;
         --src) [[ $# -ge 2 ]] || fail "--src needs a value"; src="$2"; shift 2 ;;
         --repo) [[ $# -ge 2 ]] || fail "--repo needs a value"; gitee_repo="$2"; shift 2 ;;
+        --body) [[ $# -ge 2 ]] || fail "--body needs a value"; body="$2"; shift 2 ;;
         --only) [[ $# -ge 2 ]] || fail "--only needs a value"; only="$2"; shift 2 ;;
         --dry-run) dry_run=1; shift ;;
         -h|--help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -113,11 +117,17 @@ elif [[ $dry_run -eq 1 ]]; then
     release_id="0"
 else
     info "creating release ${tag}"
+    # Gitee requires a non-empty body and a target; omitting either answers 400.
+    release_body="${body:-Waymark ${version}. Archives mirrored from the GitHub release; see the repository README for install steps.}"
     created="$(curl -sS --max-time 60 -H 'Content-Type: application/json' \
-        --data "{\"tag_name\":\"${tag}\",\"name\":\"Waymark ${version}\",\"access_token\":\"${token}\"}" \
-        "${GITEE_API}/repos/${gitee_repo}/releases")"
+        --data "{\"tag_name\":\"${tag}\",\"name\":\"Waymark ${version}\",\"body\":\"${release_body}\",\"target_commitish\":\"master\",\"access_token\":\"${token}\"}" \
+        "${GITEE_API}/repos/${gitee_repo}/releases")" \
+        || fail 5 "could not create release ${tag}"
     release_id="$(json_id "$created")"
-    [[ -n "$release_id" ]] || { printf '%s\n' "$created" >&2; exit 5; }
+    if [[ -z "$release_id" ]]; then
+        printf '%s\n' "$created" >&2
+        fail 5 "release ${tag} was not created"
+    fi
 fi
 
 # 2. Skip names Gitee already has. Names are unique per release, so this is the

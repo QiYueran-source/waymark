@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-12
+
+### Added
+
+- `--cascade` on `archive`, `link add`, `link remove`, and `create`, and the
+  same optional boolean on the MCP tools that map to them. It is the consent a
+  command gives for writing a second work item, and it authorizes only the
+  caller's own items.
+- Two error codes for a cross-item write: `OWNED_BY_OTHER` (the other item
+  belongs to someone else, so re-running cannot help) and
+  `CASCADE_CONSENT_REQUIRED` (registered for callers that can supply consent;
+  no current command raises it).
+- `ONE_SIDED_SOFT_LINK`: `doctor` and `show` report a soft link that one side
+  records and the other does not, naming the side that is missing it.
+- `CLOSED_PARENT`: an active item whose direct parent is closed is labelled in
+  `list` and `ready`, and reported as an informational finding by `doctor`.
+  Nothing is written and no readiness changes.
+- Archive results list the documents it left untouched and who still references
+  the archived item, so retiring one item no longer hides who was affected.
+- `create` and `link add` results report the documents they left untouched,
+  with each partner's owner and whether it is the operator's.
+
+### Changed
+
+- Archive no longer rewrites another owner's document. It strips inbound
+  references only from documents the operator owns, and leaves the rest in place
+  with a `doctor` finding for its owner to resolve. `HAS_ACTIVE_CHILDREN` still
+  refuses an item with live children.
+- `link add` without `--cascade` no longer writes the other item. It records the
+  link on the caller's item and reports the partner as one-sided; re-running
+  from the other side completes the pair.
+- `link remove` without `--cascade` removes the link from the caller's item
+  only. Removing a link is a statement about one's own item; adding one is a
+  claim about both.
+- `create --link` without `--cascade` no longer rewrites the referenced item.
+- Ownership for cross-item writes resolves the operator the same way everything
+  else does: `.waymark/user.toml`, then Git `user.name`. A project with no
+  operator refuses a cross-item write rather than silently skipping it.
+
+### Removed
+
+- Nothing. `CASCADE_CONSENT_REQUIRED` is deliberately kept registered without a
+  producer so that a later operation can adopt it without a registry change.
+
+### Breaking
+
+- A command that rewrites a second document without `--cascade` now leaves that
+  document alone; a caller relying on the old two-sided write must pass the flag
+  and own the other item.
+
 ## [0.1.4] - 2026-11-11
 
 ### Added

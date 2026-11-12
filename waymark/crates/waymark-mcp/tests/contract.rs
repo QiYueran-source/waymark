@@ -198,8 +198,26 @@ async fn every_tool_routes_to_the_shared_library_and_returns_the_envelope() {
             "waymark_remove_dependency",
             json!({"id": id1, "blocking": id0}),
         ),
-        ("waymark_add_soft_link", json!({"id": id0, "other": id1})),
-        ("waymark_remove_soft_link", json!({"id": id0, "other": id1})),
+        // A soft link is a cross-item write, so both verbs need consent and an
+        // operator who owns the document they would also rewrite. The two ends
+        // are transferred to the same owner and the operator follows them, so
+        // the pair is hers and the removal that follows is one she may make.
+        (
+            "waymark_config_set",
+            json!({"name": "operator", "value": "carol"}),
+        ),
+        (
+            "waymark_transfer_owner",
+            json!({"id": id1, "owner": "carol"}),
+        ),
+        (
+            "waymark_add_soft_link",
+            json!({"id": id0, "other": id1, "cascade": true}),
+        ),
+        (
+            "waymark_remove_soft_link",
+            json!({"id": id0, "other": id1, "cascade": true}),
+        ),
         ("waymark_archive_work_item", json!({"id": id1})),
     ];
 
@@ -446,6 +464,53 @@ async fn every_write_tool_exposes_the_shared_lock_override() {
             assert!(
                 description.contains("lock_timeout_ms"),
                 "{} does not document lock_timeout_ms",
+                tool.name
+            );
+        }
+    }
+    client.shutdown().await;
+}
+
+/// The cross-item operations expose the same consent option the CLI's
+/// `--cascade` gives, and no operation that writes only its own target does.
+#[tokio::test]
+async fn every_cross_item_tool_exposes_the_consent_flag_and_no_other_write_tool_does() {
+    let fixture = common::fixture(&[]);
+    let client = common::Client::connect(fixture.root.clone()).await;
+    let cross_item = [
+        "waymark_create_work_item",
+        "waymark_add_soft_link",
+        "waymark_remove_soft_link",
+        "waymark_archive_work_item",
+    ];
+    for tool in client.tools().await {
+        let schema = tool_schema(&tool);
+        let writes = schema["properties"].get("dry_run").is_some();
+        let cascade = &schema["properties"]["cascade"];
+        if cross_item.contains(&tool.name.as_ref()) {
+            assert_eq!(
+                cascade["type"], "boolean",
+                "{} must expose `cascade` as a boolean: {schema}",
+                tool.name
+            );
+            assert!(
+                !schema["required"]
+                    .as_array()
+                    .expect("required is a list")
+                    .contains(&json!("cascade")),
+                "{} must keep consent optional",
+                tool.name
+            );
+            let description = tool.description.as_deref().unwrap_or_default();
+            assert!(
+                description.contains("cascade"),
+                "{} does not document `cascade`",
+                tool.name
+            );
+        } else if writes {
+            assert!(
+                cascade.is_null(),
+                "{} writes only its own target and must not take consent",
                 tool.name
             );
         }

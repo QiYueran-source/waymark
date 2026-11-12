@@ -244,6 +244,31 @@ fn every_typed_constructor_fills_exactly_the_registered_details_keys() {
             "assets_version_mismatch",
             WaymarkError::assets_version_mismatch("version", "0.1.0", "0.2.0"),
         ),
+        (
+            "closed_parent",
+            WaymarkError::closed_parent(&id(), &other()),
+        ),
+        (
+            "one_sided_soft_link",
+            WaymarkError::one_sided_soft_link(&id(), &other()),
+        ),
+        (
+            "cascade_consent_required",
+            WaymarkError::cascade_consent_required(
+                "link add",
+                &id(),
+                &other(),
+                "re-run with --cascade to also record the link there",
+            ),
+        ),
+        (
+            "owned_by_other",
+            WaymarkError::owned_by_other(&other(), "alice", "link add"),
+        ),
+        (
+            "missing_operator_source",
+            WaymarkError::missing_operator_source("link add", &other(), "/p/.waymark/user.toml"),
+        ),
     ];
 
     let mut seen: Vec<Code> = Vec::new();

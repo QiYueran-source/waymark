@@ -11,7 +11,7 @@ use std::io::Read;
 
 use camino::Utf8PathBuf;
 use clap::Args;
-use waymark_core::envelope::{success_envelope, Meta};
+use waymark_core::envelope::success_envelope;
 use waymark_core::error::{ValidationIssue, WaymarkError};
 use waymark_core::model::{FieldKey, FieldValue};
 use waymark_core::ops::create::CreateRequest;
@@ -19,7 +19,6 @@ use waymark_core::ops::{create, OpOptions};
 use waymark_core::Project;
 
 use super::{emit, err_line};
-use waymark_core::view::item_json;
 
 /// Arguments of `waymark create`.
 #[derive(Debug, Args)]
@@ -60,9 +59,15 @@ pub struct CreateArgs {
     #[arg(long = "dependency", value_name = "ID", action = clap::ArgAction::Append)]
     pub dependency: Vec<String>,
 
-    /// Stable ID to soft-link to. Repeatable; the link is stored on both sides.
+    /// Stable ID to soft-link to. Repeatable; the link is stored on the new item,
+    /// and on the other side only with `--cascade`.
     #[arg(long = "link", value_name = "ID", action = clap::ArgAction::Append)]
     pub link: Vec<String>,
+
+    /// Consent to a cross-item write: also record the link on the other side,
+    /// which requires you to own it. Defaults to off.
+    #[arg(long)]
+    pub cascade: bool,
 
     /// Validate and report what would be written, without writing.
     #[arg(long)]
@@ -98,27 +103,14 @@ pub fn run(
     for link in args.link {
         request = request.with_soft_link(link);
     }
-    let options = if args.dry_run {
-        options.clone().dry_run()
-    } else {
-        options.clone()
-    };
+    let options = options.clone().flags(args.cascade, args.dry_run);
 
     let created = create::create(project, request, &options)?;
 
     if json {
         emit(&success_envelope(
-            serde_json::json!({
-                "id": created.item.id.as_str(),
-                "path": created.path.to_string(),
-                "written": created.written,
-                "item": item_json(&created.item, &created.path),
-                "partners": created.partners.iter().map(|partner| {
-                    item_json(&partner.item, &partner.path)
-                }).collect::<Vec<_>>(),
-                "fingerprints": created.fingerprints.iter().map(|fingerprint| fingerprint.as_str()).collect::<Vec<_>>(),
-            }),
-            Meta::direct_file_scoped(),
+            waymark_core::view::create_result_json(&created),
+            created.meta.clone(),
         ))?;
     } else if created.written {
         err_line(&format!("created {}", created.item.id));
@@ -132,6 +124,15 @@ pub fn run(
         for partner in &created.partners {
             err_line(&format!("  would update {}", partner.item.id));
         }
+    }
+    for partner in &created.untouched {
+        err_line(&format!(
+            "  {} left alone (it did not record the link)",
+            partner.item.id
+        ));
+    }
+    for warning in &created.meta.warnings {
+        err_line(&format!("  {}: {}", warning.code, warning.message));
     }
     Ok(())
 }
