@@ -582,6 +582,26 @@ pub fn archive_leftovers_summary(target: &WorkItemId, untouched: usize) -> Optio
     }
 }
 
+/// The partner a one-sided soft-link change left as it is.
+///
+/// `None` when the change wrote both sides, or when the partner's document is
+/// missing or archived and there was nothing to leave alone:
+///
+/// ```json
+/// {"id": "wm-…", "path": "work/task/wm-….md", "owner": "frank", "owned": true}
+/// ```
+///
+/// `owned` says whether consent would have been enough to rewrite it, which is
+/// the question a caller asks after seeing that the partner was left alone.
+pub fn link_untouched_json(untouched: &crate::ops::link::UntouchedLink) -> Value {
+    json!({
+        "id": untouched.id.as_str(),
+        "path": untouched.path.as_str(),
+        "owner": untouched.owner,
+        "owned": untouched.owned,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

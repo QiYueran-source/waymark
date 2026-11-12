@@ -111,7 +111,7 @@ fn both_ends_are_sorted_and_deduplicated() {
     }
 
     // A link from the other side reaches the same state, not a second copy.
-    remove_soft_link(&project, &d, &a, &options()).unwrap();
+    remove_soft_link(&project, &d, &a, &options().with_cascade()).unwrap();
     assert!(links(&project, &d).is_empty());
     assert!(!links(&project, &a).contains(&d));
 }
@@ -186,18 +186,95 @@ fn an_archived_target_or_source_is_item_archived() {
 }
 
 #[test]
-fn removing_a_link_updates_both_sides() {
+fn removing_a_link_without_consent_leaves_the_partner_byte_identical() {
     let (_dir, project) = project();
     let left = make(&project, "task", "left");
     let right = make(&project, "bug", "right");
     add_soft_link(&project, &left, &right, &options()).unwrap();
+    let partner = document(&project, &right);
 
     let outcome = remove_soft_link(&project, &left, &right, &options()).unwrap();
 
     assert!(outcome.changed && outcome.written);
+    assert_eq!(outcome.other_id.as_str(), right);
+    assert_eq!(
+        outcome.fingerprints.len(),
+        1,
+        "only the caller's document was replaced"
+    );
+    assert!(
+        outcome.other_untouched.is_some(),
+        "the partner is reported as left alone"
+    );
+    let untouched = outcome
+        .other_untouched
+        .as_ref()
+        .expect("the partner is reported as left alone");
+    assert_eq!(untouched.id.as_str(), right);
+    assert_eq!(untouched.path, read::read(&project, &right).unwrap().path);
+    assert_eq!(untouched.owner, "frank");
+    assert!(
+        !untouched.owned,
+        "no operator is configured, so nobody owns the partner"
+    );
+    assert!(outcome.other.is_none(), "the partner was not rewritten");
+    assert!(outcome.other_path.is_none());
+    assert!(!document(&project, &left).contains("soft_links"));
+    assert!(links(&project, &left).is_empty());
+    assert_eq!(
+        document(&project, &right),
+        partner,
+        "the partner keeps its bytes and its updated_at"
+    );
+    assert_eq!(
+        links(&project, &right),
+        vec![left.clone()],
+        "the partner still lists the link"
+    );
+}
+
+#[test]
+fn a_one_sided_removal_of_a_partner_i_own_is_reported_as_mine() {
+    let (_dir, project) = project();
+    waymark_core::ops::local_config::set_scalar(
+        &project,
+        waymark_core::ops::config::Scalar::Operator,
+        "frank",
+        &options(),
+    )
+    .unwrap();
+    let left = make(&project, "task", "left");
+    let right = make(&project, "bug", "right");
+    add_soft_link(&project, &left, &right, &options()).unwrap();
+    let partner = document(&project, &right);
+
+    let outcome = remove_soft_link(&project, &left, &right, &options()).unwrap();
+
+    let untouched = outcome.other_untouched.as_ref().unwrap();
+    assert!(
+        untouched.owned,
+        "the partner belongs to the effective operator"
+    );
+    assert_eq!(document(&project, &right), partner);
+}
+
+#[test]
+fn removing_a_link_with_consent_updates_both_owned_sides() {
+    let (_dir, project) = project();
+    let left = make(&project, "task", "left");
+    let right = make(&project, "bug", "right");
+    add_soft_link(&project, &left, &right, &options()).unwrap();
+    let consented = options().with_cascade();
+
+    let outcome = remove_soft_link(&project, &left, &right, &consented).unwrap();
+
+    assert_eq!(outcome.fingerprints.len(), 2);
+    assert_eq!(
+        outcome.other.as_ref().map(|item| &item.id),
+        Some(&outcome.other_id)
+    );
     assert!(links(&project, &left).is_empty());
     assert!(links(&project, &right).is_empty());
-    assert!(!document(&project, &left).contains("soft_links"));
 }
 
 #[test]
@@ -209,24 +286,39 @@ fn removing_a_link_that_does_not_exist_is_an_invalid_relationship() {
     let error = remove_soft_link(&project, &left, &right, &options()).unwrap_err();
 
     assert_eq!(error.code(), Code::InvalidRelationship);
+
+    let consented = options().with_cascade();
+    let error = remove_soft_link(&project, &left, &right, &consented).unwrap_err();
+
+    assert_eq!(
+        error.code(),
+        Code::InvalidRelationship,
+        "consent does not make an absent link removable"
+    );
 }
 
 #[test]
 fn removing_a_link_to_a_deleted_target_cleans_the_surviving_side() {
-    let (_dir, project) = project();
-    let left = make(&project, "task", "left");
-    let right = make(&project, "task", "right");
-    add_soft_link(&project, &left, &right, &options()).unwrap();
+    for options in [options(), options().with_cascade()] {
+        let (_dir, project) = project();
+        let left = make(&project, "task", "left");
+        let right = make(&project, "task", "right");
+        add_soft_link(&project, &left, &right, &options).unwrap();
 
-    // Someone deletes the other document behind our back.
-    let path = read::read(&project, &right).unwrap().path;
-    std::fs::remove_file(path).unwrap();
+        // Someone deletes the other document behind our back.
+        let path = read::read(&project, &right).unwrap().path;
+        std::fs::remove_file(path).unwrap();
 
-    let outcome = remove_soft_link(&project, &left, &right, &options()).unwrap();
+        let outcome = remove_soft_link(&project, &left, &right, &options).unwrap();
 
-    assert!(outcome.written);
-    assert!(outcome.other.is_none(), "there was nothing to rewrite");
-    assert!(links(&project, &left).is_empty());
+        assert!(outcome.written);
+        assert!(outcome.other.is_none(), "there was nothing to rewrite");
+        assert!(
+            outcome.other_untouched.is_none(),
+            "a missing partner is not reported as left alone"
+        );
+        assert!(links(&project, &left).is_empty());
+    }
 }
 
 #[test]

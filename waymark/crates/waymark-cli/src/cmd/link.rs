@@ -170,7 +170,17 @@ fn apply(
         "{prefix}{} {relation} {}",
         outcome.item.id, outcome.other_id
     ));
-    if outcome.other.is_none() {
+    if let Some(untouched) = &outcome.other_untouched {
+        err_line(&format!(
+            "  {} {unchanged}",
+            untouched.id,
+            unchanged = if options.dry_run {
+                "is left alone and still lists this link"
+            } else {
+                "was left alone"
+            }
+        ));
+    } else if outcome.other.is_none() {
         err_line(&format!(
             "  {} had no document; only {} was updated",
             outcome.other_id, outcome.item.id
@@ -199,6 +209,7 @@ fn payload(outcome: &LinkOutcome, verb: Verb) -> serde_json::Value {
             "soft_links": outcome.item.soft_links.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
             "fingerprints": outcome.fingerprints.iter().map(|f| f.as_str()).collect::<Vec<_>>(),
             "other_item": outcome.other.as_ref().zip(outcome.other_path.as_ref()).map(|(item, path)| item_json(item, path)),
+            "other_untouched": outcome.other_untouched.as_ref().map(waymark_core::view::link_untouched_json),
         }),
     )
 }
