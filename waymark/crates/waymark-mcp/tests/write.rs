@@ -676,7 +676,10 @@ async fn soft_links_are_written_on_both_sides_as_one_batch() {
     let client = common::Client::connect(fixture.root.clone()).await;
 
     let result = client
-        .call("waymark_add_soft_link", json!({"id": left, "other": right}))
+        .call(
+            "waymark_add_soft_link",
+            json!({"id": left, "other": right, "cascade": true}),
+        )
         .await;
     let envelope = common::envelope(&result);
     assert_eq!(envelope["ok"], true);
@@ -684,6 +687,7 @@ async fn soft_links_are_written_on_both_sides_as_one_batch() {
     assert_eq!(envelope["data"]["other"], right);
     assert_eq!(envelope["data"]["soft_links"], json!([right]));
     assert_eq!(envelope["data"]["other_item"]["soft_links"], json!([left]));
+    assert_eq!(envelope["data"]["partner_unsynchronised"], false);
     assert_eq!(
         envelope["data"]["fingerprints"].as_array().unwrap().len(),
         2
@@ -702,6 +706,52 @@ async fn soft_links_are_written_on_both_sides_as_one_batch() {
     assert_eq!(envelope["data"]["soft_links"], json!([]));
     assert_eq!(envelope["data"]["changed"], true);
     assert!(!common::read(&right_path).contains(&format!("- {left}")));
+
+    client.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_soft_link_without_consent_is_recorded_on_one_side_only() {
+    let fixture = common::fixture(&["one", "two"]);
+    let left = fixture.ids[0].clone();
+    let right = fixture.ids[1].clone();
+    let right_path = fixture
+        .root
+        .join("work")
+        .join("task")
+        .join(format!("{right}.md"));
+    let right_document = common::read(&right_path);
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    let result = client
+        .call("waymark_add_soft_link", json!({"id": left, "other": right}))
+        .await;
+    let envelope = common::envelope(&result);
+    assert_eq!(envelope["ok"], true, "{envelope}");
+    assert_eq!(envelope["data"]["soft_links"], json!([right]));
+    assert_eq!(envelope["data"]["other_item"], serde_json::Value::Null);
+    assert_eq!(
+        envelope["data"]["partner_unsynchronised"],
+        json!(true),
+        "the result says the pair is one-sided"
+    );
+    assert_eq!(
+        envelope["data"]["fingerprints"].as_array().unwrap().len(),
+        1
+    );
+    assert_eq!(
+        common::read(&right_path),
+        right_document,
+        "the partner is byte-identical, updated_at included"
+    );
+
+    let result = client
+        .call("waymark_add_soft_link", json!({"id": left, "other": right}))
+        .await;
+    let envelope = common::envelope(&result);
+    assert_eq!(envelope["ok"], true, "{envelope}");
+    assert_eq!(envelope["data"]["written"], false);
+    assert_eq!(envelope["data"]["partner_unsynchronised"], json!(true));
 
     client.shutdown().await;
 }

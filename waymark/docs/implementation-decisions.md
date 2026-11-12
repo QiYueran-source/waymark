@@ -571,15 +571,16 @@ operation that nobody asked for and that would be very hard to undo.
 
 ### Soft links live in `ops::link`, and both documents change in one batch
 
-**Choice:** `add_soft_link` / `remove_soft_link` write `soft_links` on **both** documents, sorted and
-deduplicated, in one `write::replace_batch` call: prevalidate both, stage both, replace both, roll back
-the first if the second fails. A duplicate link, a self-link, or a cross-kind relationship is
-`INVALID_RELATIONSHIP {relation: "soft_links"}`; a missing target is `ITEM_NOT_FOUND` and an archived
-one `ITEM_ARCHIVED`.
+**Choice:** with consent, `add_soft_link` / `remove_soft_link` write `soft_links` on **both**
+documents, sorted and deduplicated, in one `write::replace_batch` call: prevalidate both, stage both,
+replace both, roll back the first if the second fails. A duplicate link, a self-link, or a cross-kind
+relationship is `INVALID_RELATIONSHIP {relation: "soft_links"}`; a missing target is `ITEM_NOT_FOUND`
+and an archived one `ITEM_ARCHIVED`. Without consent `link add` writes one document; see "A
+non-consenting `link add` leaves the pair one-sided" below.
 
-**Why:** a symmetric edge stored on one side only is a lie that depends on which document you read.
-Sorting and deduplicating makes the persisted bytes a function of the set, so two agents that add the
-same pair in either order converge instead of producing a spurious write conflict.
+**Why:** sorting and deduplicating makes the persisted bytes a function of the set, so two agents that
+add the same pair in either order converge instead of producing a spurious write conflict, and a
+two-sided change is never left half-applied.
 
 ### Removing a soft link tolerates a missing or archived partner
 
@@ -3574,6 +3575,56 @@ and `--dry-run`, instead of one `LinkPair` shared by both verbs.
 consent and treats `--cascade` as the old two-sided path, while `add` without consent eventually
 records only the caller's side. One shared flag struct would force a single meaning onto both, and
 clap's own help is where a caller learns which verb consents to what.
+
+### A non-consenting `link add` leaves the pair one-sided
+
+**Choice:** `add_soft_link` without `options.cascade` records the link on the caller's document only.
+The partner is read to validate the request (it exists, it is not archived, it is not the caller) and
+is otherwise not written at all: same bytes, same `updated_at`, no list change. The outcome carries
+`other: None`, `other_path: None`, one fingerprint, and `partner_unsynchronised: true`; the adapters
+render `partner_unsynchronised` in the `data` block, and the CLI's human output says
+`<partner> was not changed: the link is recorded on one side only; re-run with --cascade to record it
+there too`. With `options.cascade` the pair is written as before, and `partner_unsynchronised` is
+`false`. There is no ownership check and no refusal in this operation; that arrives with its own
+ticket.
+
+**Why:** the spec calls adding a link a claim about the caller's item. Writing the partner without a
+word is exactly the collateral edit the consent rule exists to stop, and "one side only" has to be
+visible in the result or nobody can tell it from a deliberate complete link. `partner_unsynchronised`
+is a boolean rather than an enum keyed on the verb because `remove` without consent produces the
+mirror-image one-sided state in its own ticket, and that ticket can reuse the field without renaming
+anything.
+
+**Consequence:** `LinkOutcome::other == None` no longer means "the partner document is missing". It
+means "this operation did not write the partner", which is also true for a non-consenting add and for
+a repeat that changed nothing. The CLI's `had no document` line is therefore printed only for `remove`,
+where `None` still means exactly that.
+
+### A repeated non-consenting `link add` succeeds without writing
+
+**Choice:** a second `link add` that repeats an add whose caller's document already records the link,
+without consent, succeeds with `changed: false`, `written: false`, no fingerprints, and
+`partner_unsynchronised: true`, without restamping the caller's `updated_at` and without reading the
+partner for anything but that one answer. It is not an error. When the fresh add is what left the pair
+one-sided, running the same command again is the only sensible retry, and an error would either hide
+the state or push the caller toward `--cascade`. The repeat is refused with
+`INVALID_RELATIONSHIP` only when nothing is left to do:
+
+- with `--cascade` and the caller's side already listing the link (the pre-existing duplicate rule,
+  unchanged — a consented add is a claim about the pair, and the pair is already what it asks for);
+- without consent when the partner's document *also* already lists the caller, because then the pair
+  is complete and the caller's request has been satisfied.
+
+An add from the far side of a one-sided pair is not a repeat of anything: that document does not
+record the link yet, so it is an ordinary first add that records its own half and leaves the other
+document alone. A pair therefore converges when each side asks once, which is what the spec means by
+"the pair converges when each side runs its own command".
+
+**Why:** the duplicate rule's purpose is to tell a caller that the thing it asked for already exists.
+For a one-sided pair that is not the whole truth — the caller's half exists and the partner's does
+not — and the honest answer is the same result shape the first run produced, at zero cost. Restamping
+`updated_at` for a retry would also be a timestamp change for an edit that did not happen, which the
+spec forbids for the partner and which there is no reason to allow for the caller.
 
 ### The archive module no longer says "archive never cascades"
 

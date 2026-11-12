@@ -1,17 +1,39 @@
 //! `waymark link add|remove`: soft links between items.
 //!
 //! A soft link is a *symmetric, non-blocking* association: two items point at
-//! each other and neither waits for nor constrains the other. Because it is
-//! symmetric, it is stored on both sides, and both documents are rewritten as
-//! one batch — see [`crate::write::replace_batch`] for the guarantee. A crash
-//! or a failure never leaves one side pointing at the other with nothing coming
-//! back.
+//! each other and neither waits for nor constrains the other.
+//!
+//! # Consent decides how many documents are written
+//!
+//! The association is stored on both sides, but writing the second side is a
+//! cross-item write. Adding a link without [`OpOptions::cascade`] therefore
+//! records it on the document the caller named and leaves the partner exactly
+//! as it is — bytes and `updated_at` included — and the outcome says so by
+//! having no `other`. The pair is then *one-sided*: a normal, reportable state
+//! that `doctor` and `show` diagnose and that converges when each side records
+//! its own half. With `cascade`, both documents are rewritten as one batch —
+//! see [`crate::write::replace_batch`] for the guarantee, which is what makes a
+//! two-sided change all-or-nothing.
+//!
+//! This operation performs no ownership check of its own: consent alone decides.
+//!
+//! # Repeating a non-consenting add
+//!
+//! A second `link add` from the side that already records the link is not a
+//! request to refuse when the pair is still one-sided: what the caller asked
+//! for is already true, and the missing half is the other side's to record. It
+//! succeeds with `changed: false`, `written: false`, and `other: None`, so a
+//! retry neither hides the one-sided state nor restamps `updated_at`. Only a
+//! repeat that leaves nothing to do is refused: a `--cascade` repeat, and a
+//! plain repeat of a pair whose two sides already record each other.
 //!
 //! # What is rejected
 //!
 //! - a self-link (`INVALID_RELATIONSHIP`);
-//! - a link that already exists (`INVALID_RELATIONSHIP`, never a silent no-op:
-//!   a caller that asked to add a link should learn it was already there);
+//! - a link that already exists on both sides, when only the caller's side
+//!   asking is not enough — a `--cascade` repeat of a complete link
+//!   (`INVALID_RELATIONSHIP`), and a plain repeat from the side that does not
+//!   record it yet;
 //! - a target that does not exist (`ITEM_NOT_FOUND`) or is archived
 //!   (`ITEM_ARCHIVED`);
 //! - an archived source (`ITEM_ARCHIVED`).
@@ -40,10 +62,16 @@ pub const SOFT_LINKS: &str = "soft_links";
 pub struct LinkOutcome {
     /// The item the caller named, as written or as it would have been written.
     pub item: WorkItem,
-    /// The other end, as written; `None` when only the surviving side changed.
+    /// The other end, as written; `None` when its document was not written —
+    /// without consent, when it was missing, or on a repeat that changed
+    /// nothing.
     pub other: Option<WorkItem>,
     /// The other end's stable ID, whether or not its document was written.
     pub other_id: WorkItemId,
+    /// Whether this `add` left the pair one-sided: the caller's document
+    /// records the link and this operation did not write the other end.
+    /// Always `false` for `remove`.
+    pub partner_unsynchronised: bool,
     /// The document of the item the caller named.
     pub path: camino::Utf8PathBuf,
     /// The document of the other end, when it was written too.
@@ -77,13 +105,12 @@ pub fn add_soft_link(
                 "an item cannot be soft-linked to itself",
             ));
         }
-        if left.item.soft_links.contains(&right_id) {
-            return Err(WaymarkError::invalid_relationship(
-                SOFT_LINKS,
-                left.id(),
-                &right_id,
-                "the soft link already exists",
-            ));
+        // The caller's side already holds the link. With consent that is the
+        // duplicate the caller asked about; without it the pair may still be
+        // one-sided, and a retry has to answer with that state instead of an
+        // error that hides it.
+        if let Some(outcome) = repeat(project, &left, &right_id, options)? {
+            return Ok(outcome);
         }
         let right = load_partner(project, &right_id, "link add")?;
         apply_add(project, left, right, options)
@@ -152,6 +179,61 @@ fn load_partner(
     }
 }
 
+/// The answer to an `add` whose caller's side already records the link.
+///
+/// Returns `None` when the caller's side does not record it yet and the add
+/// should proceed. The partner is read only when consent was given (a consented
+/// add must judge the *pair*) or, without consent, only to confirm a document
+/// exists that itself already records the link — which without consent means
+/// nothing is left to do.
+fn repeat(
+    project: &Project,
+    left: &Loaded,
+    partner: &WorkItemId,
+    options: &OpOptions,
+) -> Result<Option<LinkOutcome>, WaymarkError> {
+    if !left.item.soft_links.contains(partner) {
+        return Ok(None);
+    }
+    if options.cascade {
+        return Err(WaymarkError::invalid_relationship(
+            SOFT_LINKS,
+            left.id(),
+            partner,
+            "the soft link already exists",
+        ));
+    }
+    let partner_records_it = match mediated::load_entry_any(project, project.locate(partner)?) {
+        Ok(right) => right.item.soft_links.contains(left.id()),
+        // A partner whose document is gone has nothing to synchronise, and the
+        // surviving side is already what the caller asked for: the outcome is
+        // the one-sided state either way.
+        Err(error) if error.code() == crate::error::Code::ItemNotFound => false,
+        Err(error) => return Err(error),
+    };
+    if partner_records_it {
+        return Err(WaymarkError::invalid_relationship(
+            SOFT_LINKS,
+            left.id(),
+            partner,
+            "the soft link already exists",
+        ));
+    }
+    let meta = link_meta(project, std::iter::once(&left.item), options);
+    Ok(Some(LinkOutcome {
+        item: left.item.clone(),
+        other: None,
+        other_id: partner.clone(),
+        partner_unsynchronised: true,
+        path: left.path.clone(),
+        other_path: None,
+        changed: false,
+        written: false,
+        fingerprints: Vec::new(),
+        meta,
+    }))
+}
+
 fn apply_add(
     project: &Project,
     left: Loaded,
@@ -161,12 +243,30 @@ fn apply_add(
     let mut left_item = left.item.clone();
     left_item.soft_links.push(right.id().clone());
     normalize_links(&mut left_item);
+    mediated::stamp_updated_at(&mut left_item, options);
+
+    if !options.cascade {
+        // Without consent the partner's document is not touched at all: no
+        // list change, no `updated_at`, not even a timestamp repair.
+        let meta = link_meta(project, std::iter::once(&left_item), options);
+        let fingerprint = mediated::commit(&left, &left_item, options)?;
+        return Ok(LinkOutcome {
+            other: None,
+            other_id: right.id().clone(),
+            partner_unsynchronised: true,
+            other_path: None,
+            changed: true,
+            written: fingerprint.is_some(),
+            fingerprints: fingerprint.into_iter().collect(),
+            meta,
+            path: left.path.clone(),
+            item: left_item,
+        });
+    }
 
     let mut right_item = right.item.clone();
     right_item.soft_links.push(left.id().clone());
     normalize_links(&mut right_item);
-
-    mediated::stamp_updated_at(&mut left_item, options);
     mediated::stamp_updated_at(&mut right_item, options);
 
     let meta = link_meta(project, [&left_item, &right_item], options);
@@ -195,6 +295,7 @@ fn apply_remove(
             item: left_item,
             other: None,
             other_id: partner.clone(),
+            partner_unsynchronised: false,
             other_path: None,
             changed: true,
             written: fingerprint.is_some(),
@@ -226,6 +327,7 @@ fn commit_pair(
             item: left_item.clone(),
             other: Some(right_item.clone()),
             other_id: right.id().clone(),
+            partner_unsynchronised: false,
             path: left.path.clone(),
             other_path: Some(right.path.clone()),
             changed: true,
@@ -256,6 +358,7 @@ fn commit_pair(
         item: left_item.clone(),
         other: Some(right_item.clone()),
         other_id: right.id().clone(),
+        partner_unsynchronised: false,
         path: left.path.clone(),
         other_path: Some(right.path.clone()),
         changed: true,
