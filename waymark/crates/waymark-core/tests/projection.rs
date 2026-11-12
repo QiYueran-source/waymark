@@ -384,10 +384,6 @@ fn a_projection_loaded_with_a_configured_cache_uses_that_capacity() {
     assert_eq!(LoadOptions::default().max_attempts, 3);
 }
 
-// Two stems that differ only in case are two files only on a
-// case-sensitive filesystem; Windows owns that difference with the platform
-// effort.
-#[cfg(not(windows))]
 #[test]
 fn a_scoped_read_reports_a_soft_link_the_partner_never_recorded() {
     let (_dir, project) = project();
@@ -417,6 +413,10 @@ fn a_scoped_read_reports_a_soft_link_the_partner_never_recorded() {
     assert!(partner.soft_link_findings.is_empty(), "{partner:?}");
 }
 
+// Two stems that differ only in case are two files only on a
+// case-sensitive filesystem; Windows owns that difference with the platform
+// effort.
+#[cfg(not(windows))]
 #[test]
 fn a_case_variant_document_makes_the_projection_scoped_and_names_the_path() {
     let dir = tempfile::tempdir().unwrap();

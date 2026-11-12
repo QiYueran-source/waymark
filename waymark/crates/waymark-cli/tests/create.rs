@@ -271,7 +271,7 @@ fn create_dry_run_performs_every_check_and_writes_nothing() {
 fn create_link_without_cascade_leaves_the_partner_byte_identical_and_names_it() {
     let (_dir, root) = project();
     let linked = create_one(&root);
-    let partner_path = root.join(format!("work/task/{linked}.md"));
+    let partner_path = root.join("work").join("task").join(format!("{linked}.md"));
     let before = std::fs::read(&partner_path).expect("the partner document reads");
 
     let result = create(&root, "linked", &["--link", &linked]);
@@ -302,7 +302,7 @@ fn create_link_without_cascade_leaves_the_partner_byte_identical_and_names_it() 
 fn create_link_with_cascade_rewrites_a_partner_the_operator_owns_and_reports_it() {
     let (_dir, root) = project();
     let linked = create_one(&root);
-    let partner_path = root.join(format!("work/task/{linked}.md"));
+    let partner_path = root.join("work").join("task").join(format!("{linked}.md"));
 
     // The partner is frank's; the operator is recorded the way a person records
     // one, so Git's `user.name` cannot decide the answer.
