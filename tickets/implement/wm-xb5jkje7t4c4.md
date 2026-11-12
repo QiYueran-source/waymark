@@ -3,11 +3,12 @@ schema: 1
 id: wm-xb5jkje7t4c4
 title: Unify cross-item write behaviour on leave-and-report
 category: implement
-status: open
+status: closed
 owner: frank
 creator: Frank
 created_at: 2026-11-12T11:36:09Z
-updated_at: 2026-11-12T11:36:09Z
+updated_at: 2026-11-12T11:49:36Z
+closed_at: 2026-11-12T11:49:36Z
 parent: wm-62yfmh5j41t5
 ---
 ## Parent
