@@ -9,6 +9,9 @@ The alternative was to make `operator` block writes outright, the way the glossa
 - Block every write from a mismatched operator: rejected because it enforces nothing against direct file edits, breaks shared checkouts, and turns a warning into a rule the data model cannot support.
 - A `--force` flag beside `cascade`: rejected because both doors lead to the same write, and taking over another owner's item should be an owner transfer, not a bypass.
 - Auto-completing a one-sided soft link on read: rejected because no read may rewrite a document, and it would move "whose edit was this" into a read.
+- Cleaning inbound references during archive regardless of owner: rejected because an irreversible deletion should not silently rewrite somebody else's document, and the cleanup can be done later by the person who owns it.
+
+Archive follows the same rule in a stronger form: without `cascade` it rewrites nothing but the archived item, and it is never refused because someone else's document still points at the target. The reference is left stale and `doctor` reports it to its owner. Derived state is deliberately left alone too — a dependency on an archived item does not make the dependent blocked — so an archive changes only the archiver's files and every other change is triggered by the person it affects. The cost is a stale reference nobody is told about except through their own `doctor` run; the alternative, rewriting other people's documents during a deletion, was judged worse.
 
 ## Consequences
 
