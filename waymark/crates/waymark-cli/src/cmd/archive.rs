@@ -28,6 +28,11 @@ pub struct ArchiveArgs {
     /// Report the plan, including every relationship removal, without writing.
     #[arg(long)]
     pub dry_run: bool,
+
+    /// Consent to a cross-item write: also clean up inbound references from
+    /// other items you own.
+    #[arg(long)]
+    pub cascade: bool,
 }
 
 /// Run `waymark archive`.
@@ -37,11 +42,13 @@ pub fn run(
     options: &OpOptions,
     json: bool,
 ) -> Result<(), WaymarkError> {
-    let options = if args.dry_run {
-        options.clone().dry_run()
-    } else {
-        options.clone()
-    };
+    let mut options = options.clone();
+    if args.dry_run {
+        options = options.dry_run();
+    }
+    if args.cascade {
+        options.cascade = true;
+    }
     let outcome = archive::archive(project, &args.id, args.reason.as_deref(), &options)?;
 
     if json {

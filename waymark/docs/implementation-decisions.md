@@ -3535,3 +3535,49 @@ the code enforces it. A materialised glibc 2.35 (Ubuntu 22.04, this development 
 `weak version 'GLIBC_2.39' not found` before any Waymark code runs, and no document said so. Building on
 an older image or against musl would lower the floor, but that is a change to the release matrix and a
 decision of its own, not a silent consequence of where the package job happens to run.
+
+# Cross-item write consent (expand step)
+
+### `cascade` is one boolean on `OpOptions`, off by default
+
+**Choice:** the consent flag is `OpOptions::cascade`, a plain `bool` whose default is `false`, with
+`OpOptions::with_cascade()` as the builder and the public field for an adapter that has it as a flag.
+The CLI exposes it as `--cascade` on `archive`, `link add`, and `link remove`; the MCP tools expose it
+as the optional boolean `cascade` on `waymark_archive_work_item`, `waymark_add_soft_link`, and
+`waymark_remove_soft_link`. `params::write_options(dry_run, cascade, lock_timeout_ms)` is the one
+place the MCP adapter turns the flag into options.
+
+**Why:** the flag belongs to the options every operation already receives, so an operation that can
+reach a second document reads it without a parameter per function and an operation that cannot simply
+ignores it. `create --link` will read the same field when it lands; giving it a second spelling now
+would be two vocabularies for one rule.
+
+### Archive's outcome carries the untouched documents and their relations
+
+**Choice:** `ArchiveOutcome` has `untouched: Vec<UntouchedItem>` (`{id, path}`) and
+`untouched_relations: Vec<UntouchedRelation>` (`{from, relation}`), both empty today. They sit beside
+`affected` and `removals`, which describe the opposite outcome. Neither is rendered in the JSON
+payload yet, because nothing populates them and a permanent empty key would be a promise the CLI
+does not keep.
+
+**Why:** the adapters already render "which documents did this archive rewrite"; the consent rule adds
+"which did it deliberately leave alone", and that list has to travel with the outcome so an adapter
+never re-reads the project to describe what just happened. Adding the fields now lets the slice that
+starts populating them change no call site.
+
+### `link` takes its consent per subcommand, not on the shared pair
+
+**Choice:** `LinkAddArgs` and `LinkRemoveArgs` are two argument structs with their own `--cascade`
+and `--dry-run`, instead of one `LinkPair` shared by both verbs.
+
+**Why:** the two verbs carry different consent semantics — `remove` writes the caller's side without
+consent and treats `--cascade` as the old two-sided path, while `add` without consent eventually
+records only the caller's side. One shared flag struct would force a single meaning onto both, and
+clap's own help is where a caller learns which verb consents to what.
+
+### The archive module no longer says "archive never cascades"
+
+**Choice:** the module documentation and the child check now say archive never cascades *to children*.
+
+**Why:** with `cascade` meaning inbound cleanup, the bare sentence would read as a contradiction of a
+flag that now exists.

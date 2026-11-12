@@ -38,6 +38,20 @@ pub fn options(dry_run: bool, lock_timeout_ms: Option<u64>) -> OpOptions {
     }
 }
 
+/// The operation options of a write that can reach a second document.
+///
+/// `cascade` is the consent flag, the same one the CLI exposes as
+/// `--cascade`; it defaults to off, so a tool that is not given it writes
+/// nothing but its own target.
+pub fn write_options(dry_run: bool, cascade: bool, lock_timeout_ms: Option<u64>) -> OpOptions {
+    let options = options(dry_run, lock_timeout_ms);
+    if cascade {
+        options.with_cascade()
+    } else {
+        options
+    }
+}
+
 /// A `VALIDATION_ERROR` about one adapter argument, in the shared shape.
 ///
 /// The adapter performs the same checks the CLI performs before a domain call

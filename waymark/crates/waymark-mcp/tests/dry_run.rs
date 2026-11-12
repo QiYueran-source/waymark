@@ -156,15 +156,15 @@ async fn every_dry_run_tool_leaves_the_project_byte_identical() {
         ),
         (
             "waymark_add_soft_link",
-            json!({"id": id0, "other": id2, "dry_run": true}),
+            json!({"id": id0, "other": id2, "cascade": true, "dry_run": true}),
         ),
         (
             "waymark_remove_soft_link",
-            json!({"id": id0, "other": id1, "dry_run": true}),
+            json!({"id": id0, "other": id1, "cascade": true, "dry_run": true}),
         ),
         (
             "waymark_archive_work_item",
-            json!({"id": id2, "reason": "would retire", "dry_run": true}),
+            json!({"id": id2, "reason": "would retire", "cascade": true, "dry_run": true}),
         ),
     ];
 

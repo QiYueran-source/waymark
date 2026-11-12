@@ -203,6 +203,34 @@ fn a_dry_run_reports_the_plan_and_writes_nothing() {
 }
 
 #[test]
+fn cascade_is_accepted_and_changes_nothing_about_the_result() {
+    let (_dir, root) = project();
+    let target = create(&root, "target");
+    let dependent = create(&root, "dependent");
+    json_ok(&root, &["dependency", "add", &dependent, &target]);
+
+    let envelope = json_ok(&root, &["archive", &target, "--cascade"]);
+
+    assert_eq!(
+        envelope["data"]["removals"],
+        serde_json::json!([{"from": dependent, "relation": "dependencies"}])
+    );
+    assert!(!document(&root, &dependent).contains(&target));
+}
+
+#[test]
+fn cascade_is_accepted_on_a_dry_run_too() {
+    let (_dir, root) = project();
+    let target = create(&root, "target");
+    let before = document(&root, &target);
+
+    let envelope = json_ok(&root, &["archive", &target, "--cascade", "--dry-run"]);
+
+    assert_eq!(envelope["data"]["written"], serde_json::json!(false));
+    assert_eq!(document(&root, &target), before, "nothing was written");
+}
+
+#[test]
 fn a_child_refuses_the_archive_with_the_child_list_and_conflict_exit() {
     let (_dir, root) = project();
     let parent = create(&root, "parent");

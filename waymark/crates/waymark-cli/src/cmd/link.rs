@@ -2,7 +2,7 @@
 //!
 //! A soft link is stored on both ends and both documents are replaced as one
 //! all-or-nothing batch; that rule lives in `waymark_core::ops::link`, and this
-//! module only parses the two IDs and renders the result.
+//! module only parses the IDs and flags and renders the result.
 
 use clap::{Args, Subcommand};
 use waymark_core::envelope::success_envelope;
@@ -22,17 +22,21 @@ pub struct LinkArgs {
 }
 
 /// The link family.
+///
+/// `add` and `remove` take their own argument sets instead of sharing one
+/// struct, because the two verbs carry different consent flags: `add` can
+/// rewrite the partner, `remove` cannot.
 #[derive(Debug, Subcommand)]
 pub enum LinkCommand {
     /// Associate two items with each other.
-    Add(LinkPair),
+    Add(LinkAddArgs),
     /// Drop the association.
-    Remove(LinkPair),
+    Remove(LinkRemoveArgs),
 }
 
-/// The two IDs a link is made of.
+/// Arguments of `waymark link add`.
 #[derive(Debug, Args)]
-pub struct LinkPair {
+pub struct LinkAddArgs {
     /// Stable ID of one end.
     #[arg(value_name = "ID")]
     pub id: String,
@@ -40,6 +44,32 @@ pub struct LinkPair {
     /// Stable ID of the other end.
     #[arg(value_name = "OTHER_ID")]
     pub other: String,
+
+    /// Consent to a cross-item write: also record the link on the other end
+    /// when you own it.
+    #[arg(long)]
+    pub cascade: bool,
+
+    /// Report the change without writing.
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+/// Arguments of `waymark link remove`.
+#[derive(Debug, Args)]
+pub struct LinkRemoveArgs {
+    /// Stable ID of one end.
+    #[arg(value_name = "ID")]
+    pub id: String,
+
+    /// Stable ID of the other end.
+    #[arg(value_name = "OTHER_ID")]
+    pub other: String,
+
+    /// Consent to a cross-item write: also drop the link from the other end
+    /// when you own it.
+    #[arg(long)]
+    pub cascade: bool,
 
     /// Report the change without writing.
     #[arg(long)]
@@ -61,26 +91,66 @@ pub fn run(
     json: bool,
 ) -> Result<(), WaymarkError> {
     match args.command {
-        LinkCommand::Add(pair) => apply(project, &pair, options, json, Verb::Add),
-        LinkCommand::Remove(pair) => apply(project, &pair, options, json, Verb::Remove),
+        LinkCommand::Add(args) => apply(project, &args, args.cascade, options, json, Verb::Add),
+        LinkCommand::Remove(args) => {
+            apply(project, &args, args.cascade, options, json, Verb::Remove)
+        }
+    }
+}
+
+/// The two ends and the two flags either verb accepts.
+trait LinkArguments {
+    fn id(&self) -> &str;
+    fn other(&self) -> &str;
+    fn dry_run(&self) -> bool;
+}
+
+impl LinkArguments for LinkAddArgs {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn other(&self) -> &str {
+        &self.other
+    }
+
+    fn dry_run(&self) -> bool {
+        self.dry_run
+    }
+}
+
+impl LinkArguments for LinkRemoveArgs {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn other(&self) -> &str {
+        &self.other
+    }
+
+    fn dry_run(&self) -> bool {
+        self.dry_run
     }
 }
 
 fn apply(
     project: &Project,
-    pair: &LinkPair,
+    pair: &impl LinkArguments,
+    cascade: bool,
     options: &OpOptions,
     json: bool,
     verb: Verb,
 ) -> Result<(), WaymarkError> {
-    let options = if pair.dry_run {
-        options.clone().dry_run()
-    } else {
-        options.clone()
-    };
+    let mut options = options.clone();
+    if cascade {
+        options.cascade = true;
+    }
+    if pair.dry_run() {
+        options = options.dry_run();
+    }
     let outcome = match verb {
-        Verb::Add => link::add_soft_link(project, &pair.id, &pair.other, &options)?,
-        Verb::Remove => link::remove_soft_link(project, &pair.id, &pair.other, &options)?,
+        Verb::Add => link::add_soft_link(project, pair.id(), pair.other(), &options)?,
+        Verb::Remove => link::remove_soft_link(project, pair.id(), pair.other(), &options)?,
     };
 
     if json {

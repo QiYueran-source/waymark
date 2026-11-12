@@ -11,8 +11,9 @@
 //! - re-archiving is refused with `ALREADY_ARCHIVED` and replaces neither
 //!   marker, so the first archive is the durable answer;
 //! - an unarchived child blocks it with `HAS_ACTIVE_CHILDREN {children}`.
-//!   Archive never cascades: a caller retires children one at a time, moves
-//!   them, or clears their parent;
+//!   Archive never cascades to children: a caller retires them one at a time,
+//!   moves them, or clears their parent. `cascade` is consent for inbound
+//!   cleanup, not for touching the hierarchy below the target;
 //! - active files that point *at* the target lose the inbound edge
 //!   (`dependencies`, `parent`, `soft_links`). Those files changed, so they get
 //!   a new `updated_at`; their body and custom fields are untouched, and an
@@ -107,6 +108,27 @@ pub struct AffectedItem {
     pub path: Utf8PathBuf,
 }
 
+/// One document the archive leaves exactly as it is.
+///
+/// Consent never extends to another owner's document, so a reference from one
+/// is preserved and reported here instead of being cleaned up.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UntouchedItem {
+    /// The document that still references the archived item.
+    pub id: WorkItemId,
+    /// That document.
+    pub path: Utf8PathBuf,
+}
+
+/// The relation an untouched document still points at the archived item with.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct UntouchedRelation {
+    /// The item that still references the archived item.
+    pub from: WorkItemId,
+    /// The field that still names the archived ID.
+    pub relation: InboundRelation,
+}
+
 /// What an archive produced, or would produce on a dry run.
 #[derive(Debug, Clone)]
 pub struct ArchiveOutcome {
@@ -122,6 +144,14 @@ pub struct ArchiveOutcome {
     pub removals: Vec<PlannedRemoval>,
     /// Every active document cleaned up, sorted by stable ID.
     pub affected: Vec<AffectedItem>,
+    /// Every document left as it is, sorted by stable ID.
+    ///
+    /// Nothing populates this list yet: it exists so an adapter can render
+    /// "left for its owner" without re-reading the project.
+    pub untouched: Vec<UntouchedItem>,
+    /// The relations each untouched document keeps, in stable-ID then relation
+    /// order. Empty alongside an empty `untouched`.
+    pub untouched_relations: Vec<UntouchedRelation>,
     /// Whether the batch was applied. Always `false` on a dry run.
     pub written: bool,
     /// One fingerprint per replaced document, target first then `affected`
@@ -199,7 +229,7 @@ fn apply(
     }
 
     // Children first: an active child means the hierarchy would be detached,
-    // and archive is one item per call, never a cascade.
+    // and archive is one item per call; consent never reaches children.
     let children = active_children(&documents, &target.item.id);
     if !children.is_empty() {
         return Err(WaymarkError::has_active_children(
@@ -266,6 +296,8 @@ fn apply(
             archive_reason: reason,
             removals,
             affected,
+            untouched: Vec::new(),
+            untouched_relations: Vec::new(),
             written: false,
             fingerprints: Vec::new(),
             meta,
@@ -287,6 +319,8 @@ fn apply(
         archive_reason: reason,
         removals,
         affected,
+        untouched: Vec::new(),
+        untouched_relations: Vec::new(),
         written: true,
         fingerprints,
         meta,

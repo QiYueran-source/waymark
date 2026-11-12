@@ -204,6 +204,46 @@ fn link_add_and_remove_touch_both_documents() {
 }
 
 #[test]
+fn link_accepts_cascade_on_both_subcommands_and_keeps_todays_behaviour() {
+    let (_dir, root) = project();
+    let left = create(&root, "left");
+    let right = create(&root, "right");
+
+    let added = json_ok(&root, &["link", "add", &left, &right, "--cascade"]);
+    assert_eq!(
+        added["data"]["item"]["soft_links"],
+        serde_json::json!([right])
+    );
+    assert_eq!(
+        added["data"]["other_item"]["soft_links"],
+        serde_json::json!([left])
+    );
+
+    let removed = json_ok(&root, &["link", "remove", &left, &right, "--cascade"]);
+    assert_eq!(removed["data"]["soft_links"], serde_json::json!([]));
+    assert_eq!(
+        removed["data"]["other_item"]["soft_links"],
+        serde_json::json!([])
+    );
+}
+
+#[test]
+fn cascade_is_accepted_on_a_link_dry_run() {
+    let (_dir, root) = project();
+    let left = create(&root, "left");
+    let right = create(&root, "right");
+
+    let preview = json_ok(
+        &root,
+        &["link", "add", &left, &right, "--cascade", "--dry-run"],
+    );
+
+    assert_eq!(preview["data"]["written"], serde_json::json!(false));
+    let shown = json_ok(&root, &["show", &left]);
+    assert_eq!(shown["data"]["item"]["soft_links"], serde_json::json!([]));
+}
+
+#[test]
 fn a_duplicate_link_is_an_invalid_relationship() {
     let (_dir, root) = project();
     let left = create(&root, "left");

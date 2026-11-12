@@ -523,7 +523,9 @@ impl WaymarkServer {
     /// Associate two items with a symmetric, non-blocking soft link. Both
     /// documents are replaced as one all-or-nothing batch.
     ///
-    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// `cascade` is the consent flag for a cross-item write: off by default,
+    /// it also rewrites the other item's document, which requires you to own
+    /// it. `lock_timeout_ms` bounds the wait for the project write lock; `0`
     /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_add_soft_link",
@@ -543,7 +545,7 @@ impl WaymarkServer {
                 &project,
                 &args.id,
                 &args.other,
-                &params::options(args.dry_run, args.lock_timeout_ms),
+                &params::write_options(args.dry_run, args.cascade, args.lock_timeout_ms),
             )?;
             Ok(link_result(&outcome, LinkVerb::Add))
         })
@@ -553,7 +555,9 @@ impl WaymarkServer {
     /// is `INVALID_RELATIONSHIP`; when the other document is missing or
     /// archived, the surviving side alone is cleaned up.
     ///
-    /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
+    /// `cascade` is the consent flag for a cross-item write: off by default,
+    /// it also rewrites the other item's document, which requires you to own
+    /// it. `lock_timeout_ms` bounds the wait for the project write lock; `0`
     /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_remove_soft_link",
@@ -573,7 +577,7 @@ impl WaymarkServer {
                 &project,
                 &args.id,
                 &args.other,
-                &params::options(args.dry_run, args.lock_timeout_ms),
+                &params::write_options(args.dry_run, args.cascade, args.lock_timeout_ms),
             )?;
             Ok(link_result(&outcome, LinkVerb::Remove))
         })
@@ -584,6 +588,8 @@ impl WaymarkServer {
     /// the same all-or-nothing batch. Re-archiving is `ALREADY_ARCHIVED`, and an
     /// active child blocks it with `HAS_ACTIVE_CHILDREN`.
     ///
+    /// `cascade` is the consent flag for a cross-item write: off by default,
+    /// it also cleans up inbound references from other items you own.
     /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
     /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
@@ -604,7 +610,7 @@ impl WaymarkServer {
                 &project,
                 &args.id,
                 args.reason.as_deref(),
-                &params::options(args.dry_run, args.lock_timeout_ms),
+                &params::write_options(args.dry_run, args.cascade, args.lock_timeout_ms),
             )?;
             Ok(archive_result(&outcome))
         })
@@ -850,6 +856,11 @@ pub struct SoftLinkArgs {
     /// Stable ID of the other end.
     pub other: String,
 
+    /// Consent to a cross-item write: also rewrite the other item's document,
+    /// which requires you to own it. Defaults to off.
+    #[serde(default)]
+    pub cascade: bool,
+
     /// Report the change without writing it.
     #[serde(default)]
     pub dry_run: bool,
@@ -871,6 +882,11 @@ pub struct ArchiveWorkItemArgs {
     /// stores no reason.
     #[serde(default)]
     pub reason: Option<String>,
+
+    /// Consent to a cross-item write: also clean up inbound references from
+    /// other items you own. Defaults to off.
+    #[serde(default)]
+    pub cascade: bool,
 
     /// Report the archive and every planned relationship removal without
     /// writing.
