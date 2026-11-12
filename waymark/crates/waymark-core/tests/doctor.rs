@@ -314,6 +314,113 @@ fn missing_and_archived_relationship_targets_are_dangling_references() {
 }
 
 #[test]
+fn one_finding_per_relation_kind_names_each_archived_target() {
+    let (_dir, project) = project();
+    let retired = create_item(&project, "retired");
+    let other_retired = create_item(&project, "other retired");
+    let stale = create_item(&project, "points at both");
+
+    // A live document can end up pointing at an archived item through every
+    // relation kind at once: archive without consent rewrites nothing but its
+    // target, so nobody's inbound edge is cleaned up for them.
+    let mut stale_item = read_item(&task_path(&project, stale.as_str()));
+    stale_item.parent = Some(retired.clone());
+    stale_item.dependencies = vec![retired.clone(), other_retired.clone()];
+    stale_item.soft_links = vec![retired.clone()];
+    write_item(&task_path(&project, stale.as_str()), &stale_item);
+    for id in [&retired, &other_retired] {
+        let mut item = read_item(&task_path(&project, id.as_str()));
+        item.archived_at = Some(Timestamp::parse("2026-11-04T00:00:00Z").unwrap());
+        write_item(&task_path(&project, id.as_str()), &item);
+    }
+
+    let report = doctor::diagnose(&project).unwrap();
+    let dangling: Vec<&Finding> = report
+        .findings
+        .iter()
+        .filter(|finding| {
+            finding.code == Code::DanglingReference && finding.message.contains(stale.as_str())
+        })
+        .collect();
+    let mut relations: Vec<&str> = dangling
+        .iter()
+        .filter_map(|finding| {
+            ["dependencies", "parent", "soft_links"]
+                .into_iter()
+                .find(|relation| finding.message.contains(relation))
+        })
+        .collect();
+    relations.sort_unstable();
+    assert_eq!(
+        relations,
+        vec!["dependencies", "parent", "soft_links"],
+        "one finding per relation kind: {dangling:#?}"
+    );
+    for finding in &dangling {
+        assert_eq!(
+            finding.location,
+            Some(Location::work_item(&stale)),
+            "the finding is located on the referencing item: {finding:?}"
+        );
+        assert!(
+            finding.message.contains(retired.as_str())
+                || finding.message.contains(other_retired.as_str()),
+            "the finding names the archived target: {}",
+            finding.message
+        );
+        assert!(!finding.fixable, "a stale reference is repaired by hand");
+    }
+    // Both archived dependencies are named by the one dependency finding.
+    let dependencies = dangling
+        .iter()
+        .find(|finding| finding.message.contains("dependencies"))
+        .expect("a dependency finding");
+    for target in [&retired, &other_retired] {
+        assert!(
+            dependencies.message.contains(target.as_str()),
+            "{}",
+            dependencies.message
+        );
+    }
+}
+
+#[test]
+fn a_one_sided_soft_link_has_its_own_code_and_names_the_silent_side() {
+    let (_dir, project) = project();
+    let recorded = create_item(&project, "recorded here");
+    let silent = create_item(&project, "never recorded there");
+
+    // A non-cascading add leaves the link on one side only.
+    let mut recorded_item = read_item(&task_path(&project, recorded.as_str()));
+    recorded_item.soft_links = vec![silent.clone()];
+    write_item(&task_path(&project, recorded.as_str()), &recorded_item);
+
+    let report = doctor::diagnose(&project).unwrap();
+    let one_sided: Vec<&Finding> = report
+        .findings
+        .iter()
+        .filter(|finding| finding.code == Code::OneSidedSoftLink)
+        .collect();
+    assert_eq!(one_sided.len(), 1, "{:#?}", report.findings);
+    let finding = one_sided[0];
+    assert_eq!(finding.location, Some(Location::work_item(&recorded)));
+    assert!(
+        finding.message.contains(silent.as_str()),
+        "{}",
+        finding.message
+    );
+    assert!(
+        !report
+            .findings
+            .iter()
+            .any(|finding| finding.code == Code::DanglingReference),
+        "a live partner is not a dangling reference: {:?}",
+        report.findings
+    );
+    assert!(!finding.fixable);
+}
+
+#[test]
 fn dependency_and_parent_cycles_carry_their_paths() {
     let (_dir, project) = project();
     let a = create_item(&project, "a");

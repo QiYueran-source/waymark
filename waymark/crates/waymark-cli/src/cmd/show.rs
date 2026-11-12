@@ -104,6 +104,17 @@ pub fn run(
             let ids: Vec<&str> = read.item.soft_links.iter().map(|id| id.as_str()).collect();
             err_line(&format!("  soft links  {}{historical}", ids.join(", ")));
         }
+        // A soft link whose two sides disagree: the partner is gone, or it is
+        // there and never recorded the link. The diagnosis is the whole line;
+        // repairing it means editing the partner's document, which may not be
+        // mine to rewrite.
+        for displacement in &read.soft_link_findings {
+            err_line(&format!(
+                "  soft link   {} ({})",
+                displacement.kind.reason(&displacement.partner),
+                displacement.partner_owner
+            ));
+        }
         if let Some(readiness) = &read.readiness {
             for line in readiness_lines(readiness, &read.item, colour) {
                 err_line(&line);

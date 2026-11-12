@@ -1687,9 +1687,16 @@ document/configuration rewrites (a category-key migration's value rewrites can r
   are `VALIDATION_ERROR` with a `custom_fields.<key>` field location. This is
   how schema-removal drift surfaces without touching the document.
 - Missing relationship targets: the graph's `DANGLING_REFERENCE` findings.
-  Archived targets are also `DANGLING_REFERENCE`: the graph deliberately treats
-  archived items as known, so the diagnostic run adds the distinct archived
-  case itself. Neither case is repaired.
+  Archived targets are `DANGLING_REFERENCE` too: the graph deliberately treats
+  archived items as known, so the diagnostic run adds the archived case itself,
+  once per relation kind per item (`dependencies`, `parent`, `soft_links`), with
+  every archived target that kind names. Neither case is repaired, and neither
+  finding is `fixable`.
+- A soft link recorded on one side only is `ONE_SIDED_SOFT_LINK` (warning,
+  finding-only, details `{from, to, missing}`). It is never filed under
+  `DANGLING_REFERENCE`: the partner is live and simply never recorded the link,
+  which is a different fact from "the partner is archived". The two kinds are
+  exclusive, so a soft link pair produces at most one finding per direction.
 - Dependency and parent cycles: `CYCLE_DETECTED` from `Graph::diagnostics`. The
   closed path is in the message (`a -> b -> a`); `Finding` has no details field
   and the registry details shape stays frozen.
@@ -3683,3 +3690,23 @@ nothing about it is surprising.
 
 **Open:** whether the Web view should render the same column; that is a separate
 read-only presentation decision.
+
+## A one-sided soft link is its own code, diagnosed once in the view
+
+**Choice:** `ONE_SIDED_SOFT_LINK` is a warning-severity, finding-only registry code with details
+`{from, to, missing}`, located on the document that records the link. A soft link whose partner is
+archived stays `DANGLING_REFERENCE`; a soft link whose partner is live but does not record it back is
+`ONE_SIDED_SOFT_LINK`. The derivation itself — which of the two cases a pair is in, and whether the
+pair is healthy — lives in `waymark_core::view::soft_link_findings`. `doctor` turns the result into
+findings through `view::soft_link_finding`; `show` renders the same list under
+`relationships.soft_link_issues` as `{partner, partner_owner, missing, reason}` (`missing` is
+`"link"` or `"archived"`), and the CLI prints the `reason` line. A partner that does not exist at all
+is left to the existing missing-target check, and an archived item's own soft links are history and
+are not diagnosed.
+
+**Why:** "the partner never recorded it" and "the partner is gone" call for different actions, so
+collapsing them into one code would lose the distinction the reader needs. Putting the derivation in
+the view layer keeps the CLI, MCP, and JSON from each deciding which case is which. No finding or
+issue carries a suggested command: completing or dropping the other side rewrites a document its
+owner may not have consented to, and the manual repair follows Git, so the diagnosis states the fact
+and names the document that would have to change.

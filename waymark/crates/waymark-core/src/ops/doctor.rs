@@ -32,6 +32,12 @@
 //! - missing and archived relationship targets (`DANGLING_REFERENCE`) and both
 //!   cycle kinds (`CYCLE_DETECTED`), but only when the projection is complete:
 //!   a partial graph is never published as a complete review;
+//! - an archived target of `dependencies`, `parent`, or `soft_links`
+//!   (`DANGLING_REFERENCE`, one finding per relation kind per item) and a soft
+//!   link recorded on one side only (`ONE_SIDED_SOFT_LINK`, warning). Neither is
+//!   fixable and neither suggests a command: the owner of the stale document
+//!   repairs it, and completing the other side would rewrite a document that
+//!   owner may not have consented to;
 //! - an active item whose direct parent is closed (`CLOSED_PARENT`, info): a
 //!   derived observation, never an error and never a suggested repair;
 //! - timestamp incoherence (`TIMESTAMP_INCOHERENT`, warning);
@@ -63,6 +69,7 @@ use crate::model::{FieldKey, Status, WorkItem, FORMAT_GENERATION};
 use crate::ops::config::validate_both;
 use crate::projection::Projection;
 use crate::store::{Fingerprint, Project};
+use crate::view::Displacement;
 
 /// The parts of the project a full run reviews.
 pub const SCOPE: &[&str] = &[
@@ -527,40 +534,89 @@ fn inventory_problem_findings(projection: &Projection) -> Vec<Finding> {
     findings
 }
 
-/// Relationship targets that exist only in the archived population.
+/// Leftovers from an archive that never touched another owner's document.
 ///
-/// The graph treats archived items as known so a routine read is not noisy, but
-/// a health check owes the operator the distinction between "missing" and
-/// "archived": both are `DANGLING_REFERENCE`.
+/// Archiving without consent rewrites nothing but the target, so an active
+/// document can keep a dependency, a parent, or a soft link that points at an
+/// archived item. That is a stale reference its owner repairs, and this is
+/// where it surfaces.
+///
+/// Two distinct diagnoses, because the repair differs:
+///
+/// - a reference to an archived item is `DANGLING_REFERENCE`, reported once per
+///   relation kind per item, with every archived target that kind names;
+/// - a soft link recorded on one side only is `ONE_SIDED_SOFT_LINK`, reported
+///   for the document that records it, naming the partner that never did. That
+///   derivation is shared with `show`, so both surfaces agree on which case is
+///   which (see [`crate::view::soft_link_findings`]).
+///
+/// The kinds are exclusive: a partner that is archived is "the partner is
+/// gone", never "the partner never recorded it". An archived item's own edges
+/// are history and are not diagnosed, and a partner that does not exist at all
+/// stays with the global missing-target check.
 fn archived_target_findings(
     projection: &Projection,
     graph: &crate::readiness::Graph,
 ) -> Vec<Finding> {
     let mut findings = Vec::new();
     for item in projection.items() {
-        for target in &item.dependencies {
-            if graph.is_archived(target) {
-                findings.push(archived_target(&item.id, "dependencies", target));
+        if item.is_archived() {
+            continue;
+        }
+        // A soft link has two ways to be stale and they are exclusive: a
+        // partner that is archived is "gone", a live partner that lacks the
+        // link is "never recorded it". The shared derivation owns that split,
+        // so `show` and `doctor` cannot disagree about which case is which.
+        let mut archived_links = Vec::new();
+        for displacement in crate::view::soft_link_findings(item, projection) {
+            match displacement.kind {
+                Displacement::PartnerArchived => archived_links.push(displacement.partner),
+                Displacement::PartnerSilent => {
+                    findings.push(crate::view::soft_link_finding(item, &displacement))
+                }
             }
         }
-        for target in &item.soft_links {
-            if graph.is_archived(target) {
-                findings.push(archived_target(&item.id, "soft_links", target));
-            }
+        if let Some(parent) = item
+            .parent
+            .as_ref()
+            .filter(|parent| graph.is_archived(parent))
+        {
+            findings.push(archived_target(
+                &item.id,
+                "parent",
+                std::slice::from_ref(parent),
+            ));
         }
-        if let Some(target) = &item.parent {
-            if graph.is_archived(target) {
-                findings.push(archived_target(&item.id, "parent", target));
+        let relations = [
+            ("dependencies", archived_targets(graph, &item.dependencies)),
+            ("soft_links", archived_links),
+        ];
+        for (relation, targets) in relations {
+            if !targets.is_empty() {
+                findings.push(archived_target(&item.id, relation, &targets));
             }
         }
     }
     findings
 }
 
-fn archived_target(from: &WorkItemId, relation: &str, target: &WorkItemId) -> Finding {
+fn archived_targets(graph: &crate::readiness::Graph, targets: &[WorkItemId]) -> Vec<WorkItemId> {
+    targets
+        .iter()
+        .filter(|target| graph.is_archived(target))
+        .cloned()
+        .collect()
+}
+
+fn archived_target(from: &WorkItemId, relation: &str, targets: &[WorkItemId]) -> Finding {
+    let ids: Vec<&str> = targets.iter().map(WorkItemId::as_str).collect();
+    let wording = match targets.len() {
+        1 => "the archived item",
+        _ => "the archived items",
+    };
     Finding::new(
         Code::DanglingReference,
-        format!("{from} {relation} the archived item {target}"),
+        format!("{from} {relation} {wording} {}", ids.join(", ")),
     )
     .with_location(Location::work_item(from))
 }

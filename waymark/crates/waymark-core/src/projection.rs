@@ -433,6 +433,12 @@ pub struct ScopedRead {
     pub children: Vec<WorkItemId>,
     /// The active items that depend on this item.
     pub dependents: Vec<WorkItemId>,
+    /// Every soft link of this item whose two sides disagree, in stored order.
+    ///
+    /// A scoped read already holds both documents, so it can state which side
+    /// of a soft link is missing without a second scan. The derivation is
+    /// shared with the diagnostic run ([`crate::view::soft_link_findings`]).
+    pub soft_link_findings: Vec<crate::view::SoftLinkDisplacement>,
     /// The `_meta` block: `scoped`, fresh, with the diagnostics this read knows.
     pub meta: Meta,
 }
@@ -725,6 +731,7 @@ impl Projection {
             self.diagnostics()
         };
         Ok(ScopedRead {
+            soft_link_findings: crate::view::soft_link_findings(&entry.item, self),
             item: entry.item.clone(),
             path: entry.path.clone(),
             category: entry.category.clone(),
