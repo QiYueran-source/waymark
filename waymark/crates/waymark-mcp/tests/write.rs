@@ -998,6 +998,73 @@ async fn archive_without_consent_rewrites_the_target_only_and_names_the_rest() {
 }
 
 #[tokio::test]
+async fn a_cascading_archive_describes_the_same_documents_the_cli_does() {
+    let fixture = common::fixture(&["one", "two"]);
+    let target = fixture.ids[0].clone();
+    let linked = fixture.ids[1].clone();
+    let project = fixture.project();
+    act_as_owner(&fixture);
+    waymark_core::ops::link::add_soft_link(
+        &project,
+        &linked,
+        &target,
+        &common::options().with_cascade().with_operator("frank"),
+    )
+    .expect("the link is added");
+    // The partner belongs to someone else, so consent cleans nothing and the
+    // document is named as left alone.
+    waymark_core::ops::owner::transfer_owner(&project, &linked, "alice", &common::options())
+        .expect("the partner belongs to someone else");
+    let linked_path = common::task_path(&fixture.root, &linked);
+    let linked_before = common::read(&linked_path);
+    common::warm_lock(&fixture.root);
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    // A dry run reports the footprint without writing it.
+    let before = common::snapshot(&fixture.root);
+    let planned = common::envelope(
+        &client
+            .call(
+                "waymark_archive_work_item",
+                json!({"id": target, "cascade": true, "dry_run": true}),
+            )
+            .await,
+    );
+    assert_eq!(planned["ok"], true, "{planned}");
+    assert_eq!(planned["data"]["written"], false);
+    assert_eq!(common::snapshot(&fixture.root), before);
+
+    let envelope = common::envelope(
+        &client
+            .call(
+                "waymark_archive_work_item",
+                json!({"id": target, "cascade": true}),
+            )
+            .await,
+    );
+    assert_eq!(envelope["ok"], true, "{envelope}");
+    assert_eq!(
+        envelope["data"]["untouched"],
+        json!([{
+            "id": linked,
+            "path": linked_path.to_string(),
+            "relations": ["soft_links"],
+        }]),
+        "the foreign partner is named with the relation it keeps"
+    );
+    assert_eq!(envelope["data"]["removals"], json!([]));
+    assert_eq!(envelope["data"]["affected"], json!([]));
+    assert_eq!(common::read(&linked_path), linked_before);
+    assert_eq!(
+        planned["data"]["untouched"], envelope["data"]["untouched"],
+        "the preview promises exactly what the real run did"
+    );
+    assert_eq!(planned["data"]["removals"], envelope["data"]["removals"]);
+
+    client.shutdown().await;
+}
+
+#[tokio::test]
 async fn write_failures_carry_the_shared_codes_and_typed_details() {
     let fixture = common::fixture(&["one"]);
     let id = fixture.ids[0].clone();

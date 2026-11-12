@@ -9,7 +9,7 @@
 use clap::Args;
 use waymark_core::envelope::success_envelope;
 use waymark_core::error::WaymarkError;
-use waymark_core::ops::archive::{self, ArchiveOutcome, PlannedRemoval};
+use waymark_core::ops::archive;
 use waymark_core::ops::OpOptions;
 use waymark_core::Project;
 
@@ -53,7 +53,10 @@ pub fn run(
     let outcome = archive::archive(project, &args.id, args.reason.as_deref(), &options)?;
 
     if json {
-        emit(&success_envelope(payload(&outcome), outcome.meta.clone()))?;
+        emit(&success_envelope(
+            waymark_core::view::archive_result_json(&outcome),
+            outcome.meta.clone(),
+        ))?;
         return Ok(());
     }
 
@@ -97,33 +100,6 @@ pub fn run(
     Ok(())
 }
 
-/// The `data` block of an archive result.
-fn payload(outcome: &ArchiveOutcome) -> serde_json::Value {
-    serde_json::json!({
-        "id": outcome.item.id.as_str(),
-        "path": outcome.path.to_string(),
-        "archived_at": outcome.archived_at.to_string(),
-        "archive_reason": outcome.archive_reason,
-        "status": outcome.item.status.as_str(),
-        "closed_at": outcome.item.closed_at.map(|value| value.to_string()),
-        "written": outcome.written,
-        "removals": outcome.removals.iter().map(removal_json).collect::<Vec<_>>(),
-        "affected": outcome
-            .affected
-            .iter()
-            .map(|item| serde_json::json!({
-                "id": item.id.as_str(),
-                "path": item.path.to_string(),
-            }))
-            .collect::<Vec<_>>(),
-        "untouched": waymark_core::view::archive_leftovers_json(
-            &outcome.untouched,
-            &outcome.untouched_relations,
-        ),
-        "item": waymark_core::view::item_fields(&outcome.item),
-    })
-}
-
 /// The relation names of one leftover document, joined for a terminal line.
 fn relations_phrase(relations: &[archive::InboundRelation]) -> String {
     relations
@@ -131,11 +107,4 @@ fn relations_phrase(relations: &[archive::InboundRelation]) -> String {
         .map(|relation| relation.as_str())
         .collect::<Vec<_>>()
         .join(", ")
-}
-
-fn removal_json(removal: &PlannedRemoval) -> serde_json::Value {
-    serde_json::json!({
-        "from": removal.from.as_str(),
-        "relation": removal.relation.as_str(),
-    })
 }

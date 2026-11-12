@@ -176,6 +176,50 @@ pub fn is_registered_code(code: &Value) -> bool {
     serde_json::from_value::<waymark_core::Code>(code.clone()).is_ok()
 }
 
+/// The error body of a CLI failure envelope, comparable with
+/// [`business_error`]: both adapters build it with the shared constructor, so
+/// the whole document — code, message, typed details, location, retryability —
+/// must match byte for byte.
+pub fn cli_business_error(envelope: &Value) -> Value {
+    assert_eq!(envelope["ok"], false, "expected a CLI failure envelope");
+    envelope["error"].clone()
+}
+
+/// Whether one location is the same path seen from two working trees.
+///
+/// The CLI and the server run against two copies of one project, so every path
+/// they report differs in its root only. Comparing the repository-relative
+/// remainder keeps "the adapters name the same document" an assertion while
+/// allowing for the two roots.
+pub fn same_relative_location(left: &Value, right: &Value) -> bool {
+    if left.is_string() || right.is_string() {
+        return match (left.as_str(), right.as_str()) {
+            (Some(left), Some(right)) => {
+                Utf8Path::new(left).file_name() == Utf8Path::new(right).file_name()
+            }
+            _ => left == right,
+        };
+    }
+    match (left, right) {
+        (Value::Object(left), Value::Object(right)) => {
+            left.len() == right.len()
+                && left.iter().all(|(key, value)| {
+                    right
+                        .get(key)
+                        .is_some_and(|other| same_relative_location(value, other))
+                })
+        }
+        (Value::Array(left), Value::Array(right)) => {
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .zip(right)
+                    .all(|(left, right)| same_relative_location(left, right))
+        }
+        _ => left == right,
+    }
+}
+
 /// Build a [`WaymarkError`] failure for comparison with an MCP failure body.
 pub fn shared_failure(error: &WaymarkError) -> Value {
     waymark_core::envelope::failure_envelope(error)["error"].clone()
@@ -265,7 +309,6 @@ pub fn waymark_binary() -> Utf8PathBuf {
     candidate
 }
 
-/// Run one CLI command in JSON mode against `root` and return its envelope.
 /// Run the CLI and return its envelope, failure or success.
 ///
 /// For the cases that assert the two adapters refuse the same request the same
@@ -291,6 +334,34 @@ pub fn try_cli_json(root: &Utf8Path, arguments: &[&str]) -> Result<Value, Value>
     }
 }
 
+/// [`try_cli_json`] keeping the process exit code too, so a refusal's exit
+/// class can be compared with the registry that both adapters classify with.
+pub fn try_cli_json_code(root: &Utf8Path, arguments: &[&str]) -> (u8, Result<Value, Value>) {
+    let output = std::process::Command::new(waymark_binary())
+        .arg("--json")
+        .arg("--project")
+        .arg(root)
+        .args(arguments)
+        .output()
+        .expect("the CLI binary runs");
+    let envelope: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+        panic!(
+            "the CLI did not emit one JSON envelope ({error}): {}",
+            String::from_utf8_lossy(&output.stdout)
+        )
+    });
+    let code = output
+        .status
+        .code()
+        .and_then(|code| u8::try_from(code).ok())
+        .expect("the CLI exits normally with a positive code");
+    if output.status.success() {
+        (code, Ok(envelope))
+    } else {
+        (code, Err(envelope))
+    }
+}
+
 pub fn cli_json(root: &Utf8Path, arguments: &[&str]) -> Value {
     let output = std::process::Command::new(waymark_binary())
         .arg("--json")
@@ -311,6 +382,27 @@ pub fn cli_json(root: &Utf8Path, arguments: &[&str]) -> Value {
             String::from_utf8_lossy(&output.stdout)
         )
     })
+}
+
+/// Record `operator` as the project's acting identity, the way a person does.
+///
+/// The CLI reads the local document; the MCP server has none of its own, so its
+/// copy of the project carries the same document. Writing both keeps a test
+/// honest about which identity each adapter sees.
+pub fn act_as(project: &waymark_core::Project, operator: &str) {
+    waymark_core::ops::local_config::set_scalar(
+        project,
+        waymark_core::ops::config::Scalar::Operator,
+        operator,
+        &options(),
+    )
+    .expect("the operator is recorded");
+}
+
+/// [`act_as`] against a second copy of the project: the CLI's working tree.
+pub fn act_as_in(root: &Utf8Path, operator: &str) {
+    let project = waymark_core::Project::discover(root).expect("the copied project opens");
+    act_as(&project, operator);
 }
 
 /// Copy a project directory to a fresh temporary directory.

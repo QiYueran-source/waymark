@@ -3885,3 +3885,54 @@ paragraph records that the reverse reading was considered and rejected.
 x --cascade` attach alice's new item to a partner while the operator is a third person. The spec
 states the three-way condition, and the stricter reading is the one that cannot surprise an owner
 whose partner suddenly lists a link they never asked for.
+
+# Cross-item write consent — adapter parity (wm-8rr624fc9mjr)
+
+### The parity suite names the consent flag on both surfaces
+
+**Choice:** `crates/waymark-mcp/tests/parity.rs` holds the cross-item operations in two tables — the
+CLI invocations (`create`, `link add`, `link remove`, `archive`) and the MCP tools that cover them — and
+fails when either side loses the flag: the CLI test reads each command's `--help` and requires the exact
+token `--cascade`, and the MCP test reads each tool's input schema and requires an optional boolean
+`cascade`. A second test drives one archive and one soft-link pair through both adapters and compares
+the `data` blocks — `removals`, `affected`, `untouched`, `written`, the warnings — and one more drives
+both refusals through both adapters and compares the whole error document and the CLI's exit code (4)
+with the registry's class.
+
+**Why:** the ticket's promise is that a tool lacking the consent field fails the suite rather than
+quietly behaving differently, and an adapter that lost the flag would have looked identical to one that
+refused every call for consent — the names are what pin the option down.
+
+### The archive result block is rendered once, in the view layer
+
+**Choice:** `view::archive_result_json` builds the `data` block for an archive — marker, reason,
+status, `written`, `removals`, `affected`, `untouched`, `item`. Both the CLI's `archive` command and
+the MCP `waymark_archive_work_item` result call it; neither keeps a copy.
+
+**Divergence fixed:** the two adapters had each grown their own copy of that block. The fields agreed
+today, which is exactly the state in which the next change to the footprint — a new list, a renamed
+relation, a reordered entry — lands on one side only, and the suite would then have to say which copy
+is right. The block now lives next to the other renderers in `view`, and both adapters are thin callers
+of it. The suite drives an archive whose consent cleans nothing and names a foreign partner, so the
+`removals`, `affected`, and `untouched` lists are non-empty and compared across adapters instead of
+being three empty arrays that agree by accident.
+
+**Why:** the module note already said the CLI and MCP must not grow two spellings of one result. The
+equivalence suite caught the drift because it compares every `data` field the two surfaces report, not
+only the bytes on disk.
+
+### A divergence is fixed in the shared layer, and the suite proves it at both seams
+
+**Choice:** when an adapter misspells what the other reports, the fix is the shared renderer or the
+domain operation, never a rule taught to the adapter. The equivalence suite drives one operation
+through both adapters over two copies of one project and compares every persisted byte with the
+operation-clock fields normalized and a freshly minted ID substituted, plus every `data` field the two
+surfaces report. Paths are compared by their repository-relative form, because the two copies live at
+different roots.
+
+**Consequence:** the parity suite grew cases for the two settings the earlier ones avoided. A create
+whose partner belongs to someone else names that partner in `untouched` and writes only the new
+document, with and without consent; a `link remove` across a pair that arrived from outside records
+`other_untouched` with `owned: false` without consent, and is refused `OWNED_BY_OTHER` with consent.
+Both adapters now reach those states through the same domain calls, so a rule that lives in one adapter
+would show up as a byte difference in one of these tests.
