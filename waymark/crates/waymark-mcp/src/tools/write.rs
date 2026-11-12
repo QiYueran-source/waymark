@@ -29,7 +29,7 @@ use waymark_core::ops::{archive, create, link, owner, parent, r#move, relationsh
 use crate::envelope::{self, ToolResult};
 use crate::server::WaymarkServer;
 use crate::tools::params;
-use waymark_core::view::{item_fields, item_json};
+use waymark_core::view::item_json;
 
 /// Inputs of `waymark_create_work_item`.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -1038,34 +1038,13 @@ fn link_result(outcome: &link::LinkOutcome, verb: LinkVerb) -> ToolResult {
 }
 
 /// One archive as a successful tool result.
+///
+/// The `data` block comes from the shared [`waymark_core::view`] renderer, the
+/// same one the CLI prints, so the two adapters cannot describe one archive
+/// differently.
 fn archive_result(outcome: &archive::ArchiveOutcome) -> ToolResult {
     envelope::success(
-        json!({
-            "id": outcome.item.id.as_str(),
-            "path": outcome.path.to_string(),
-            "archived_at": outcome.archived_at.to_string(),
-            "archive_reason": outcome.archive_reason,
-            "status": outcome.item.status.as_str(),
-            "closed_at": outcome.item.closed_at.map(|value| value.to_string()),
-            "written": outcome.written,
-            "removals": outcome.removals.iter().map(|removal| json!({
-                "from": removal.from.as_str(),
-                "relation": removal.relation.as_str(),
-            })).collect::<Vec<_>>(),
-            "affected": outcome
-                .affected
-                .iter()
-                .map(|item| json!({
-                    "id": item.id.as_str(),
-                    "path": item.path.to_string(),
-                }))
-                .collect::<Vec<_>>(),
-            "untouched": waymark_core::view::archive_leftovers_json(
-                &outcome.untouched,
-                &outcome.untouched_relations,
-            ),
-            "item": item_fields(&outcome.item),
-        }),
+        waymark_core::view::archive_result_json(outcome),
         outcome.meta.clone(),
     )
 }

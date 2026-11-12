@@ -726,6 +726,41 @@ pub fn leftover_partners_json(untouched: &[crate::ops::create::UntouchedPartner]
     )
 }
 
+/// The `data` block of one archive, shared by every adapter.
+///
+/// It describes the archive itself — the marker, the reason, the status it left
+/// alone, whether it was applied — then the three footprint lists: the
+/// relationships `removals` dropped, the documents `affected` it rewrote, and
+/// the documents `untouched` it left exactly as they were with the relations
+/// that still name the target. The lists are rendered from the outcome alone,
+/// so an adapter never re-reads the project to describe what just happened, and
+/// a dry run carries the same block with `written: false`.
+pub fn archive_result_json(outcome: &crate::ops::archive::ArchiveOutcome) -> Value {
+    json!({
+        "id": outcome.item.id.as_str(),
+        "path": outcome.path.as_str(),
+        "archived_at": outcome.archived_at.to_string(),
+        "archive_reason": outcome.archive_reason,
+        "status": outcome.item.status.as_str(),
+        "closed_at": outcome.item.closed_at.map(|value| value.to_string()),
+        "written": outcome.written,
+        "removals": outcome.removals.iter().map(|removal| json!({
+            "from": removal.from.as_str(),
+            "relation": removal.relation.as_str(),
+        })).collect::<Vec<_>>(),
+        "affected": outcome
+            .affected
+            .iter()
+            .map(|item| json!({
+                "id": item.id.as_str(),
+                "path": item.path.as_str(),
+            }))
+            .collect::<Vec<_>>(),
+        "untouched": archive_leftovers_json(&outcome.untouched, &outcome.untouched_relations),
+        "item": item_fields(&outcome.item),
+    })
+}
+
 /// The one human sentence that precedes an archive's leftover list.
 ///
 /// It names the target and the count so the line stands on its own in a
@@ -1368,6 +1403,79 @@ mod tests {
             ])
         );
         assert_eq!(archive_leftovers_json(&[], &[]), json!([]));
+    }
+
+    #[test]
+    fn the_archive_result_block_carries_the_footprint_lists() {
+        use crate::ops::archive::{
+            AffectedItem, ArchiveOutcome, InboundRelation, PlannedRemoval, UntouchedItem,
+            UntouchedRelation,
+        };
+        use crate::ops::mediated::write_meta;
+        use crate::testing::fixtures;
+        use camino::Utf8PathBuf;
+
+        let mut item = fixtures::work_item("wm-000000000001", "task", "Retire me")
+            .with_status(Status::Open)
+            .build();
+        item.archived_at = Some(instant());
+        let mut outcome = ArchiveOutcome {
+            item,
+            path: Utf8PathBuf::from("work/task/wm-000000000001.md"),
+            archived_at: instant(),
+            archive_reason: Some("superseded".to_owned()),
+            removals: vec![PlannedRemoval {
+                from: id("wm-000000000002"),
+                relation: InboundRelation::Dependencies,
+            }],
+            affected: vec![AffectedItem {
+                id: id("wm-000000000002"),
+                path: Utf8PathBuf::from("work/task/wm-000000000002.md"),
+            }],
+            untouched: vec![UntouchedItem {
+                id: id("wm-000000000003"),
+                path: Utf8PathBuf::from("work/task/wm-000000000003.md"),
+            }],
+            untouched_relations: vec![UntouchedRelation {
+                from: id("wm-000000000003"),
+                relation: InboundRelation::SoftLinks,
+            }],
+            written: true,
+            fingerprints: Vec::new(),
+            meta: write_meta(Vec::new()),
+        };
+
+        let value = archive_result_json(&outcome);
+
+        assert_eq!(value["id"], "wm-000000000001");
+        assert_eq!(value["path"], "work/task/wm-000000000001.md");
+        assert_eq!(value["archive_reason"], "superseded");
+        assert_eq!(value["status"], "open", "archive is not a status");
+        assert_eq!(value["written"], true);
+        assert_eq!(
+            value["removals"],
+            json!([{"from": "wm-000000000002", "relation": "dependencies"}])
+        );
+        assert_eq!(
+            value["affected"],
+            json!([{
+                "id": "wm-000000000002",
+                "path": "work/task/wm-000000000002.md",
+            }])
+        );
+        assert_eq!(
+            value["untouched"],
+            json!([{
+                "id": "wm-000000000003",
+                "path": "work/task/wm-000000000003.md",
+                "relations": ["soft_links"],
+            }])
+        );
+        assert_eq!(value["item"]["id"], "wm-000000000001");
+
+        // A dry run carries the same block and says so.
+        outcome.written = false;
+        assert_eq!(archive_result_json(&outcome)["written"], false);
     }
 
     #[test]

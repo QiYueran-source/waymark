@@ -262,6 +262,38 @@ fn cascade_is_accepted_on_a_dry_run_too() {
 }
 
 #[test]
+fn cascade_never_rewrites_a_foreign_document_and_names_it() {
+    let (_dir, root) = project();
+    act_as(&root, "frank");
+    let target = create(&root, "target");
+    let theirs = create_owned_by(&root, "theirs", "alice");
+    let theirs_path = root.join("work").join("task").join(format!("{theirs}.md"));
+    let mut mine = std::fs::read_to_string(&theirs_path).expect("the document is readable");
+    let fence = mine.rfind("\n---").expect("a frontmatter fence");
+    mine.insert_str(fence, &format!("\nsoft_links:\n  - {target}"));
+    std::fs::write(&theirs_path, &mine).expect("the document is writable");
+
+    let envelope = json_ok(&root, &["archive", &target, "--cascade"]);
+
+    assert_eq!(envelope["data"]["written"], serde_json::json!(true));
+    assert_eq!(envelope["data"]["removals"], serde_json::json!([]));
+    assert_eq!(envelope["data"]["affected"], serde_json::json!([]));
+    assert_eq!(
+        envelope["data"]["untouched"],
+        serde_json::json!([{
+            "id": theirs,
+            "path": theirs_path.to_string(),
+            "relations": ["soft_links"],
+        }])
+    );
+    assert_eq!(
+        document(&root, &theirs),
+        mine,
+        "the foreign document keeps its bytes"
+    );
+}
+
+#[test]
 fn archive_without_cascade_leaves_a_foreign_document_alone_and_names_it() {
     let (_dir, root) = project();
     act_as(&root, "frank");

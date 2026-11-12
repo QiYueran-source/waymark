@@ -11,11 +11,14 @@ mod common;
 use std::collections::BTreeMap;
 
 use camino::Utf8Path;
+use common::{act_as, act_as_in};
 use serde_json::json;
 use waymark_core::config::FieldType;
 use waymark_core::model::FieldKey;
-use waymark_core::ops::{config, edit, local_config, relationship};
+use waymark_core::ops::{config, edit, relationship};
 use waymark_core::FieldValue;
+use waymark_core::WaymarkError;
+use waymark_core::WorkItemId;
 
 /// Declare an optional custom field before the project is copied.
 fn add_field(fixture: &common::Fixture, key: &str, ty: FieldType) {
@@ -40,24 +43,6 @@ fn add_category(fixture: &common::Fixture, key: &str, path: &str) {
         &common::options(),
     )
     .expect("the category is declared");
-}
-
-/// Record `operator` as the local document's operator, the way a person does.
-fn act_as(project: &waymark_core::Project, operator: &str) {
-    local_config::set_scalar(
-        project,
-        config::Scalar::Operator,
-        operator,
-        &common::options(),
-    )
-    .expect("the operator is recorded");
-}
-
-/// Record `operator` in the CLI copy's local document, so both adapters act as
-/// the same person: the server has no local document of its own.
-fn act_as_in(root: &Utf8Path, operator: &str) {
-    let project = waymark_core::Project::discover(root).expect("the copied project opens");
-    act_as(&project, operator);
 }
 
 #[tokio::test]
@@ -270,6 +255,212 @@ async fn composite_create_matches_the_cli_with(cascade: bool) {
     );
 
     client.shutdown().await;
+}
+
+/// One composite create whose partner belongs to someone else, with or without
+/// consent: neither adapter may rewrite that partner, and both must name it as
+/// left alone — with identical bytes and identical `untouched` lists.
+async fn foreign_partner_create_matches_the_cli_with(cascade: bool) {
+    let fixture = common::fixture(&["one"]);
+    let linked = fixture.ids[0].clone();
+    waymark_core::ops::owner::transfer_owner(
+        &fixture.project(),
+        &linked,
+        "alice",
+        &common::options(),
+    )
+    .expect("the partner belongs to someone else");
+    act_as(&fixture.project(), "frank");
+    let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
+    act_as_in(&cli_root, "frank");
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    let result = client
+        .call(
+            "waymark_create_work_item",
+            json!({
+                "title": "Composite item",
+                "category": "task",
+                "owner": "frank",
+                "body": "the body\n",
+                "soft_links": [linked],
+                "cascade": cascade
+            }),
+        )
+        .await;
+    let mcp = common::envelope(&result);
+    assert_eq!(mcp["ok"], true, "{mcp}");
+    let mcp_id = mcp["data"]["id"].as_str().expect("the MCP id").to_owned();
+
+    let mut arguments = vec![
+        "create",
+        "--title",
+        "Composite item",
+        "--category",
+        "task",
+        "--owner",
+        "frank",
+        "--body",
+        "the body\n",
+        "--link",
+        &linked,
+    ];
+    if cascade {
+        arguments.push("--cascade");
+    }
+    let cli = common::cli_json(&cli_root, &arguments);
+    let cli_id = cli["data"]["id"].as_str().expect("the CLI id").to_owned();
+
+    // The partner is not the operator's, so consent changes nothing: the link
+    // is recorded on the new document only and the partner is named.
+    assert_eq!(mcp["data"]["partners"], json!([]));
+    assert_eq!(cli["data"]["partners"], json!([]));
+    assert_eq!(
+        untouched_ids(&mcp),
+        untouched_ids(&cli),
+        "the adapters disagree about the partner they left alone"
+    );
+    assert_eq!(untouched_ids(&mcp), vec![linked.clone()]);
+    assert_eq!(
+        mcp["data"]["fingerprints"].as_array().unwrap().len(),
+        1,
+        "only the new document was written"
+    );
+    assert_eq!(
+        mcp["data"]["item"]["soft_links"],
+        cli["data"]["item"]["soft_links"]
+    );
+    assert_eq!(
+        mcp["_meta"]["warnings"].as_array().map(Vec::len),
+        cli["_meta"]["warnings"].as_array().map(Vec::len)
+    );
+
+    assert_eq!(
+        normalized_created_tree(&fixture.root, &mcp_id),
+        normalized_created_tree(&cli_root, &cli_id),
+        "a create with a foreign partner must write the same tree through both adapters (cascade={cascade})"
+    );
+
+    client.shutdown().await;
+}
+
+#[tokio::test]
+async fn create_with_a_foreign_partner_matches_the_cli() {
+    foreign_partner_create_matches_the_cli_with(false).await;
+}
+
+#[tokio::test]
+async fn cascading_create_with_a_foreign_partner_matches_the_cli() {
+    foreign_partner_create_matches_the_cli_with(true).await;
+}
+
+/// One soft-link removal across a foreign pair that arrived one-sided from
+/// outside Waymark, with or without consent: both adapters refuse the consented
+/// form the same way and both rewrite only the caller's document otherwise.
+async fn foreign_link_remove_matches_the_cli_with(cascade: bool) {
+    let fixture = common::fixture(&["one", "two"]);
+    let mine = fixture.ids[0].clone();
+    let theirs = fixture.ids[1].clone();
+    waymark_core::ops::owner::transfer_owner(
+        &fixture.project(),
+        &theirs,
+        "alice",
+        &common::options(),
+    )
+    .expect("the partner belongs to someone else");
+    // Record both halves by hand: `link add` against a foreign partner is
+    // refused, so the pair is created the way a merge or a hand edit leaves it.
+    for (from, to) in [(&mine, &theirs), (&theirs, &mine)] {
+        let path = common::task_path(&fixture.root, from);
+        let text = common::read(&path);
+        let fence = text.rfind("\n---").expect("a frontmatter fence");
+        let mut seeded = text[..fence].to_owned();
+        seeded.push_str(&format!("\nsoft_links:\n  - {to}"));
+        seeded.push_str(&text[fence..]);
+        std::fs::write(&path, seeded).expect("the document is writable");
+    }
+    act_as(&fixture.project(), "frank");
+    let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
+    act_as_in(&cli_root, "frank");
+    let before = common::normalized_snapshot(&fixture.root);
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    let mut arguments = vec!["link", "remove", &mine, &theirs];
+    let mut payload = json!({"id": mine, "other": theirs});
+    if cascade {
+        arguments.push("--cascade");
+        payload["cascade"] = json!(true);
+    }
+
+    if cascade {
+        let owned = WaymarkError::owned_by_other(
+            &WorkItemId::parse(&theirs).expect("a stable ID"),
+            "alice",
+            "link remove",
+        );
+        let mcp = common::business_error(&client.call("waymark_remove_soft_link", payload).await);
+        let (exit, cli) = common::try_cli_json_code(&cli_root, &arguments);
+        let cli = common::cli_business_error(&cli.expect_err("the CLI refuses as well"));
+        assert_eq!(mcp, cli, "the ownership refusal differs between adapters");
+        assert_eq!(mcp, common::shared_failure(&owned));
+        assert_eq!(mcp["code"], json!("OWNED_BY_OTHER"));
+        assert_eq!(exit, 4, "the registry's conflict class");
+        assert_eq!(
+            common::normalized_snapshot(&fixture.root),
+            before,
+            "the refused removal wrote neither document"
+        );
+    } else {
+        let mcp = common::envelope(&client.call("waymark_remove_soft_link", payload).await);
+        assert_eq!(mcp["ok"], true, "{mcp}");
+        let cli = common::cli_json(&cli_root, &arguments);
+        assert_eq!(mcp["data"]["soft_links"], json!([]));
+        assert_eq!(mcp["data"]["other_item"], json!(null));
+        for field in ["id", "changed", "written", "verb", "partner_unsynchronised"] {
+            assert_eq!(
+                mcp["data"][field], cli["data"][field],
+                "the adapters disagree about `{field}`"
+            );
+        }
+        // The two copies live at different roots, so the document is compared
+        // by its repository-relative path and every other field exactly.
+        let mcp_partner = &mcp["data"]["other_untouched"];
+        let cli_partner = &cli["data"]["other_untouched"];
+        for field in ["id", "owner", "owned"] {
+            assert_eq!(
+                mcp_partner[field], cli_partner[field],
+                "the adapters disagree about the partner's `{field}`"
+            );
+        }
+        assert!(
+            common::same_relative_location(&mcp_partner["path"], &cli_partner["path"]),
+            "the adapters name different partner documents: {mcp_partner} vs {cli_partner}"
+        );
+        assert_eq!(mcp["data"]["other_untouched"]["id"], json!(theirs));
+        assert_eq!(mcp["data"]["other_untouched"]["owned"], json!(false));
+        assert_eq!(
+            mcp["data"]["fingerprints"].as_array().unwrap().len(),
+            1,
+            "only the caller's document was written"
+        );
+        assert_eq!(
+            common::normalized_snapshot(&fixture.root),
+            common::normalized_snapshot(&cli_root),
+            "the one-sided removal across a foreign pair diverges from the CLI"
+        );
+    }
+
+    client.shutdown().await;
+}
+
+#[tokio::test]
+async fn link_remove_across_a_foreign_pair_matches_the_cli() {
+    foreign_link_remove_matches_the_cli_with(false).await;
+}
+
+#[tokio::test]
+async fn cascading_link_remove_across_a_foreign_pair_matches_the_cli() {
+    foreign_link_remove_matches_the_cli_with(true).await;
 }
 
 #[tokio::test]
