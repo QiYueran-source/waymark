@@ -26,7 +26,7 @@ Creating an item with an initial soft link no longer edits the item it points at
 
 - [ ] `create` with a soft link and no consent leaves the partner byte-identical
 - [ ] `create` with consent rewrites a partner only when the new item's owner, the partner's owner, and the operator agree
-- [ ] `create` with consent against a partner owned by somebody else is refused with the foreign-owner code
+- [ ] `create` with consent against a partner owned by somebody else leaves that partner byte-identical and names it in the result; `create` never refuses because a partner was left alone
 - [ ] A partner that was rewritten appears in the result together with the documents written; a partner left alone is named as such
 - [ ] The warning that the existing path never emitted for a rewritten partner is now produced
 
