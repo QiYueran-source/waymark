@@ -769,6 +769,31 @@ Confirmed by the user on 2026-11-04. These close the nine earlier interface gaps
 - Confirmed by the user on 2026-11-06: show active work-item summaries, paginated 50 rows per page, stable ID ascending, with previous/next navigation and no search/filter in v1. Rows contain only ID, title, category, lifecycle status, and project-relative path. Exclude archived items from rows and counts. Never expose absolute paths, owner, relationships, Markdown bodies or arbitrary custom fields.
 - Confirmed by the user on 2026-11-06: incomplete or stale projections may supply parseable rows for diagnosis only when the dashboard prominently labels incomplete/stale state, reports failure count and diagnostic summary, and states the list is not a complete/current index. No partial or stale result may be represented as complete/current.
 
+### Cross-item write scope and the `--cascade` consent flag
+
+> Opened on 2026-11-12. Verified against the 0.1.4 build: closing a parent does not change its children; adding or removing a hard dependency writes only the caller's document; a soft link rewrites both documents and updates the `updated_at` of the other owner's file; creating an item with `--link` rewrites the partner the same way; archive strips inbound `dependencies`, `parent`, and `soft_links` from every other owner's documents and moves their `updated_at`; closing a parent leaves its children `open` and reported `ready` with no signal.
+
+Settled so far:
+
+- Default is still no automatic cross-item write. Closing an item never changes its children's status. A dependency edge never rewrites the target. This confirms the earlier "parent lifecycle does not cascade".
+- A closed parent that still has active children must be visible instead of silent: the child is marked as having a closed parent in `list`, `ready`, and `doctor`. This is derived read state carrying no writes. It is not behind `--cascade`; a read-only hint has no reason for a toggle.
+- Cross-item writes are governed by one consent flag, `--cascade`, present on exactly the commands that can touch another document: `link add`, `link remove`, `archive`, and `create --link`. `dependency add/remove` and `create --dependency` never rewrite the target and take no such flag.
+- The rule is not "one toggle for everything". Two independent questions decide whether a write proceeds:
+  1. Is the other document owned by me? The other item's `owner` must equal the effective operator. `creator` is provenance and never counts. An item already claimed by another owner is never mine.
+  2. Did I explicitly consent to the cross-item write? That is `--cascade`.
+  Both must be true for a write to touch a second document; either one false refuses it. `--cascade` therefore authorizes writing my own linked documents only and can never authorize writing someone else's.
+- The refusals are distinct, because the recovery differs: `--cascade` missing is a usage/re-ask mistake; the other document belonging to a different owner is a consent boundary that re-running cannot fix.
+- Single-document writes to an item owned by another person keep today's semantics: an `OWNER_MISMATCH` warning and the write proceeds. The refusal is scoped to cross-item writes, so a project without an operator set, or a shared checkout where several people edit directly, keeps working instead of failing on every ordinary write. No global permission model is introduced: documents are plain files that anyone can hand-edit, so a blanket refusal would not enforce anything and would damage ordinary collaboration.
+- No `--force` flag. Writing another owner's document is not a thing to force — if the item should be yours, transfer ownership first. Adding both a consent flag and a bypass would give two overlapping ways to do the same cross-owner write.
+- When the operator is not set, the ownership question cannot be answered, so a cross-item write is refused with a message naming the missing operator. This is deliberate: no silent pass-through.
+- A refused cross-item write writes nothing and reports what declined and why. An accepted one reports which other documents it rewrote.
+- A soft link that exists on one side only (for example because a refused or non-cascading write left one half) is found by reads that already scan the documents involved. `show` reports the one-sided link, `doctor` reports it as a fixable finding, and the message gives the command that completes it. Waymark does not silently rewrite a document on a read, and there is no background process or network step to complete the pair: it is completed by a later explicit `link add` (a write) or is reported until someone does that.
+
+Open:
+
+- Concrete flag names, MCP parameter spelling, and error codes for the two refusals. They have to stay consistent with the frozen error registry and the class-4 rule (conflict and state rejection); MCP must expose the same capability rather than being weaker.
+- Whether `link add` of an existing one-sided link is a no-op that completes the pair or stays an `INVALID_RELATIONSHIP` error.
+
 
 ## Not yet specified
 
