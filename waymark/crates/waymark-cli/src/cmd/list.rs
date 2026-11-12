@@ -474,6 +474,9 @@ fn row_lines(row: &ListedItem, colour: Palette) -> Vec<String> {
     if row.needs_migration {
         lines.push("    needs migration".to_owned());
     }
+    if let Some(line) = waymark_core::view::closed_parent_reason(&row.closed_parent) {
+        lines.push(format!("    {line}"));
+    }
     if !row.readiness.blocked_by.is_empty() {
         let ids: Vec<&str> = row
             .readiness
@@ -548,6 +551,7 @@ mod tests {
             children: Vec::new(),
             dependents: Vec::new(),
             needs_migration: false,
+            closed_parent: None,
         };
 
         assert_eq!(state_column(&row), (DisplayState::Blocked, "blocked"));
@@ -558,5 +562,52 @@ mod tests {
                 "    blocked by wm-000000000002".to_owned(),
             ]
         );
+    }
+}
+
+#[cfg(test)]
+mod closed_parent_tests {
+    use super::*;
+    use waymark_core::readiness::Readiness;
+    use waymark_core::testing::fixtures;
+
+    #[test]
+    fn a_closed_parent_is_a_second_line_and_keeps_the_state_column() {
+        let parent = WorkItemId::parse("wm-000000000002").expect("a valid stable ID");
+        let mut item = fixtures::work_item("wm-000000000001", "task", "Child").build();
+        item.parent = Some(parent.clone());
+        let row = ListedItem {
+            item,
+            readiness: Readiness::ready(),
+            children: Vec::new(),
+            dependents: Vec::new(),
+            needs_migration: false,
+            closed_parent: Some(parent),
+        };
+
+        // The label is an observation, not a state: readiness decides the column.
+        assert_eq!(state_column(&row), (DisplayState::Ready, "ready"));
+        let lines = row_lines(&row, Palette::Plain);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(
+            lines,
+            vec![
+                "wm-000000000001  open         ready    Child".to_owned(),
+                "    parent wm-000000000002 is closed".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_row_without_a_closed_parent_adds_no_line() {
+        let row = ListedItem {
+            item: fixtures::work_item("wm-000000000001", "task", "Plain").build(),
+            readiness: Readiness::ready(),
+            children: Vec::new(),
+            dependents: Vec::new(),
+            needs_migration: false,
+            closed_parent: None,
+        };
+        assert_eq!(row_lines(&row, Palette::Plain).len(), 1);
     }
 }

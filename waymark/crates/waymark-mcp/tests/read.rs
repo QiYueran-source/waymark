@@ -98,6 +98,46 @@ async fn list_returns_a_page_with_filters_projection_and_meta() {
 }
 
 #[tokio::test]
+async fn a_closed_parent_reaches_the_mcp_list_and_ready_rows() {
+    let fixture = common::fixture(&["parent", "child"]);
+    let project = fixture.project();
+    let parent = fixture.ids[0].clone();
+    let child = fixture.ids[1].clone();
+    common::set_parent(&project, &child, &parent);
+    waymark_core::ops::status::set_status(
+        &project,
+        &parent,
+        waymark_core::Status::Closed,
+        &common::options(),
+    )
+    .expect("the parent closes");
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    let row_of = |envelope: &Value, id: &str| {
+        envelope["data"]["items"]
+            .as_array()
+            .expect("a page has an items array")
+            .iter()
+            .find(|row| row["id"] == json!(id))
+            .unwrap_or_else(|| panic!("{id} is listed"))
+            .clone()
+    };
+
+    for (tool, arguments) in [
+        ("waymark_list_work_items", json!({"limit": 100})),
+        ("waymark_get_ready_items", json!({"limit": 100})),
+    ] {
+        let result = client.call(tool, arguments).await;
+        let envelope = common::envelope(&result);
+        let row = row_of(&envelope, &child);
+        assert_eq!(row["closed_parent"], json!(parent), "{tool}");
+        assert_eq!(row["ready"], json!(true), "{tool}");
+    }
+
+    client.shutdown().await;
+}
+
+#[tokio::test]
 async fn the_mcp_list_default_is_50_while_the_cli_default_is_100() {
     assert_eq!(MCP_DEFAULT_LIMIT, 50);
     assert_eq!(DEFAULT_LIMIT, 100);

@@ -32,6 +32,8 @@
 //! - missing and archived relationship targets (`DANGLING_REFERENCE`) and both
 //!   cycle kinds (`CYCLE_DETECTED`), but only when the projection is complete:
 //!   a partial graph is never published as a complete review;
+//! - an active item whose direct parent is closed (`CLOSED_PARENT`, info): a
+//!   derived observation, never an error and never a suggested repair;
 //! - timestamp incoherence (`TIMESTAMP_INCOHERENT`, warning);
 //! - items needing a format migration (`MIGRATION_AVAILABLE`, info);
 //! - projection state: incompleteness, uncertain inventory entries, content
@@ -410,6 +412,7 @@ fn run(
         let graph = projection.graph();
         findings.extend(graph.diagnostics());
         findings.extend(archived_target_findings(&projection, &graph));
+        findings.extend(closed_parent_findings(&projection, &graph));
     }
 
     findings.extend(oversized_and_drift_findings(project, &projection));
@@ -560,6 +563,40 @@ fn archived_target(from: &WorkItemId, relation: &str, target: &WorkItemId) -> Fi
         format!("{from} {relation} the archived item {target}"),
     )
     .with_location(Location::work_item(from))
+}
+
+/// An active item whose direct parent is closed.
+///
+/// This is an observation rather than a fault, so it is `CLOSED_PARENT` at info
+/// severity with no suggested command: the item is valid, still ready, and
+/// still maybe the right next thing to do. Only the direct parent is looked at,
+/// a closed child is not observed, and "closed" is the lifecycle state — an
+/// archived parent is already reported as a dangling reference.
+fn closed_parent_findings(
+    projection: &Projection,
+    graph: &crate::readiness::Graph,
+) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    for item in projection.items() {
+        if item.is_archived() || item.status.is_closed() {
+            continue;
+        }
+        let Some(parent) = &item.parent else {
+            continue;
+        };
+        if let Some(parent_item) = graph.get(parent) {
+            if parent_item.status.is_closed() {
+                findings.push(
+                    Finding::new(
+                        Code::ClosedParent,
+                        WaymarkError::closed_parent(&item.id, &parent_item.id).message(),
+                    )
+                    .with_location(Location::work_item(&item.id)),
+                );
+            }
+        }
+    }
+    findings
 }
 
 /// The spec's title rule: non-empty and single-line.

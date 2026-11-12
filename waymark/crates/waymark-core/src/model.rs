@@ -34,15 +34,16 @@ pub fn readable_generations() -> String {
 
 /// How many reserved names the query vocabulary yields.
 ///
-/// Every [`FieldName`](crate::query::FieldName) except `needs_migration`, which
-/// is a derived read column rather than a persisted or relationship name.
+/// Every [`FieldName`](crate::query::FieldName) except `needs_migration` and
+/// `closed_parent`, which are derived read columns rather than persisted or
+/// relationship names.
 const RESERVED_NAME_COUNT: usize = {
     let mut count = 0;
     let mut index = 0;
     while index < crate::query::FieldName::ALL.len() {
         if !matches!(
             crate::query::FieldName::ALL[index],
-            crate::query::FieldName::NeedsMigration
+            crate::query::FieldName::NeedsMigration | crate::query::FieldName::ClosedParent
         ) {
             count += 1;
         }
@@ -62,7 +63,10 @@ const fn reserved_field_names() -> [&'static str; RESERVED_NAME_COUNT] {
     let mut next = 0;
     while index < crate::query::FieldName::ALL.len() {
         let field = crate::query::FieldName::ALL[index];
-        if !matches!(field, crate::query::FieldName::NeedsMigration) {
+        if !matches!(
+            field,
+            crate::query::FieldName::NeedsMigration | crate::query::FieldName::ClosedParent
+        ) {
             names[next] = field.as_str();
             next += 1;
         }
@@ -76,9 +80,9 @@ const fn reserved_field_names() -> [&'static str; RESERVED_NAME_COUNT] {
 ///
 /// Derived from [`FieldName::ALL`](crate::query::FieldName::ALL) so the
 /// reserved vocabulary cannot drift from the query column vocabulary. The
-/// historical order and the exact value are preserved; `needs_migration` is
-/// deliberately excluded because it is a derived read column, not a name a
-/// custom field could shadow.
+/// historical order and the exact value are preserved; `needs_migration` and
+/// `closed_parent` are deliberately excluded because they are derived read
+/// columns, not names a custom field could shadow.
 pub const RESERVED_FIELD_NAMES: &[&str] = &reserved_field_names();
 
 /// The lifecycle states a work item can be in.

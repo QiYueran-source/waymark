@@ -1013,6 +1013,15 @@ pub struct ListedItem {
     /// mediated writes refuse it until a version migration runs. Reads still
     /// include it, marked rather than hidden.
     pub needs_migration: bool,
+    /// The direct parent's ID when this item is active and that parent is
+    /// `closed`; `None` otherwise.
+    ///
+    /// A derived observation, never persisted and never a readiness input:
+    /// closing a parent does not reopen, close, block, or unblock its children,
+    /// it only labels them. Only the direct parent is looked at, and "closed"
+    /// means the lifecycle state, not `archived` — an archived parent is
+    /// already reported by `tree` and `doctor`.
+    pub closed_parent: Option<WorkItemId>,
 }
 
 /// The result of a list-family read.
@@ -1138,7 +1147,26 @@ impl Snapshot {
             children,
             dependents,
             needs_migration: item.needs_migration(),
+            closed_parent: self.closed_parent(item),
             item: item.clone(),
+        }
+    }
+
+    /// The direct parent of `item` when the listing row should report it as
+    /// closed.
+    ///
+    /// The row must itself be active (a closed or archived child under a closed
+    /// parent changed nothing and is not flagged), must declare a parent, and
+    /// that one parent — no ancestor above it — must be an active item in the
+    /// `closed` lifecycle state.
+    fn closed_parent(&self, item: &WorkItem) -> Option<WorkItemId> {
+        if item.is_archived() || item.status.is_closed() {
+            return None;
+        }
+        let parent = item.parent.as_ref()?;
+        match self.graph.get(parent) {
+            Some(parent) if parent.status.is_closed() => Some(parent.id.clone()),
+            _ => None,
         }
     }
 
@@ -1475,6 +1503,8 @@ pub enum FieldName {
     Children,
     /// Active dependents.
     Dependents,
+    /// The direct parent's ID when the row's active parent is closed.
+    ClosedParent,
 }
 
 impl FieldName {
@@ -1502,6 +1532,7 @@ impl FieldName {
         Self::BlockedBy,
         Self::Children,
         Self::Dependents,
+        Self::ClosedParent,
     ];
 
     /// The identity columns a `--compact` row keeps.
@@ -1538,6 +1569,7 @@ impl FieldName {
             Self::BlockedBy => "blocked_by",
             Self::Children => "children",
             Self::Dependents => "dependents",
+            Self::ClosedParent => "closed_parent",
         }
     }
 
@@ -1560,6 +1592,7 @@ impl FieldName {
                 | Self::BlockedBy
                 | Self::Children
                 | Self::Dependents
+                | Self::ClosedParent
         )
     }
 }
@@ -1702,7 +1735,8 @@ fn frontmatter_value(item: &WorkItem, field: FieldName) -> Value {
         | FieldName::Blocked
         | FieldName::BlockedBy
         | FieldName::Children
-        | FieldName::Dependents => Value::Null,
+        | FieldName::Dependents
+        | FieldName::ClosedParent => Value::Null,
     }
 }
 
@@ -1737,6 +1771,7 @@ fn derived_value(row: &ListedItem, field: FieldName) -> Value {
                 .map(|id| id.as_str())
                 .collect::<Vec<_>>())
         }
+        FieldName::ClosedParent => json!(row.closed_parent.as_ref().map(|id| id.as_str())),
         _ => Value::Null,
     }
 }

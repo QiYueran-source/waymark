@@ -12,7 +12,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use waymark_core::config::{Category, Config, FieldDecl, FieldType};
 use waymark_core::envelope::{Completeness, Finding, Meta};
 use waymark_core::error::{Code, ExitClass, Severity};
-use waymark_core::model::{CategoryKey, FieldKey, FieldValue, WorkItem, FORMAT_GENERATION};
+use waymark_core::model::{CategoryKey, FieldKey, FieldValue, Status, WorkItem, FORMAT_GENERATION};
 use waymark_core::ops::create::{self, CreateRequest};
 use waymark_core::ops::doctor::{self, DoctorOptions, RepairKind};
 use waymark_core::ops::relationship;
@@ -938,5 +938,129 @@ fn a_broken_shared_document_still_reports_the_local_one() {
                 && !matches!(finding.location, Some(Location::File { .. }))),
         "the shared document's own problem is reported too: {:?}",
         report.findings
+    );
+}
+
+#[test]
+fn an_active_child_of_a_closed_parent_is_an_info_observation() {
+    let (_dir, project) = project();
+    let parent = create_item(&project, "parent");
+    let child = create_item(&project, "child");
+    let grandchild = create_item(&project, "grandchild");
+    waymark_core::ops::parent::set_parent(&project, child.as_str(), parent.as_str(), &options())
+        .unwrap();
+    waymark_core::ops::parent::set_parent(
+        &project,
+        grandchild.as_str(),
+        child.as_str(),
+        &options(),
+    )
+    .unwrap();
+    let sibling = create_item(&project, "plain");
+    let before = text_of(&project, child.as_str());
+
+    // An open parent is not a closed parent.
+    let report = doctor::diagnose(&project).unwrap();
+    let observations = messages(&report, Code::ClosedParent);
+    assert!(observations.is_empty(), "{observations:?}");
+
+    let mut parent_item = read_item(&task_path(&project, parent.as_str()));
+    parent_item.status = Status::Closed;
+    parent_item.closed_at = Some(Timestamp::parse("2026-11-04T00:00:00Z").unwrap());
+    write_item(&task_path(&project, parent.as_str()), &parent_item);
+    let child_bytes = text_of(&project, child.as_str());
+
+    let report = doctor::diagnose(&project).unwrap();
+    let observations: Vec<_> = report
+        .findings
+        .iter()
+        .filter(|finding| finding.code == Code::ClosedParent)
+        .collect();
+    assert_eq!(observations.len(), 1, "{:?}", report.findings);
+    let observation = observations[0];
+    // A fact, not an error: default and strict runs both succeed.
+    assert_eq!(observation.severity, Severity::Info);
+    assert!(!observation.fixable);
+    assert_eq!(report.exit_class(), None);
+    assert!(
+        doctor::diagnose_with(&project, DoctorOptions::new().strict())
+            .unwrap()
+            .exit_class()
+            .is_none()
+    );
+    assert!(observation.message.contains(child.as_str()));
+    assert!(observation.message.contains(parent.as_str()));
+    assert!(!observation.message.contains(grandchild.as_str()));
+    assert!(!observation.message.contains(sibling.as_str()));
+    // Nobody was named as needing a repair.
+    assert!(
+        !observation.message.contains("--"),
+        "{}",
+        observation.message
+    );
+
+    // The run wrote nothing.
+    assert_eq!(before, child_bytes);
+    assert_eq!(child_bytes, text_of(&project, child.as_str()));
+}
+
+#[test]
+fn a_closed_child_or_an_archived_parent_is_not_observed_as_a_closed_parent() {
+    let (_dir, project) = project();
+    let parent = create_item(&project, "parent");
+    let closed_child = create_item(&project, "closed child");
+    let open_child = create_item(&project, "open child");
+    let orphan = create_item(&project, "orphan");
+    let archived_parent = create_item(&project, "archived parent");
+    for (child, target) in [
+        (&closed_child, &parent),
+        (&open_child, &parent),
+        (&orphan, &archived_parent),
+    ] {
+        waymark_core::ops::parent::set_parent(
+            &project,
+            child.as_str(),
+            target.as_str(),
+            &options(),
+        )
+        .unwrap();
+    }
+    waymark_core::ops::status::set_status(&project, parent.as_str(), Status::Closed, &options())
+        .unwrap();
+    waymark_core::ops::status::set_status(
+        &project,
+        closed_child.as_str(),
+        Status::Closed,
+        &options(),
+    )
+    .unwrap();
+    let mut archived_parent_item = read_item(&task_path(&project, archived_parent.as_str()));
+    archived_parent_item.archived_at = Some(Timestamp::parse("2026-11-04T00:00:00Z").unwrap());
+    write_item(
+        &task_path(&project, archived_parent.as_str()),
+        &archived_parent_item,
+    );
+
+    let report = doctor::diagnose(&project).unwrap();
+    // Only the active child of the closed parent is an observation.
+    let observations = messages(&report, Code::ClosedParent);
+    assert_eq!(observations.len(), 1, "{:?}", report.findings);
+    assert!(
+        observations[0].contains(open_child.as_str()),
+        "{}",
+        observations[0]
+    );
+    assert!(
+        !observations[0].contains(closed_child.as_str()),
+        "a closed child is not flagged: {}",
+        observations[0]
+    );
+    // An archived parent belongs to the dangling-reference finding instead.
+    let dangling = messages(&report, Code::DanglingReference);
+    assert!(
+        dangling.iter().any(|message| message.contains("parent")
+            && message.contains(archived_parent.as_str())
+            && message.contains(orphan.as_str())),
+        "{dangling:?}"
     );
 }

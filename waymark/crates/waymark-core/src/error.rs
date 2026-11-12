@@ -133,6 +133,8 @@ pub enum Code {
     AssetsVersionMismatch,
     /// The machine-local time zone could not be determined.
     TimeZoneUndetected,
+    /// An active item's direct parent is in the closed lifecycle state.
+    ClosedParent,
 }
 
 /// The process exit class of a failure.
@@ -305,6 +307,7 @@ impl Code {
         Code::TimestampIncoherent,
         Code::AssetsVersionMismatch,
         Code::TimeZoneUndetected,
+        Code::ClosedParent,
     ];
 
     /// The registry row for this code.
@@ -552,6 +555,13 @@ impl Code {
                 &[],
             ),
             Self::TimeZoneUndetected => spec(None, false, Some(Severity::Info), &[], &[]),
+            Self::ClosedParent => spec(
+                None,
+                false,
+                Some(Severity::Info),
+                &["id", "parent"],
+                &[WorkItem],
+            ),
         }
     }
 
@@ -600,6 +610,7 @@ impl Code {
             Self::TimestampIncoherent => "TIMESTAMP_INCOHERENT",
             Self::AssetsVersionMismatch => "ASSETS_VERSION_MISMATCH",
             Self::TimeZoneUndetected => "TIME_ZONE_UNDETECTED",
+            Self::ClosedParent => "CLOSED_PARENT",
         }
     }
 
@@ -657,6 +668,7 @@ impl Code {
             "TIMESTAMP_INCOHERENT" => Ok(Self::TimestampIncoherent),
             "ASSETS_VERSION_MISMATCH" => Ok(Self::AssetsVersionMismatch),
             "TIME_ZONE_UNDETECTED" => Ok(Self::TimeZoneUndetected),
+            "CLOSED_PARENT" => Ok(Self::ClosedParent),
             other => Err(UnknownCode(other.to_owned())),
         }
     }
@@ -1406,6 +1418,22 @@ impl WaymarkError {
             "field": field,
             "value": value,
             "reason": reason,
+        }))
+        .with_location(Location::work_item(id))
+    }
+
+    /// An active item's direct parent is closed.
+    ///
+    /// An observation, not a fault: the item is still valid and still ready,
+    /// so the code carries no exit class and no suggested command.
+    pub fn closed_parent(id: &WorkItemId, parent: &WorkItemId) -> Self {
+        Self::new(
+            Code::ClosedParent,
+            format!("{id} has the closed parent {parent}"),
+        )
+        .with_details(json!({
+            "id": id.as_str(),
+            "parent": parent.as_str(),
         }))
         .with_location(Location::work_item(id))
     }

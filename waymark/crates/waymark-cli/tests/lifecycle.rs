@@ -293,6 +293,56 @@ fn closing_the_blocker_makes_the_dependent_ready() {
 }
 
 #[test]
+fn a_closed_parent_reaches_list_and_ready_without_changing_readiness() {
+    let (_dir, root) = project();
+    let parent = create(&root, "parent");
+    let child = create(&root, "child");
+    let grandchild = create(&root, "grandchild");
+    json_ok(&root, &["parent", "set", &child, &parent]);
+    json_ok(&root, &["parent", "set", &grandchild, &child]);
+
+    let row_of = |envelope: &serde_json::Value, id: &str| -> serde_json::Value {
+        envelope["data"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == serde_json::json!(id))
+            .unwrap_or_else(|| panic!("{id} is listed"))
+            .clone()
+    };
+    // The parent is open, so nothing is labelled.
+    let open_list = json_ok(&root, &["list"]);
+    assert!(row_of(&open_list, &child)["closed_parent"].is_null());
+
+    json_ok(&root, &["close", &parent]);
+
+    let list = json_ok(&root, &["list"]);
+    let child_row = row_of(&list, &child);
+    assert_eq!(child_row["closed_parent"], serde_json::json!(parent));
+    assert_eq!(child_row["ready"], serde_json::json!(true));
+    assert_eq!(child_row["blocked"], serde_json::json!(false));
+    assert_eq!(child_row["status"], serde_json::json!("open"));
+    // Only the direct parent is inspected.
+    assert!(row_of(&list, &grandchild)["closed_parent"].is_null());
+
+    let ready = json_ok(&root, &["ready"]);
+    assert_eq!(
+        row_of(&ready, &child)["closed_parent"],
+        serde_json::json!(parent)
+    );
+
+    let human = run(waymark().arg("list").arg("--project").arg(&root));
+    assert_eq!(human.status(), 0, "stderr: {}", human.stderr());
+    assert!(
+        human
+            .stderr()
+            .contains(&format!("parent {parent} is closed")),
+        "{}",
+        human.stderr()
+    );
+}
+
+#[test]
 fn a_self_dependency_and_a_cycle_exit_three_with_the_contract_details() {
     let (_dir, root) = project();
     let a = create(&root, "a");

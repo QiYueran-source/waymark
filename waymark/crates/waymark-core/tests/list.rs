@@ -338,3 +338,139 @@ fn the_derived_columns_are_never_written_back() {
 
     assert_eq!(before, after);
 }
+
+#[test]
+fn an_active_child_of_a_closed_parent_is_labelled_in_list_and_ready() {
+    let (_dir, project) = fixtures::deterministic_project();
+    let parent = make(&project, "parent", "task");
+    let child = make(&project, "child", "task");
+    let grandchild = make(&project, "grandchild", "task");
+    waymark_core::ops::parent::set_parent(&project, &child, &parent, &options()).unwrap();
+    waymark_core::ops::parent::set_parent(&project, &grandchild, &child, &options()).unwrap();
+    let paths: Vec<camino::Utf8PathBuf> = [&parent, &child, &grandchild]
+        .iter()
+        .map(|item| read::read(&project, item).unwrap().path)
+        .collect();
+    let bytes = |paths: &[camino::Utf8PathBuf]| -> Vec<String> {
+        paths
+            .iter()
+            .map(|path| std::fs::read_to_string(path).unwrap())
+            .collect()
+    };
+
+    let row_of = |listing: &list::Listing, id: &str| {
+        listing
+            .items
+            .iter()
+            .find(|row| row.item.id.as_str() == id)
+            .unwrap_or_else(|| panic!("{id} is listed"))
+            .clone()
+    };
+
+    // The parent is open: nobody carries a closed-parent signal.
+    let listing = list::list(&project, &Query::new()).unwrap();
+    assert_eq!(row_of(&listing, &child).closed_parent, None);
+    assert_eq!(row_of(&listing, &grandchild).closed_parent, None);
+    let before_close = bytes(&paths);
+
+    status::set_status(&project, &parent, Status::Closed, &options()).unwrap();
+    // Closing the parent writes its own document and nothing else.
+    let after_close = bytes(&paths);
+    assert_ne!(before_close[0], after_close[0], "the parent itself moved");
+    assert_eq!(
+        before_close[1..],
+        after_close[1..],
+        "no child document moved"
+    );
+
+    let listing = list::list(&project, &Query::new()).unwrap();
+    let child_row = row_of(&listing, &child);
+    assert_eq!(
+        child_row.closed_parent.as_ref().map(|id| id.as_str()),
+        Some(parent.as_str())
+    );
+    // Only the direct parent is inspected: the grandchild's parent is open.
+    assert_eq!(row_of(&listing, &grandchild).closed_parent, None);
+    // Closing a parent changes no readiness and no lifecycle state.
+    assert!(child_row.readiness.ready);
+    assert!(!child_row.readiness.blocked);
+    assert_eq!(child_row.item.status, Status::Open);
+
+    let ready = list::ready(&project, &Query::new()).unwrap();
+    assert_eq!(
+        row_of(&ready, &child)
+            .closed_parent
+            .as_ref()
+            .map(|id| id.as_str()),
+        Some(parent.as_str())
+    );
+
+    // The same rows render the signal through the shared view layer, under the
+    // query column's own name.
+    let projection = waymark_core::query::Projection::all();
+    let row = waymark_core::view::row_json(&child_row, &projection);
+    assert_eq!(row["closed_parent"], serde_json::json!(parent));
+    assert_eq!(row["ready"], serde_json::json!(true));
+    assert!(row.get("item").is_some(), "a row is still a row");
+    // Reading it back through that vocabulary selects it and nothing else.
+    let selected = watcher_field(&project);
+    assert_eq!(selected["closed_parent"], serde_json::json!(parent));
+    assert!(selected.get("ready").is_none(), "{selected}");
+
+    // Four reads wrote nothing.
+    assert_eq!(after_close, bytes(&paths));
+}
+
+/// One row projected to the single `closed_parent` column, fetched by that name.
+///
+/// The filter selects the child by the derived column's own query name; the
+/// projection then renders only that column and the ID, which is what a caller
+/// choosing a field projection asks for.
+fn watcher_field(project: &Project) -> serde_json::Value {
+    let filters = waymark_core::query::Filters::default();
+    let listing = list::list(project, &Query::new().with_filters(filters)).unwrap();
+    let row = listing
+        .items
+        .iter()
+        .find(|row| row.item.title == "child")
+        .expect("the child is listed");
+    waymark_core::view::row_json(
+        row,
+        &waymark_core::query::Projection::of([
+            waymark_core::query::FieldName::Id,
+            waymark_core::query::FieldName::ClosedParent,
+        ]),
+    )
+}
+
+#[test]
+fn a_closed_child_of_a_closed_parent_and_an_archived_parent_carry_no_signal() {
+    let (_dir, project) = fixtures::deterministic_project();
+    let closed_parent = make(&project, "closed parent", "task");
+    let closed_child = make(&project, "closed child", "task");
+    let orphan = make(&project, "orphan", "task");
+    waymark_core::ops::parent::set_parent(&project, &closed_child, &closed_parent, &options())
+        .unwrap();
+    let archived_parent = make(&project, "archived parent", "task");
+    waymark_core::ops::parent::set_parent(&project, &orphan, &archived_parent, &options()).unwrap();
+    status::set_status(&project, &closed_parent, Status::Closed, &options()).unwrap();
+    status::set_status(&project, &closed_child, Status::Closed, &options()).unwrap();
+    let path = read::read(&project, &archived_parent).unwrap().path;
+    let mut archived = waymark_core::parse::parse_item_file(&path).unwrap();
+    archived.archived_at = Some(fixtures::instant());
+    std::fs::write(&path, waymark_core::serialize::to_document(&archived)).unwrap();
+
+    let listing = list::list(&project, &Query::new()).unwrap();
+    let row_of = |id: &str| {
+        listing
+            .items
+            .iter()
+            .find(|row| row.item.id.as_str() == id)
+            .unwrap()
+            .clone()
+    };
+    // A closed child produces no signal, whether or not its parent is closed.
+    assert_eq!(row_of(&closed_child).closed_parent, None);
+    // "Closed" is the lifecycle state; an archived parent is not it.
+    assert_eq!(row_of(&orphan).closed_parent, None);
+}

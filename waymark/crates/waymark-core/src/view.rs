@@ -26,8 +26,9 @@
 //! - [`listing_json`] — the complete collection page (summary, rows, projection).
 //! - [`write_result_json`] / [`write_result_json_with`] — the shared
 //!   `{id, path, …, changed, written, item}` core of every write result.
-//! - [`DisplayState`] / [`display_state`] / [`blocked_reason`] — the one
-//!   derivation of the display state and the human blocked-reason prose.
+//! - [`DisplayState`] / [`display_state`] / [`blocked_reason`] /
+//!   [`closed_parent_reason`] — the one derivation of the display state and the
+//!   human blocked-reason and closed-parent prose.
 //!
 //! # The derived display state
 //!
@@ -146,6 +147,18 @@ pub fn blocked_reason(graph: &Graph, readiness: &Readiness) -> Option<String> {
         })
         .collect();
     Some(format!("waiting on {}", parts.join(", ")))
+}
+
+/// The human line for a list-family row whose direct parent is closed.
+///
+/// One adapter (the CLI listing) prints it and no machine form carries prose,
+/// so the sentence lives here rather than in the adapter: a second surface that
+/// wants to say the same thing says it the same way. `None` when the row has no
+/// closed parent, which is the ordinary case.
+pub fn closed_parent_reason(closed_parent: &Option<crate::id::WorkItemId>) -> Option<String> {
+    closed_parent
+        .as_ref()
+        .map(|parent| format!("parent {} is closed", parent.as_str()))
 }
 
 /// The persisted fields of one item, without the file that happens to hold it.
@@ -633,6 +646,7 @@ mod tests {
             children: vec![id("wm-000000000005")],
             dependents: vec![],
             needs_migration: false,
+            closed_parent: None,
         }
     }
 
