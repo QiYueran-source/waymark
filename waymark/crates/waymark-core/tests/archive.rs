@@ -510,6 +510,23 @@ fn targeted_cleanup_leaves_body_and_custom_fields_alone() {
 }
 
 #[test]
+fn the_outcome_can_describe_documents_it_left_untouched_and_the_relation_before_anything_does() {
+    let (_dir, project) = project();
+    let target = make(&project, "target");
+    let dependent = make(&project, "dependent");
+    relationship::add_dependency(&project, &dependent, &target, &options())
+        .expect("the edge is added");
+
+    let outcome =
+        archive::archive(&project, &target, None, &options_at(10)).expect("archive succeeds");
+
+    // Nothing populates the new lists yet, so they are empty: the shape exists
+    // for an adapter to render, and today it renders nothing.
+    assert!(outcome.untouched.is_empty());
+    assert!(outcome.untouched_relations.is_empty());
+}
+
+#[test]
 fn a_broken_sibling_document_stops_the_archive_before_anything_is_written() {
     let (_dir, project) = project();
     let target = make(&project, "target");

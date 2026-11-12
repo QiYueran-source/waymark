@@ -17,6 +17,15 @@ fn options() -> OpOptions {
 }
 
 #[test]
+fn a_consent_flag_is_absent_unless_it_is_asked_for() {
+    // Consent is the exception, not the default: an options value built the
+    // ordinary way carries none, so no existing caller changes behaviour.
+    assert!(!OpOptions::new().cascade);
+    assert!(!OpOptions::default().cascade);
+    assert!(OpOptions::new().with_cascade().cascade);
+}
+
+#[test]
 fn create_writes_one_document_named_from_the_new_stable_id() {
     let (_dir, project) = fixtures::deterministic_project();
     let created = create::create(

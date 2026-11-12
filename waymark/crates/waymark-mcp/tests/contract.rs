@@ -452,3 +452,49 @@ async fn every_write_tool_exposes_the_shared_lock_override() {
     }
     client.shutdown().await;
 }
+
+/// The cross-item operations expose the same consent option the CLI's
+/// `--cascade` gives, and no operation that writes only its own target does.
+#[tokio::test]
+async fn every_cross_item_tool_exposes_the_consent_flag_and_no_other_write_tool_does() {
+    let fixture = common::fixture(&[]);
+    let client = common::Client::connect(fixture.root.clone()).await;
+    let cross_item = [
+        "waymark_add_soft_link",
+        "waymark_remove_soft_link",
+        "waymark_archive_work_item",
+    ];
+    for tool in client.tools().await {
+        let schema = tool_schema(&tool);
+        let writes = schema["properties"].get("dry_run").is_some();
+        let cascade = &schema["properties"]["cascade"];
+        if cross_item.contains(&tool.name.as_ref()) {
+            assert_eq!(
+                cascade["type"], "boolean",
+                "{} must expose `cascade` as a boolean: {schema}",
+                tool.name
+            );
+            assert!(
+                !schema["required"]
+                    .as_array()
+                    .expect("required is a list")
+                    .contains(&json!("cascade")),
+                "{} must keep consent optional",
+                tool.name
+            );
+            let description = tool.description.as_deref().unwrap_or_default();
+            assert!(
+                description.contains("cascade"),
+                "{} does not document `cascade`",
+                tool.name
+            );
+        } else if writes {
+            assert!(
+                cascade.is_null(),
+                "{} writes only its own target and must not take consent",
+                tool.name
+            );
+        }
+    }
+    client.shutdown().await;
+}

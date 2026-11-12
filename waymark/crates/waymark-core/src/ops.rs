@@ -67,6 +67,15 @@ pub struct OpOptions {
     pub lock_wait: LockWait,
     /// Validate and compute, but do not write.
     pub dry_run: bool,
+    /// Consent to a cross-item write: the operation may also rewrite a second
+    /// document, and only when that document's `owner` equals
+    /// [`Self::operator`].
+    ///
+    /// It defaults to off, so a caller that never asks for it writes nothing
+    /// but its own target. Only the operations that can reach a second
+    /// document read it — `archive`, `link add`, `link remove`, and `create`
+    /// with soft links — and every other operation ignores it.
+    pub cascade: bool,
     /// The configuration fingerprint a configuration write expects to find.
     ///
     /// `None` keeps the historical behaviour: a configuration write re-reads
@@ -85,6 +94,7 @@ impl OpOptions {
             operator: None,
             lock_wait: LockWait::default_policy(),
             dry_run: false,
+            cascade: false,
             expected_config_fingerprint: None,
         }
     }
@@ -113,6 +123,12 @@ impl OpOptions {
         self
     }
 
+    /// Give consent to a cross-item write.
+    pub fn with_cascade(mut self) -> Self {
+        self.cascade = true;
+        self
+    }
+
     /// Require the on-disk configuration to still have `fingerprint`.
     pub fn with_expected_config_fingerprint(mut self, fingerprint: Fingerprint) -> Self {
         self.expected_config_fingerprint = Some(fingerprint);
@@ -137,6 +153,7 @@ impl std::fmt::Debug for OpOptions {
             .field("operator", &self.operator)
             .field("lock_wait", &self.lock_wait)
             .field("dry_run", &self.dry_run)
+            .field("cascade", &self.cascade)
             .field(
                 "expected_config_fingerprint",
                 &self.expected_config_fingerprint,
