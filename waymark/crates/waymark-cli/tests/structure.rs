@@ -430,8 +430,10 @@ fn the_human_output_says_the_partner_did_not_change() {
         "the caller's result is reported: {stderr}"
     );
     assert!(
-        stderr.contains(&format!("{right} was not changed")),
-        "the partner is named as untouched: {stderr}"
+        stderr.contains(&format!(
+            "{right} left alone and still lists the link (frank)"
+        )),
+        "the partner is named as untouched, with its owner: {stderr}"
     );
     assert!(
         stderr.contains("--cascade"),

@@ -131,9 +131,12 @@ pub fn effective_operator(project: &Project, options: &OpOptions) -> Option<Stri
 ///
 /// Ownership is a permission-style question, so it uses the same identity but
 /// not the same leniency: an unreadable local document is a configuration error
-/// (`CONFIG_INVALID`) rather than a silent "no operator". A project that simply
-/// has no operator configured still resolves to `None`, which is an answer, not
-/// a failure.
+/// (`CONFIG_INVALID`) rather than a silent "no operator". The resolution itself
+/// is the full one — the local document, then Git's `user.name`, then nothing —
+/// because a person identified only by Git is as much the operator as one who
+/// wrote the value down: see [`strict_operator`], which also reports the source.
+/// A project that simply has no operator configured still resolves to `None`,
+/// which is an answer, not a failure.
 pub fn effective_operator_strict(
     project: &Project,
     options: &OpOptions,
@@ -141,9 +144,24 @@ pub fn effective_operator_strict(
     if let Some(operator) = options.operator() {
         return Ok(Some(operator.to_owned()));
     }
-    Ok(crate::ops::local_config::bundle(project)?
-        .effective
-        .operator)
+    Ok(strict_operator(project)?.0)
+}
+
+/// The operator the local document and its fallbacks resolve, strictly.
+///
+/// The one resolution every ownership and provenance question uses: the local
+/// document's value, else Git's `user.name`, else nothing. An unreadable local
+/// document is `CONFIG_INVALID`; absence is `None`. The value comes back with
+/// the [`ValueSource`](crate::user_config::ValueSource) that supplied it, for a
+/// refusal or a report that has to say where the identity came from.
+///
+/// The operation override is not part of this: it is the caller stating who it
+/// is, and the callers put it in front, as [`effective_operator_strict`] does.
+pub fn strict_operator(
+    project: &Project,
+) -> Result<(Option<String>, crate::user_config::ValueSource), WaymarkError> {
+    let bundle = crate::ops::local_config::bundle(project)?;
+    Ok((bundle.effective.operator, bundle.effective.operator_source))
 }
 
 /// The operator an operation is about to *persist*, resolved strictly.

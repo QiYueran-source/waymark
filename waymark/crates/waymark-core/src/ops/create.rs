@@ -24,14 +24,18 @@
 //! - the partner's `owner`, the new item's `owner`, and the effective operator
 //!   are the same identity. `creator` never participates.
 //!
-//! With `cascade` the operator is resolved strictly (a broken local document is
-//! `CONFIG_INVALID`) once, before anything is staged. A partner that is left
-//! alone — no consent, or an identity mismatch — keeps its bytes and its
-//! `updated_at` and is reported in [`Created::untouched`]; a partner that was
-//! rewritten is reported in [`Created::partners`]. Because the operator can
-//! only ever rewrite partners it owns, the consent rule needs no refusal of its
-//! own: the new item is still created and a partner that is not the operator's
-//! is simply named as left alone.
+//! With `cascade` the operator is resolved once, before the partner is read:
+//! strictly — the local document, then Git's `user.name`, then nothing — so a
+//! broken local document is `CONFIG_INVALID`, and so is no identity at all when
+//! there are partners to judge. A partner that is left alone — no consent, or an
+//! identity mismatch — keeps its bytes and its `updated_at` and is reported in
+//! [`Created::untouched`]; a partner that was rewritten is reported in
+//! [`Created::partners`]. Because the operator can only ever rewrite partners it
+//! owns, no partner write needs an `OWNED_BY_OTHER` refusal: the new item is
+//! still created and a partner that is not the operator's is simply named as
+//! left alone. For the same reason a rewritten partner never raises
+//! `OWNER_MISMATCH`: its owner is the operator, and the entry in `partners` is
+//! what explains its new `updated_at`.
 //!
 //! An archived, missing, or older-generation partner is refused exactly as
 //! before whether or not it would have been rewritten: the link the caller asked
@@ -254,10 +258,7 @@ fn prepare_only(
     let loaded = load_partners(project, &prepared.soft_links)?;
     // Ownership is resolved here exactly as the real write resolves it, so the
     // preview and the write name the same partners as untouched.
-    let operator = match options.cascade {
-        true => mediated::effective_operator_strict(project, options)?,
-        false => None,
-    };
+    let operator = creation_operator(project, &prepared.soft_links, options)?;
 
     let mut partners = Vec::new();
     let mut untouched = Vec::new();
@@ -276,7 +277,7 @@ fn prepare_only(
         });
     }
 
-    let warnings = creation_warnings(project, &partners, options);
+    let warnings = creation_warnings();
 
     Ok(Created {
         item,
@@ -347,10 +348,7 @@ fn write_new_item(
     // no partner can be rewritten, so a broken local document cannot change the
     // answer, and resolving it would turn an otherwise valid create into a
     // configuration error for a write that will not happen.
-    let operator = match options.cascade {
-        true => mediated::effective_operator_strict(project, options)?,
-        false => None,
-    };
+    let operator = creation_operator(project, &prepared.soft_links, options)?;
 
     let mut partner_documents: Vec<PartnerDocument> = Vec::new();
     let mut untouched: Vec<UntouchedPartner> = Vec::new();
@@ -399,7 +397,7 @@ fn write_new_item(
         })
         .collect();
 
-    let warnings = creation_warnings(project, &partners, options);
+    let warnings = creation_warnings();
 
     Ok(Created {
         item,
@@ -413,22 +411,47 @@ fn write_new_item(
     })
 }
 
-/// The `OWNER_MISMATCH` notes this creation justifies.
+/// The operator a soft-link partner is judged against, resolved strictly.
 ///
-/// `_meta.warnings` matches the documents this write actually moved: an owner
-/// mismatch on a rewritten soft-link partner. The new item itself never warns —
-/// creating an item for somebody else is ordinary and unchanged — so a plain
-/// create, and a create whose partners were all left alone, stays quiet.
-fn creation_warnings(
+/// Ownership and creation ask the same question of the same identity, so they
+/// take the same resolution: the operation override, else the local document,
+/// else Git's `user.name`, else nothing. A create with a partner and no resolved
+/// operator cannot say whose the partner is, so it is refused (`CONFIG_INVALID`
+/// naming the identity sources) before the partner is read. Without consent it
+/// is not asked at all: no partner can be rewritten, so a missing identity
+/// changes nothing.
+fn creation_operator(
     project: &Project,
-    partners: &[ChangedPartner],
+    partners: &[WorkItemId],
     options: &OpOptions,
-) -> Vec<crate::envelope::Warning> {
-    let mut warnings = Vec::new();
-    for partner in partners {
-        warnings.extend(mediated::owner_warnings(project, &partner.item, options));
+) -> Result<Option<String>, WaymarkError> {
+    if !options.cascade || partners.is_empty() {
+        return Ok(None);
     }
-    warnings
+    if let Some(operator) = options.operator() {
+        return Ok(Some(operator.to_owned()));
+    }
+    match mediated::strict_operator(project)?.0 {
+        Some(operator) => Ok(Some(operator)),
+        None => Err(WaymarkError::missing_operator_source(
+            "create",
+            &partners[0],
+            project.user_config_path().as_str(),
+        )),
+    }
+}
+
+/// The `OWNER_MISMATCH` notes this creation justifies: none, ever.
+///
+/// A partner is rewritten only when its owner is the operator — and the new
+/// item's owner besides — so a rewritten partner is the operator's own document
+/// and there is no mismatch to warn about. The three-identity rule is therefore
+/// what reports a rewritten partner, all of it in `partners`, and the spec's
+/// `OWNER_MISMATCH` for `create --link` is deliberately never produced. An
+/// operator that speaks for a partner's owner through the override is that
+/// owner, which is exactly why it may write the document.
+fn creation_warnings() -> Vec<crate::envelope::Warning> {
+    Vec::new()
 }
 
 /// Whether one loaded soft-link partner is planned for a rewrite.

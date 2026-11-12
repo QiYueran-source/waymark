@@ -29,7 +29,6 @@ use waymark_core::ops::{archive, create, link, owner, parent, r#move, relationsh
 use crate::envelope::{self, ToolResult};
 use crate::server::WaymarkServer;
 use crate::tools::params;
-use waymark_core::view::item_json;
 
 /// Inputs of `waymark_create_work_item`.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -221,17 +220,7 @@ impl WaymarkServer {
                 &params::write_options(args.dry_run, args.cascade, args.lock_timeout_ms),
             )?;
             Ok(envelope::success(
-                json!({
-                    "id": created.item.id.as_str(),
-                    "path": created.path.to_string(),
-                    "written": created.written,
-                    "item": item_json(&created.item, &created.path),
-                    "partners": created.partners.iter().map(|partner| {
-                        item_json(&partner.item, &partner.path)
-                    }).collect::<Vec<_>>(),
-                    "untouched": waymark_core::view::leftover_partners_json(&created.untouched),
-                    "fingerprints": created.fingerprints.iter().map(|fingerprint| fingerprint.as_str()).collect::<Vec<_>>(),
-                }),
+                waymark_core::view::create_result_json(&created),
                 created.meta.clone(),
             ))
         })
@@ -1012,26 +1001,12 @@ fn dependency_result(outcome: &relationship::RelationshipOutcome) -> ToolResult 
 
 /// One soft-link change as a successful tool result.
 fn link_result(outcome: &link::LinkOutcome, verb: LinkVerb) -> ToolResult {
+    let verb = match verb {
+        LinkVerb::Add => "add",
+        LinkVerb::Remove => "remove",
+    };
     envelope::success(
-        write_data(
-            &outcome.item,
-            &outcome.path,
-            outcome.changed,
-            outcome.written,
-            json!({
-                "other": outcome.other_id.as_str(),
-                "other_path": outcome.other_path.as_ref().map(|path| path.to_string()),
-                "partner_unsynchronised": outcome.partner_unsynchronised,
-                "verb": match verb {
-                    LinkVerb::Add => "add",
-                    LinkVerb::Remove => "remove",
-                },
-                "soft_links": outcome.item.soft_links.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-                "fingerprints": outcome.fingerprints.iter().map(|fingerprint| fingerprint.as_str()).collect::<Vec<_>>(),
-                "other_item": outcome.other.as_ref().zip(outcome.other_path.as_ref()).map(|(item, path)| item_json(item, path)),
-                "other_untouched": outcome.other_untouched.as_ref().map(waymark_core::view::link_untouched_json),
-            }),
-        ),
+        waymark_core::view::link_result_json(outcome, verb),
         outcome.meta.clone(),
     )
 }

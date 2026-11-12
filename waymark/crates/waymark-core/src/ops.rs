@@ -129,6 +129,21 @@ impl OpOptions {
         self
     }
 
+    /// Apply one adapter's flag pair: consent, then the dry run.
+    ///
+    /// The two flags are asked the same way by every cross-item command, so the
+    /// assembly lives here once. It moves the value like every builder above,
+    /// which is why a caller may hand it back — `options = options.flags(…)` —
+    /// and the order of the two settings cannot matter.
+    pub fn flags(self, consent: bool, dry_run: bool) -> Self {
+        let options = if consent { self.with_cascade() } else { self };
+        if dry_run {
+            options.dry_run()
+        } else {
+            options
+        }
+    }
+
     /// Require the on-disk configuration to still have `fingerprint`.
     pub fn with_expected_config_fingerprint(mut self, fingerprint: Fingerprint) -> Self {
         self.expected_config_fingerprint = Some(fingerprint);

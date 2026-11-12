@@ -64,9 +64,13 @@
 //! end may drop it alone. Without [`OpOptions::cascade`] a removal rewrites the
 //! caller's document only and reports the partner as left alone
 //! ([`LinkOutcome::other_untouched`]), leaving it byte-identical, `updated_at`
-//! included. Ownership does not come into it: the operation writes one document,
-//! and that document is the caller's own. With `cascade` the removal is a
-//! cross-item write and takes the same two conditions as `add`.
+//! included. An `add` without consent reports its partner through that same
+//! field, so every one-sided link names the document it left alone, whose it is,
+//! and whether consent would have been enough.
+//!
+//! Ownership does not come into a non-consenting removal: the operation writes
+//! one document, and that document is the caller's own. With `cascade` the
+//! removal is a cross-item write and takes the same two conditions as `add`.
 //!
 //! Removing a link that is not there is an `INVALID_RELATIONSHIP` with or
 //! without consent: the caller named an association that does not exist. When
@@ -117,9 +121,10 @@ pub struct LinkOutcome {
     pub other_id: WorkItemId,
     /// The other end as it still stands unchanged in this project.
     ///
-    /// `Some` when the change deliberately wrote only the caller's document,
-    /// and `None` otherwise: a two-sided write, a partner whose document is
-    /// missing or archived, and every `link add` all leave this empty.
+    /// `Some` when the change deliberately wrote only the caller's document —
+    /// an `add` or a `remove` without consent — and `None` otherwise: a
+    /// two-sided write, or a partner whose document is missing or archived and
+    /// so cannot be named at all.
     pub other_untouched: Option<UntouchedLink>,
     /// Whether an `add` left the pair one-sided: the caller's document records
     /// the link and this operation did not write the other end. Always `false`
@@ -216,7 +221,22 @@ pub fn remove_soft_link(
             ));
         }
         if !options.cascade {
-            return remove_own_side(project, left, &right_id, options);
+            // The partner is reported, not written, so its absence is no reason
+            // to fail: a vanished or archived document is already the state the
+            // removal wants, and there is nothing to name as left alone.
+            let right = match load_partner(project, &right_id, "link remove") {
+                Ok(right) => Some(right),
+                Err(error)
+                    if matches!(
+                        error.code(),
+                        crate::error::Code::ItemNotFound | crate::error::Code::ItemArchived
+                    ) =>
+                {
+                    None
+                }
+                Err(error) => return Err(error),
+            };
+            return remove_own_side(project, left, &right_id, right, options);
         }
         match load_partner(project, &right_id, "link remove") {
             Ok(right) => {
@@ -295,15 +315,16 @@ fn repeat(
         return Ok(None);
     }
     // One-sided, without consent: the caller's half exists, so there is nothing
-    // to write. The answer is that state — no write, `partner_unsynchronised` —
-    // so a retry is neither an error that hides it nor a timestamp for an edit
-    // nobody made.
+    // to write. The answer is that state — no write, `partner_unsynchronised`,
+    // and the partner named as left alone — so a retry is neither an error that
+    // hides it nor a timestamp for an edit nobody made.
     let meta = link_meta(project, std::iter::once(&left.item), options);
+    let untouched = untouched_partner(project, right, options);
     Ok(Some(LinkOutcome {
         item: left.item.clone(),
         other: None,
         other_id: right.id().clone(),
-        other_untouched: None,
+        other_untouched: Some(untouched),
         partner_unsynchronised: true,
         path: left.path.clone(),
         other_path: None,
@@ -327,13 +348,17 @@ fn apply_add(
 
     if !options.cascade {
         // Without consent the partner's document is not touched at all: no
-        // list change, no `updated_at`, not even a timestamp repair.
+        // list change, no `updated_at`, not even a timestamp repair. The pair is
+        // one-sided, and the partner is named as the document that stays as it
+        // is, so an `add` and a `remove` answer "whose file did I leave alone"
+        // through the same field.
         let meta = link_meta(project, std::iter::once(&left_item), options);
+        let untouched = untouched_partner(project, &right, options);
         let fingerprint = mediated::commit(&left, &left_item, options)?;
         return Ok(LinkOutcome {
             other: None,
             other_id: right.id().clone(),
-            other_untouched: None,
+            other_untouched: Some(untouched),
             partner_unsynchronised: true,
             other_path: None,
             changed: true,
@@ -359,31 +384,23 @@ fn apply_add(
 ///
 /// Ownership is a permission-style question, so it must not inherit the lenient
 /// path's "a broken document means no operator" answer: that would turn an
-/// unreadable identity into a write nobody is entitled to. `source` names where
-/// the operator should have come from, and the refusal carries it as
-/// `CONFIG_INVALID` at the local document, the file that has to be fixed.
+/// unreadable identity into a write nobody is entitled to. The resolution is
+/// the same one every other check uses — the local document, then Git's
+/// `user.name`, then nothing — so a person identified only by Git is the
+/// operator like anybody else. Only "nothing" is the refusal, and it names the
+/// local document the caller would write the identity into.
 fn require_operator(
     project: &Project,
     operation: &str,
     other: &WorkItemId,
 ) -> Result<String, WaymarkError> {
-    let local = project.user_config_path();
-    if !local.exists() {
-        // No local document at all: nothing to repair, so the refusal names the
-        // missing source instead of pointing at a file that is not there.
-        return Err(WaymarkError::missing_operator_source(
-            operation,
-            other,
-            local.as_str(),
-        ));
-    }
-    let bundle = crate::ops::local_config::bundle(project)?;
-    match bundle.effective.operator {
+    let (operator, _) = mediated::strict_operator(project)?;
+    match operator {
         Some(operator) => Ok(operator),
         None => Err(WaymarkError::missing_operator_source(
             operation,
             other,
-            local.as_str(),
+            project.user_config_path().as_str(),
         )),
     }
 }
@@ -433,6 +450,7 @@ fn remove_own_side(
     project: &Project,
     left: Loaded,
     partner: &WorkItemId,
+    right: Option<Loaded>,
     options: &OpOptions,
 ) -> Result<LinkOutcome, WaymarkError> {
     let mut left_item = left.item.clone();
@@ -440,28 +458,12 @@ fn remove_own_side(
     normalize_links(&mut left_item);
     mediated::stamp_updated_at(&mut left_item, options);
 
-    // The partner is read, never written: the result says whose file still
-    // lists the link so the caller does not have to look it up.
-    let untouched = match mediated::load_for_write(project, partner.as_str(), "link remove") {
-        Ok(right) => Some(UntouchedLink {
-            id: partner.clone(),
-            path: right.path.clone(),
-            owned: mediated::is_operators(
-                &right.item.owner,
-                mediated::effective_operator(project, options).as_deref(),
-            ),
-            owner: right.item.owner.clone(),
-        }),
-        Err(error)
-            if matches!(
-                error.code(),
-                crate::error::Code::ItemNotFound | crate::error::Code::ItemArchived
-            ) =>
-        {
-            None
-        }
-        Err(error) => return Err(error),
-    };
+    // The partner is read, never written, and already loaded unless its
+    // document is gone: the result says whose file still lists the link so the
+    // caller does not have to look it up.
+    let untouched = right
+        .as_ref()
+        .map(|right| untouched_partner(project, right, options));
 
     let meta = link_meta(project, [&left_item], options);
     let fingerprint = mediated::commit(&left, &left_item, options)?;
@@ -478,6 +480,24 @@ fn remove_own_side(
         written: fingerprint.is_some(),
         fingerprints: fingerprint.into_iter().collect(),
     })
+}
+
+/// Report a partner whose document this change deliberately did not write.
+///
+/// The partner has already been loaded, so nothing here re-reads the project:
+/// the entry says which document still stands unchanged, whose it is, and
+/// whether that owner is the operator — the question a caller asks next, since
+/// an owned partner is the one consent would have been enough to rewrite.
+fn untouched_partner(project: &Project, partner: &Loaded, options: &OpOptions) -> UntouchedLink {
+    UntouchedLink {
+        id: partner.id().clone(),
+        path: partner.path.clone(),
+        owner: partner.item.owner.clone(),
+        owned: mediated::is_operators(
+            &partner.item.owner,
+            mediated::effective_operator(project, options).as_deref(),
+        ),
+    }
 }
 
 fn apply_remove(

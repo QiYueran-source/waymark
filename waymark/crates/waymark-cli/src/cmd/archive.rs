@@ -43,13 +43,7 @@ pub fn run(
     options: &OpOptions,
     json: bool,
 ) -> Result<(), WaymarkError> {
-    let mut options = options.clone();
-    if args.dry_run {
-        options = options.dry_run();
-    }
-    if args.cascade {
-        options.cascade = true;
-    }
+    let options = options.clone().flags(args.cascade, args.dry_run);
     let outcome = archive::archive(project, &args.id, args.reason.as_deref(), &options)?;
 
     if json {

@@ -5,11 +5,14 @@
 //! documents back, because a refusal is only real if the bytes did not move.
 //!
 //! The caller is identified through the local `user.toml` document — the source
-//! a real project configures — and through an options override only where the
-//! test is about which source answers.
+//! a real project configures — through Git's `user.name` where the test is about
+//! that source, and through an options override only where the test is about
+//! which source answers.
 
+use std::process::Command;
 use std::sync::Arc;
 
+use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 use waymark_core::error::Code;
 use waymark_core::ops::create::CreateRequest;
@@ -98,9 +101,10 @@ fn seed_pair(project: &Project, left: &str, right: &str) {
 /// Write the half of a link the named document records, leaving the other
 /// document exactly as it is.
 ///
-/// The fixtures need a one-sided pair as a starting state, and after this ticket
-/// a real `link add` is refused rather than half-written, so setting up that
-/// state is a hand edit — the same half-state a `git pull` can deliver.
+/// The fixtures need a one-sided pair as a starting state, and every `link add`
+/// that Waymark itself runs records the caller's side only, so setting up the
+/// state the other way round is a hand edit — the same half-state a `git pull`
+/// can deliver.
 fn seed_caller_side(project: &Project, from: &str, to: &str) {
     let entry = project
         .locate(&WorkItemId::parse(from).expect("a valid stable ID"))
@@ -119,12 +123,27 @@ fn an_add_without_consent_records_only_the_callers_side_even_for_my_own_pair() {
     let left = make(&project, "left");
     let right = make(&project, "right");
     let right_before = document(&project, &right);
+    let right_path = project
+        .locate(&WorkItemId::parse(&right).expect("a valid stable ID"))
+        .expect("the partner is inventoried")
+        .path;
 
     let outcome = add_soft_link(&project, &left, &right, &options())
         .expect("leaving a document alone is not a refusal");
 
     assert!(outcome.changed && outcome.written);
     assert!(outcome.partner_unsynchronised);
+    let untouched = outcome
+        .other_untouched
+        .as_ref()
+        .expect("the partner is reported as left alone");
+    assert_eq!(untouched.id.as_str(), right);
+    assert_eq!(untouched.path, right_path.clone());
+    assert_eq!(untouched.owner, "frank");
+    assert!(
+        untouched.owned,
+        "the operator owns the partner, so consent would have been enough"
+    );
     assert_eq!(outcome.fingerprints.len(), 1);
     assert_eq!(links(&project, &left), vec![right.clone()]);
     assert!(links(&project, &right).is_empty());
@@ -434,8 +453,6 @@ fn a_broken_local_document_fails_a_cross_item_write_as_a_configuration_error() {
 
 #[test]
 fn a_project_with_no_operator_refuses_a_cross_item_write_and_names_the_source() {
-    // No local document, no override, and an isolated environment: Git cannot
-    // supply a fallback here, which is also what a CI checkout looks like.
     let (_dir, project) = project();
     let left = make(&project, "left");
     let right = make(&project, "right");
@@ -449,16 +466,7 @@ fn a_project_with_no_operator_refuses_a_cross_item_write_and_names_the_source() 
     let error = add_soft_link(&project, &left, &right, &options().with_cascade())
         .expect_err("a cross-item write with nobody to own it is refused");
 
-    if error.code() != Code::ConfigInvalid {
-        // A machine whose Git `user.name` resolves has an operator after all:
-        // then the pair is legitimately written or legitimately refused as
-        // another owner's, and the missing-source path cannot be exercised here.
-        assert!(
-            matches!(error.code(), Code::OwnedByOther),
-            "unexpected refusal: {error:?}"
-        );
-        return;
-    }
+    assert_eq!(error.code(), Code::ConfigInvalid, "{error:?}");
     assert!(
         error
             .message()
@@ -476,4 +484,89 @@ fn a_project_with_no_operator_refuses_a_cross_item_write_and_names_the_source() 
         before,
         "nothing was written"
     );
+}
+
+/// Whether a real `git` executable is on `PATH`; the Git-only cases skip without one.
+fn git_available() -> bool {
+    waymark_core::git::find_executable().is_some()
+}
+
+/// Run `git` in `root`, panicking with its stderr on failure.
+fn git(root: &Utf8Path, args: &[&str]) {
+    let output = Command::new("git")
+        .current_dir(root)
+        .args(args)
+        .output()
+        .expect("the git binary runs");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// A project inside a Git repository whose only identity is `user.name`.
+///
+/// No local document is written, so the operator can only come from Git — the
+/// shape of a fresh clone on a machine that never ran `waymark config set`.
+fn project_with_git_identity(name: &str) -> Option<(tempfile::TempDir, Project)> {
+    if !git_available() {
+        eprintln!("skipping: no `git` executable on PATH");
+        return None;
+    }
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let root = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).expect("a UTF-8 path");
+    git(&root, &["init", "--quiet"]);
+    git(&root, &["config", "user.name", name]);
+    let project = Project::init(&root, InitOptions::default())
+        .expect("the project initialises")
+        .with_clock(Arc::new(fixtures::clock()))
+        .with_id_source(Box::new(SequentialIds::new()));
+    // `Project::init` seeds no local document, but a checkout may already have
+    // one; this test is about Git being the only source, so remove it.
+    let _ = std::fs::remove_file(project.user_config_path());
+    assert!(
+        !project.user_config_path().exists(),
+        "Git must be the only identity source"
+    );
+    Some((dir, project))
+}
+
+#[test]
+fn git_user_name_alone_is_the_operator_for_a_consented_add() {
+    let Some((_dir, project)) = project_with_git_identity("frank") else {
+        return;
+    };
+    let left = make(&project, "left");
+    let right = make(&project, "right");
+
+    let outcome = add_soft_link(&project, &left, &right, &options().with_cascade())
+        .expect("Git's user.name is the operator, so both ends are theirs");
+
+    assert!(
+        outcome.written,
+        "a user identified only by Git owns their documents: {:?}",
+        outcome.meta
+    );
+    assert!(!outcome.partner_unsynchronised);
+    assert_eq!(outcome.fingerprints.len(), 2);
+    assert_eq!(links(&project, &left), vec![right.clone()]);
+    assert_eq!(links(&project, &right), vec![left.clone()]);
+}
+
+#[test]
+fn git_user_name_alone_still_refuses_a_consented_add_to_another_owners_item() {
+    let Some((_dir, project)) = project_with_git_identity("frank") else {
+        return;
+    };
+    let mine = make(&project, "mine");
+    let theirs = make_owned_by(&project, "theirs", "alice");
+    let before = document(&project, &theirs);
+
+    let error = add_soft_link(&project, &mine, &theirs, &options().with_cascade())
+        .expect_err("resolving an operator does not grant its documents");
+
+    assert_eq!(error.code(), Code::OwnedByOther, "{error:?}");
+    assert_eq!(error.details()["owner"], serde_json::json!("alice"));
+    assert_eq!(document(&project, &theirs), before);
 }

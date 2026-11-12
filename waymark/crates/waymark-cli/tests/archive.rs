@@ -568,3 +568,46 @@ fn list_hides_archived_items_until_the_archived_range_is_asked_for() {
     assert_eq!(shown["data"]["id"], serde_json::json!(retired));
     assert!(shown["data"]["item"]["archived_at"].is_string());
 }
+
+#[test]
+fn the_human_output_names_the_documents_left_for_their_owner() {
+    let (_dir, root) = project();
+    act_as(&root, "frank");
+    let target = create_owned_by(&root, "target", "alice");
+    let dependent = create_owned_by(&root, "dependent", "alice");
+    let mut command = waymark();
+    command
+        .arg("--project")
+        .arg(&root)
+        .arg("dependency")
+        .arg("add")
+        .arg(&dependent)
+        .arg(&target);
+    let added = run(&mut command);
+    assert_eq!(added.status(), 0, "stderr: {}", added.stderr());
+
+    // The operator is nobody who owns the dependent, so the archive leaves it
+    // alone and the human output has to say so in a sentence, not only in JSON.
+    let result = run(waymark()
+        .arg("--project")
+        .arg(&root)
+        .arg("archive")
+        .arg(&target));
+    assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
+
+    let stderr = result.stderr();
+    let summary = format!("{target} still referenced by 1 document left untouched");
+    assert!(
+        stderr.contains(&summary),
+        "the summary line counts the documents left alone: {stderr}"
+    );
+    let line = format!("{dependent}  left for its owner (dependencies)");
+    assert!(
+        stderr.contains(&line),
+        "the list names the document and the relation: {stderr}"
+    );
+    assert!(
+        stderr.find(&summary) < stderr.find(&line),
+        "the summary precedes the list it introduces: {stderr}"
+    );
+}

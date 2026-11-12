@@ -798,6 +798,16 @@ async fn a_soft_link_without_consent_records_one_side_only() {
         "the tool says the pair is one-sided"
     );
     assert_eq!(
+        envelope["data"]["other_untouched"],
+        json!({
+            "id": right,
+            "path": right_path.to_string(),
+            "owner": "frank",
+            "owned": true,
+        }),
+        "the tool names the document it left alone, as `link remove` does"
+    );
+    assert_eq!(
         common::read(&right_path),
         right_before,
         "the partner keeps its bytes and its updated_at"
@@ -1056,6 +1066,105 @@ async fn a_cascading_archive_describes_the_same_documents_the_cli_does() {
         "the preview promises exactly what the real run did"
     );
     assert_eq!(planned["data"]["removals"], envelope["data"]["removals"]);
+
+    client.shutdown().await;
+}
+
+/// Make `from` depend on (and soft-link to) `target`, then hand `from` to
+/// somebody else. Dependencies and soft links do not block an archive; a parent
+/// edge would, because an unarchived child always does.
+fn foreign_referrer(fixture: &common::Fixture, target: &str, from: &str) {
+    let project = fixture.project();
+    common::depend(&project, from, target);
+    waymark_core::ops::link::add_soft_link(
+        &project,
+        from,
+        target,
+        &common::options().with_cascade().with_operator("frank"),
+    )
+    .expect("the link is added");
+    waymark_core::ops::owner::transfer_owner(&project, from, "alice", &common::options())
+        .expect("the document belongs to someone else");
+}
+
+#[tokio::test]
+async fn cascade_reaches_the_archive_tool_as_consent_to_clean_my_own_documents() {
+    let fixture = common::fixture(&["target", "mine", "hers"]);
+    act_as_owner(&fixture);
+    let target = fixture.ids[0].clone();
+    let mine = fixture.ids[1].clone();
+    let hers = fixture.ids[2].clone();
+    foreign_referrer(&fixture, &target, &hers);
+    common::depend(&fixture.project(), &mine, &target);
+    let mine_path = common::task_path(&fixture.root, &mine);
+    let hers_path = common::task_path(&fixture.root, &hers);
+    let hers_before = common::read(&hers_path);
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    // Consent with nothing new to clean: the operator's own parent edge goes,
+    // and the foreign one stays. If the flag were dropped between the tool
+    // schema and the operation, this call would clean nothing at all.
+    let envelope = common::envelope(
+        &client
+            .call(
+                "waymark_archive_work_item",
+                json!({"id": target, "cascade": true}),
+            )
+            .await,
+    );
+    assert_eq!(envelope["ok"], true, "{envelope}");
+    assert_eq!(
+        envelope["data"]["affected"],
+        json!([{"id": mine, "path": mine_path.to_string()}]),
+        "consent cleaned the operator's own document: {envelope}"
+    );
+    assert_eq!(
+        envelope["data"]["removals"],
+        json!([{"from": mine, "relation": "dependencies"}])
+    );
+    assert_eq!(
+        envelope["data"]["untouched"],
+        json!([{
+            "id": hers,
+            "path": hers_path.to_string(),
+            "relations": ["dependencies", "soft_links"],
+        }]),
+        "another owner's document is named, never rewritten"
+    );
+    assert!(
+        !common::read(&mine_path).contains(&target),
+        "the operator's own dependency is gone"
+    );
+    assert_eq!(common::read(&hers_path), hers_before);
+
+    client.shutdown().await;
+}
+
+#[tokio::test]
+async fn without_cascade_the_archive_tool_cleans_nothing_it_owns() {
+    let fixture = common::fixture(&["target", "mine"]);
+    act_as_owner(&fixture);
+    let target = fixture.ids[0].clone();
+    let mine = fixture.ids[1].clone();
+    common::depend(&fixture.project(), &mine, &target);
+    let mine_path = common::task_path(&fixture.root, &mine);
+    let mine_before = common::read(&mine_path);
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    let envelope = common::envelope(
+        &client
+            .call("waymark_archive_work_item", json!({"id": target}))
+            .await,
+    );
+    assert_eq!(envelope["ok"], true, "{envelope}");
+    assert_eq!(envelope["data"]["affected"], json!([]));
+    assert_eq!(envelope["data"]["removals"], json!([]));
+    assert_eq!(
+        envelope["data"]["untouched"],
+        json!([{"id": mine, "path": mine_path.to_string(), "relations": ["dependencies"]}]),
+        "the operator's own document is left alone without consent"
+    );
+    assert_eq!(common::read(&mine_path), mine_before);
 
     client.shutdown().await;
 }

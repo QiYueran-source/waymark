@@ -7,10 +7,12 @@
 //! consent the partner is rewritten only when the new item's owner, the
 //! partner's owner, and the operator are the same identity; nothing is refused
 //! because a partner was left alone; and a rewritten partner is always listed in
-//! the result, with an `OWNER_MISMATCH` warning when the operator is acting for
-//! its owner.
+//! the result, so its new `updated_at` is explained. A rewritten partner never
+//! raises `OWNER_MISMATCH`: it is only rewritten when its owner is the operator,
+//! so a create's warning set is always empty.
 
 use waymark_core::config::FieldType;
+use waymark_core::error::Code;
 use waymark_core::model::FieldKey;
 use waymark_core::ops::config::Scalar;
 use waymark_core::ops::create::{self, CreateRequest};
@@ -198,6 +200,38 @@ fn consent_rewrites_a_partner_the_operator_owns_and_reports_it() {
     );
 }
 
+#[test]
+fn a_create_never_warns_about_owner_mismatch_even_when_the_operator_speaks_for_the_owner() {
+    // The three-identity rule only ever rewrites a document whose owner is the
+    // operator, so `OWNER_MISMATCH` has nothing to describe. The override is the
+    // closest the rule comes to a mismatch — the operator speaks for the
+    // partner's owner — and it still warns about nothing. Nothing records an
+    // identity here either, so a warning cannot come from anywhere but the
+    // rewrite under test.
+    let (_dir, project) = project();
+    let partner = make(&project, "alice", "partner");
+
+    let created = create::create(
+        &project,
+        request("alice", "linked").with_soft_link(partner.as_str()),
+        &options().with_cascade().with_operator("alice"),
+    )
+    .expect("creation succeeds");
+
+    assert!(created.written);
+    assert_eq!(rewritten(&created), vec![partner.clone()]);
+    assert_eq!(
+        read_item(&project, &partner).soft_links,
+        vec![created.item.id.clone()],
+        "the operator's own partner records the link"
+    );
+    assert_eq!(
+        warning_codes(&created),
+        Vec::<String>::new(),
+        "a rewritten partner is the operator's own document, not a mismatch"
+    );
+}
+
 /// A partner the operator rewrites through the `--operator` override: the
 /// operator is its owner, the new item is somebody else's, and the result still
 /// carries the document itself so its new `updated_at` is explained.
@@ -308,27 +342,6 @@ fn consent_leaves_the_partner_alone_when_the_recorded_operator_is_somebody_else(
 }
 
 #[test]
-fn no_operator_is_no_owner_so_consent_rewrites_nothing() {
-    let (_dir, project) = project();
-    let partner = make(&project, "frank", "partner");
-    let partner_updated_at = read_item(&project, &partner).updated_at;
-
-    let created = create::create(
-        &project,
-        request("frank", "linked").with_soft_link(partner.as_str()),
-        &options().with_cascade(),
-    )
-    .expect("creation succeeds");
-
-    assert!(
-        created.partners.is_empty(),
-        "nobody can claim the partner, so it is left alone"
-    );
-    assert_eq!(untouched(&created), vec![partner.clone()]);
-    assert_eq!(read_item(&project, &partner).updated_at, partner_updated_at);
-}
-
-#[test]
 fn a_dry_run_names_the_rewritten_and_the_untouched_partners() {
     let (_dir, project) = project();
     act_as(&project, "frank");
@@ -357,4 +370,126 @@ fn a_dry_run_names_the_rewritten_and_the_untouched_partners() {
         "a dry run writes nothing"
     );
     assert_eq!(document(&project, &foreign), foreign_document);
+}
+
+/// Whether a real `git` executable is on `PATH`; the Git-only cases skip without one.
+fn git_available() -> bool {
+    waymark_core::git::find_executable().is_some()
+}
+
+fn git(root: &camino::Utf8Path, args: &[&str]) {
+    let output = std::process::Command::new("git")
+        .current_dir(root)
+        .args(args)
+        .output()
+        .expect("the git binary runs");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// A project inside a Git repository whose only identity is `user.name`.
+fn project_with_git_identity(name: &str) -> Option<(tempfile::TempDir, Project)> {
+    if !git_available() {
+        eprintln!("skipping: no `git` executable on PATH");
+        return None;
+    }
+    let (_dir, project) = project();
+    git(project.root(), &["init", "--quiet"]);
+    git(project.root(), &["config", "user.name", name]);
+    let _ = std::fs::remove_file(project.user_config_path());
+    assert!(
+        !project.user_config_path().exists(),
+        "Git must be the only identity source"
+    );
+    Some((_dir, project))
+}
+
+#[test]
+fn git_user_name_alone_lets_consent_rewrite_the_operators_own_partner() {
+    let Some((_dir, project)) = project_with_git_identity("frank") else {
+        return;
+    };
+    let partner = make(&project, "frank", "partner");
+
+    let created = create::create(
+        &project,
+        request("frank", "linked").with_soft_link(partner.as_str()),
+        &options().with_cascade(),
+    )
+    .expect("Git's user.name is the operator, so the partner is theirs");
+
+    assert_eq!(
+        rewritten(&created),
+        vec![partner.clone()],
+        "a user identified only by Git owns their documents"
+    );
+    assert_eq!(
+        read_item(&project, &partner).soft_links,
+        vec![created.item.id.clone()]
+    );
+}
+
+#[test]
+fn consent_with_no_operator_at_all_is_refused_and_creates_nothing() {
+    let (_dir, project) = project();
+    let partner = make(&project, "frank", "partner");
+    let partner_document = document(&project, &partner);
+    let partner_updated_at = read_item(&project, &partner).updated_at;
+    let before = waymark_core::ops::list::list(&project, &Default::default())
+        .expect("the project lists")
+        .items
+        .len();
+
+    let error = create::create(
+        &project,
+        request("frank", "linked").with_soft_link(partner.as_str()),
+        &options().with_cascade(),
+    )
+    .expect_err("nobody can be shown entitled to write the partner");
+
+    assert_eq!(error.code(), Code::ConfigInvalid, "{error:?}");
+    let issues = error.details()["issues"]
+        .as_array()
+        .expect("a CONFIG_INVALID carries its issues")
+        .iter()
+        .map(|issue| issue.as_str().unwrap_or_default())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        issues.contains("no operator is configured"),
+        "the refusal names the missing identity: {issues}"
+    );
+    assert_eq!(
+        document(&project, &partner),
+        partner_document,
+        "the partner keeps its bytes"
+    );
+    assert_eq!(read_item(&project, &partner).updated_at, partner_updated_at);
+    assert_eq!(
+        waymark_core::ops::list::list(&project, &Default::default())
+            .expect("the project lists")
+            .items
+            .len(),
+        before,
+        "no item was created"
+    );
+}
+
+#[test]
+fn without_consent_a_create_needs_no_operator_at_all() {
+    let (_dir, project) = project();
+    let partner = make(&project, "frank", "partner");
+
+    let created = create::create(
+        &project,
+        request("frank", "linked").with_soft_link(partner.as_str()),
+        &options(),
+    )
+    .expect("no consent means no ownership question");
+
+    assert!(created.written);
+    assert_eq!(untouched(&created), vec![partner]);
 }

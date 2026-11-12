@@ -1,19 +1,20 @@
 //! `waymark link add|remove`: symmetric soft links.
 //!
-//! A soft link is stored on both ends, but only `link add --cascade` writes the
+//! A soft link is stored on both ends, but only a consented change writes the
 //! other end: without it the pair is left one-sided and this module says so in
-//! both output modes. Those rules live in `waymark_core::ops::link`; this
-//! module only parses the IDs and flags and renders the result.
+//! both output modes, naming the partner it left alone and its owner. Those
+//! rules live in `waymark_core::ops::link`, the JSON block in
+//! `waymark_core::view::link_result_json`; this module only parses the IDs and
+//! flags and prints the result.
 
 use clap::{Args, Subcommand};
 use waymark_core::envelope::success_envelope;
 use waymark_core::error::WaymarkError;
-use waymark_core::ops::link::{self, LinkOutcome};
+use waymark_core::ops::link;
 use waymark_core::ops::OpOptions;
 use waymark_core::Project;
 
 use super::{emit, err_line};
-use waymark_core::view::item_json;
 
 /// Arguments of `waymark link`.
 #[derive(Debug, Args)]
@@ -143,21 +144,19 @@ fn apply(
     json: bool,
     verb: Verb,
 ) -> Result<(), WaymarkError> {
-    let mut options = options.clone();
-    if cascade {
-        options.cascade = true;
-    }
-    if pair.dry_run() {
-        options = options.dry_run();
-    }
+    let options = options.clone().flags(cascade, pair.dry_run());
     let outcome = match verb {
         Verb::Add => link::add_soft_link(project, pair.id(), pair.other(), &options)?,
         Verb::Remove => link::remove_soft_link(project, pair.id(), pair.other(), &options)?,
     };
 
     if json {
+        let verb = match verb {
+            Verb::Add => "add",
+            Verb::Remove => "remove",
+        };
         emit(&success_envelope(
-            payload(&outcome, verb),
+            waymark_core::view::link_result_json(&outcome, verb),
             outcome.meta.clone(),
         ))?;
         return Ok(());
@@ -173,25 +172,36 @@ fn apply(
         outcome.item.id, outcome.other_id
     ));
     if let Some(untouched) = &outcome.other_untouched {
-        // A removal without consent: the partner keeps its document and the
-        // link it still lists.
+        // A change without consent: the partner keeps its document, its bytes,
+        // and the link list it already had. The owner is printed because the
+        // next question is whose file still needs the other half.
         err_line(&format!(
-            "  {} {unchanged}",
+            "  {} {owned} {unchanged} ({owner})",
             untouched.id,
-            unchanged = if options.dry_run {
-                "is left alone and still lists this link"
+            owned = if untouched.owned {
+                "left alone"
             } else {
-                "was left alone"
-            }
+                "left for its owner"
+            },
+            unchanged = if options.dry_run {
+                "and keeps the link it lists"
+            } else {
+                "and still lists the link"
+            },
+            owner = untouched.owner
         ));
+        if outcome.partner_unsynchronised {
+            // The caller's document now records a link the partner does not.
+            err_line("  the link is recorded on one side only; re-run with --cascade to record it there too");
+        }
     } else if outcome.partner_unsynchronised {
-        // An addition without consent: the caller's document records the link
-        // and the partner's does not.
         err_line(&format!(
             "  {} was not changed: the link is recorded on one side only; re-run with --cascade to record it there too",
             outcome.other_id
         ));
     } else if outcome.other.is_none() {
+        // Only a partnered change reaches here: the other document is missing
+        // or archived, so the caller's side is all there was to write.
         err_line(&format!(
             "  {} had no document; only {} was updated",
             outcome.other_id, outcome.item.id
@@ -201,27 +211,4 @@ fn apply(
         err_line(&format!("  {}: {}", warning.code, warning.message));
     }
     Ok(())
-}
-
-/// The `data` block of a link result.
-fn payload(outcome: &LinkOutcome, verb: Verb) -> serde_json::Value {
-    super::write_json(
-        &outcome.item,
-        &outcome.path,
-        outcome.changed,
-        outcome.written,
-        serde_json::json!({
-            "other": outcome.other_id.as_str(),
-            "other_path": outcome.other_path.as_ref().map(|path| path.to_string()),
-            "partner_unsynchronised": outcome.partner_unsynchronised,
-            "verb": match verb {
-                Verb::Add => "add",
-                Verb::Remove => "remove",
-            },
-            "soft_links": outcome.item.soft_links.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-            "fingerprints": outcome.fingerprints.iter().map(|f| f.as_str()).collect::<Vec<_>>(),
-            "other_item": outcome.other.as_ref().zip(outcome.other_path.as_ref()).map(|(item, path)| item_json(item, path)),
-            "other_untouched": outcome.other_untouched.as_ref().map(waymark_core::view::link_untouched_json),
-        }),
-    )
 }

@@ -19,7 +19,6 @@ use waymark_core::ops::{create, OpOptions};
 use waymark_core::Project;
 
 use super::{emit, err_line};
-use waymark_core::view::item_json;
 
 /// Arguments of `waymark create`.
 #[derive(Debug, Args)]
@@ -104,29 +103,13 @@ pub fn run(
     for link in args.link {
         request = request.with_soft_link(link);
     }
-    let mut options = options.clone();
-    if args.dry_run {
-        options = options.dry_run();
-    }
-    if args.cascade {
-        options.cascade = true;
-    }
+    let options = options.clone().flags(args.cascade, args.dry_run);
 
     let created = create::create(project, request, &options)?;
 
     if json {
         emit(&success_envelope(
-            serde_json::json!({
-                "id": created.item.id.as_str(),
-                "path": created.path.to_string(),
-                "written": created.written,
-                "item": item_json(&created.item, &created.path),
-                "partners": created.partners.iter().map(|partner| {
-                    item_json(&partner.item, &partner.path)
-                }).collect::<Vec<_>>(),
-                "untouched": waymark_core::view::leftover_partners_json(&created.untouched),
-                "fingerprints": created.fingerprints.iter().map(|fingerprint| fingerprint.as_str()).collect::<Vec<_>>(),
-            }),
+            waymark_core::view::create_result_json(&created),
             created.meta.clone(),
         ))?;
     } else if created.written {

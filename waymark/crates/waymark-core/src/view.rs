@@ -802,6 +802,96 @@ pub fn link_untouched_json(untouched: &crate::ops::link::UntouchedLink) -> Value
     })
 }
 
+/// The `data` block of one soft-link change, shared by every adapter.
+///
+/// A link change writes one document or two, and either way the reader needs
+/// the same facts: the caller's new `soft_links`, the fingerprints of every
+/// document that moved, whether the pair is complete, the partner as written
+/// when it was, and the partner as it still stands when it was deliberately
+/// left alone. The two adapters call this one function, so a field added to a
+/// link result cannot reach one of them first.
+pub fn link_result_json(outcome: &crate::ops::link::LinkOutcome, verb: &str) -> Value {
+    write_result_json_with(
+        &outcome.item,
+        &outcome.path,
+        outcome.changed,
+        outcome.written,
+        [
+            ("other".to_owned(), json!(outcome.other_id.as_str())),
+            (
+                "other_path".to_owned(),
+                json!(outcome.other_path.as_ref().map(|path| path.as_str())),
+            ),
+            (
+                "partner_unsynchronised".to_owned(),
+                json!(outcome.partner_unsynchronised),
+            ),
+            ("verb".to_owned(), json!(verb)),
+            (
+                "soft_links".to_owned(),
+                json!(outcome
+                    .item
+                    .soft_links
+                    .iter()
+                    .map(|id| id.as_str())
+                    .collect::<Vec<_>>()),
+            ),
+            (
+                "fingerprints".to_owned(),
+                json!(outcome
+                    .fingerprints
+                    .iter()
+                    .map(|fingerprint| fingerprint.as_str())
+                    .collect::<Vec<_>>()),
+            ),
+            (
+                "other_item".to_owned(),
+                json!(outcome
+                    .other
+                    .as_ref()
+                    .zip(outcome.other_path.as_ref())
+                    .map(|(item, path)| item_json(item, path))),
+            ),
+            (
+                "other_untouched".to_owned(),
+                outcome
+                    .other_untouched
+                    .as_ref()
+                    .map(link_untouched_json)
+                    .unwrap_or(Value::Null),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    )
+}
+
+/// The `data` block of one creation, shared by every adapter.
+///
+/// It lists what was written — the new document, then every soft-link partner
+/// that was rewritten — and, through [`leftover_partners_json`], every partner
+/// deliberately left as it was. `fingerprints` is `[new, partners…]`, so a
+/// create that rewrote nothing carries exactly one.
+pub fn create_result_json(created: &crate::ops::create::Created) -> Value {
+    json!({
+        "id": created.item.id.as_str(),
+        "path": created.path.as_str(),
+        "written": created.written,
+        "item": item_json(&created.item, &created.path),
+        "partners": created
+            .partners
+            .iter()
+            .map(|partner| item_json(&partner.item, &partner.path))
+            .collect::<Vec<_>>(),
+        "untouched": leftover_partners_json(&created.untouched),
+        "fingerprints": created
+            .fingerprints
+            .iter()
+            .map(|fingerprint| fingerprint.as_str())
+            .collect::<Vec<_>>(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -831,6 +921,94 @@ mod tests {
             blocked: true,
             blocked_by: vec![id("wm-000000000003")],
         }
+    }
+
+    fn link_outcome(
+        other_untouched: Option<crate::ops::link::UntouchedLink>,
+    ) -> crate::ops::link::LinkOutcome {
+        let partner_unsynchronised = other_untouched.is_some();
+        crate::ops::link::LinkOutcome {
+            item: item_with_status(Status::Open),
+            other: None,
+            other_id: id("wm-000000000002"),
+            other_untouched,
+            partner_unsynchronised,
+            path: Utf8Path::new("work/task/wm-000000000001.md").to_path_buf(),
+            other_path: None,
+            changed: true,
+            written: true,
+            fingerprints: Vec::new(),
+            meta: Meta::direct_file_scoped(),
+        }
+    }
+
+    #[test]
+    fn a_one_sided_link_renders_the_partner_it_left_alone() {
+        let left_alone = crate::ops::link::UntouchedLink {
+            id: id("wm-000000000002"),
+            path: Utf8Path::new("work/task/wm-000000000002.md").to_path_buf(),
+            owner: "alice".to_owned(),
+            owned: false,
+        };
+        let rendered = link_result_json(&link_outcome(Some(left_alone)), "add");
+
+        assert_eq!(
+            rendered["other_untouched"],
+            json!({
+                "id": "wm-000000000002",
+                "path": "work/task/wm-000000000002.md",
+                "owner": "alice",
+                "owned": false,
+            })
+        );
+        assert_eq!(rendered["verb"], "add");
+        assert_eq!(rendered["other"], "wm-000000000002");
+        assert_eq!(rendered["other_item"], Value::Null);
+        assert_eq!(rendered["partner_unsynchronised"], true);
+        assert_eq!(rendered["soft_links"], json!([]));
+
+        // An add that wrote both sides reports no untouched partner at all.
+        let both = link_result_json(&link_outcome(None), "remove");
+        assert_eq!(both["other_untouched"], Value::Null);
+        assert_eq!(both["verb"], "remove");
+    }
+
+    #[test]
+    fn a_creation_renders_the_partners_it_rewrote_and_the_ones_it_left_alone() {
+        let partner = fixtures::work_item("wm-000000000002", "task", "Partner").build();
+        let untouched = fixtures::work_item("wm-000000000003", "task", "Hers").build();
+        let mut created_item = fixtures::work_item("wm-000000000001", "task", "New").build();
+        created_item.soft_links = vec![id("wm-000000000002"), id("wm-000000000003")];
+        let created = crate::ops::create::Created {
+            path: Utf8Path::new("work/task/wm-000000000001.md").to_path_buf(),
+            partners: vec![crate::ops::create::ChangedPartner {
+                path: Utf8Path::new("work/task/wm-000000000002.md").to_path_buf(),
+                item: partner,
+                fingerprint: None,
+            }],
+            untouched: vec![crate::ops::create::UntouchedPartner {
+                path: Utf8Path::new("work/task/wm-000000000003.md").to_path_buf(),
+                item: untouched,
+            }],
+            item: created_item,
+            fingerprint: None,
+            fingerprints: Vec::new(),
+            written: false,
+            meta: Meta::direct_file_scoped(),
+        };
+
+        let rendered = create_result_json(&created);
+
+        assert_eq!(rendered["written"], false);
+        assert_eq!(rendered["partners"][0]["id"], "wm-000000000002");
+        assert_eq!(
+            rendered["untouched"],
+            json!([{
+                "id": "wm-000000000003",
+                "path": "work/task/wm-000000000003.md",
+            }])
+        );
+        assert_eq!(rendered["fingerprints"], json!([]));
     }
 
     #[test]
