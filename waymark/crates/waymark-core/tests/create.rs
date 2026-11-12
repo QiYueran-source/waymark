@@ -29,6 +29,12 @@ fn options() -> OpOptions {
     OpOptions::new().with_clock(fixtures::shared_clock())
 }
 
+/// Options that consent to rewriting soft-link partners, acting as the fixture
+/// owner so every fixture item is the operator's.
+fn owned_by_operator() -> OpOptions {
+    options().with_cascade().with_operator("frank")
+}
+
 fn field_key(literal: &str) -> FieldKey {
     FieldKey::parse(literal).expect("a valid field key")
 }
@@ -78,8 +84,33 @@ fn request(title: &str) -> CreateRequest {
 }
 
 /// Create one seeded item and return its ID.
-fn make(project: &Project, title: &str) -> String {
+fn make_plain(project: &Project, title: &str) -> String {
     create::create(project, request(title), &options())
+        .expect("creation succeeds")
+        .item
+        .id
+        .as_str()
+        .to_owned()
+}
+
+/// Create one seeded item the acting operator owns, and return its ID.
+///
+/// The fixture `make`: these items are the subject of the consent cases, so the
+/// operator is set to their owner.
+fn make(project: &Project, title: &str) -> String {
+    create::create(project, request(title), &owned_by_operator())
+        .expect("creation succeeds")
+        .item
+        .id
+        .as_str()
+        .to_owned()
+}
+
+/// Create one seeded item owned by `owner` and return its ID.
+fn make_owned_by(project: &Project, title: &str, owner: &str) -> String {
+    let request = CreateRequest::new(title, "task", owner)
+        .with_field(field_key("effort"), FieldValue::Integer(1));
+    create::create(project, request, &owned_by_operator())
         .expect("creation succeeds")
         .item
         .id
@@ -368,7 +399,7 @@ fn soft_link_partners_gain_the_new_id_symmetrically() {
         request("linked")
             .with_soft_link(first.as_str())
             .with_soft_link(second.as_str()),
-        &options(),
+        &owned_by_operator(),
     )
     .expect("creation succeeds");
 
@@ -422,14 +453,16 @@ fn a_create_with_parent_dependencies_and_links_matches_applying_them_one_by_one(
             .with_dependency(composite_ids[0].as_str())
             .with_soft_link(composite_ids[0].as_str())
             .with_soft_link(composite_ids[2].as_str()),
-        &options(),
+        &owned_by_operator(),
     )
     .expect("composite creation succeeds");
 
+    // The same operator as the composite create, so the separately written
+    // document records the same defaulted creator.
     let sequential_created = create::create(
         &sequential,
         request("work").with_field(field_key("note"), FieldValue::String("n".to_owned())),
-        &options(),
+        &owned_by_operator(),
     )
     .expect("plain creation succeeds");
     assert_eq!(composite_created.item.id, sequential_created.item.id);
@@ -644,11 +677,14 @@ fn a_failed_partner_write_creates_nothing_and_leaves_the_store_byte_identical() 
     let original = std::fs::read(&partner_path).expect("the partner document reads");
 
     let before = snapshot(project.root());
-    let options = OpOptions::new().with_clock(Arc::new(SabotageClock {
-        inner: fixtures::clock(),
-        partner: partner_path.clone(),
-        fired: AtomicBool::new(false),
-    }));
+    let options = OpOptions::new()
+        .with_clock(Arc::new(SabotageClock {
+            inner: fixtures::clock(),
+            partner: partner_path.clone(),
+            fired: AtomicBool::new(false),
+        }))
+        .with_cascade()
+        .with_operator("frank");
 
     let error = create::create(
         &project,
@@ -691,7 +727,7 @@ fn a_dry_run_performs_every_check_and_writes_nothing() {
             .with_field(field_key("note"), FieldValue::String("n".to_owned()))
             .with_soft_link(first.as_str())
             .with_soft_link(second.as_str()),
-        &options().dry_run(),
+        &owned_by_operator().dry_run(),
     )
     .expect("the dry run validates");
 
@@ -715,4 +751,195 @@ fn a_dry_run_performs_every_check_and_writes_nothing() {
     .expect_err("the dry run refuses a missing target");
     assert_eq!(error.code(), Code::ItemNotFound);
     assert_eq!(snapshot(project.root()), before);
+}
+
+#[test]
+fn a_soft_link_with_consent_rewrites_a_partner_the_operator_owns() {
+    let (_dir, project) = project();
+    let partner = make_plain(&project, "partner");
+    let partner_path = task_path(&project, &partner);
+    let before = std::fs::read(&partner_path).expect("the partner document reads");
+
+    let created = create::create(
+        &project,
+        request("linked").with_soft_link(partner.as_str()),
+        &options().with_cascade().with_operator("frank"),
+    )
+    .expect("creation succeeds");
+
+    assert_eq!(created.partners.len(), 1);
+    assert_eq!(created.partners[0].item.id.as_str(), partner);
+    assert_eq!(created.partners[0].path, partner_path);
+    assert!(created.partners[0].fingerprint.is_some());
+    assert!(created.untouched.is_empty());
+    assert_eq!(created.fingerprints.len(), 2);
+    assert_ne!(
+        std::fs::read(&partner_path).expect("the partner document reads"),
+        before,
+        "the partner's document was rewritten"
+    );
+    assert_eq!(
+        read_item(&project, &partner).soft_links,
+        vec![created.item.id.clone()],
+        "both sides record the link"
+    );
+    assert!(
+        created.meta.warnings.is_empty(),
+        "the partner is the operator's"
+    );
+}
+
+#[test]
+fn a_soft_link_with_consent_leaves_a_partner_owned_by_someone_else_alone() {
+    let (_dir, project) = project();
+    // The partner belongs to frank; the operator is recorded the way a person
+    // records one, so Git's `user.name` cannot change the answer.
+    let partner = make(&project, "partner");
+    let partner_path = task_path(&project, &partner);
+    let before = std::fs::read(&partner_path).expect("the partner document reads");
+    waymark_core::ops::local_config::set_scalar(
+        &project,
+        waymark_core::ops::config::Scalar::Operator,
+        "alice",
+        &options(),
+    )
+    .expect("the operator is recorded");
+
+    let created = create::create(
+        &project,
+        request("linked").with_soft_link(partner.as_str()),
+        &options().with_cascade(),
+    )
+    .expect("creation succeeds");
+
+    assert!(
+        created.partners.is_empty(),
+        "consent never reaches another owner's document"
+    );
+    assert_eq!(created.untouched.len(), 1);
+    assert_eq!(created.untouched[0].item.id.as_str(), partner);
+    assert_eq!(created.untouched[0].path, partner_path);
+    assert_eq!(created.fingerprints.len(), 1, "only the new document");
+    assert_eq!(
+        std::fs::read(&partner_path).expect("the partner document reads"),
+        before,
+        "the partner document is byte-identical"
+    );
+    assert!(
+        created.meta.warnings.is_empty(),
+        "the result carries no warning for a document it did not move"
+    );
+}
+
+#[test]
+fn a_soft_link_without_consent_leaves_the_partner_byte_identical() {
+    let (_dir, project) = project();
+    let partner = make_plain(&project, "partner");
+    let partner_path = task_path(&project, &partner);
+    let before = std::fs::read(&partner_path).expect("the partner document reads");
+    let partner_item = read_item(&project, &partner);
+
+    let created = create::create(
+        &project,
+        request("linked").with_soft_link(partner.as_str()),
+        &options(),
+    )
+    .expect("creation succeeds");
+
+    assert_eq!(
+        std::fs::read(&partner_path).expect("the partner document reads"),
+        before,
+        "the partner document is byte-identical without consent"
+    );
+    assert_eq!(
+        read_item(&project, &partner),
+        partner_item,
+        "the partner's updated_at did not move and its links are unchanged"
+    );
+    assert_eq!(
+        read_item(&project, created.item.id.as_str()).soft_links,
+        vec![waymark_core::WorkItemId::parse(&partner).unwrap()],
+        "the new item records the link on its own side"
+    );
+    assert!(created.partners.is_empty());
+    assert_eq!(created.untouched.len(), 1);
+}
+
+#[test]
+fn a_dry_run_reports_the_same_partners_the_write_leaves_alone() {
+    for cascade in [false, true] {
+        let (_dir, project) = project();
+        let mine = make(&project, "mine");
+        // The second partner belongs to somebody else.
+        let theirs = make_owned_by(&project, "theirs", "alice");
+        let request = || {
+            request("planned")
+                .with_soft_link(mine.as_str())
+                .with_soft_link(theirs.as_str())
+        };
+        let options = || {
+            if cascade {
+                owned_by_operator()
+            } else {
+                options()
+            }
+        };
+
+        let preview = create::create(&project, request(), &options().dry_run())
+            .expect("the dry run validates");
+        let created = create::create(&project, request(), &options()).expect("creation");
+
+        assert_eq!(
+            created.partners.len(),
+            preview.partners.len(),
+            "the preview and the write plan the same partners (cascade={cascade})"
+        );
+        assert_eq!(created.untouched.len(), preview.untouched.len());
+    }
+}
+
+#[test]
+fn a_dry_run_never_promises_a_write_of_another_owners_document() {
+    let (_dir, project) = project();
+    let mine = make(&project, "mine");
+    let theirs = make_owned_by(&project, "theirs", "alice");
+
+    let preview = create::create(
+        &project,
+        request("planned")
+            .with_soft_link(mine.as_str())
+            .with_soft_link(theirs.as_str()),
+        &owned_by_operator().dry_run(),
+    )
+    .expect("the dry run validates");
+
+    assert_eq!(
+        preview
+            .partners
+            .iter()
+            .map(|partner| partner.item.id.as_str())
+            .collect::<Vec<_>>(),
+        vec![mine.as_str()]
+    );
+    assert_eq!(
+        preview
+            .untouched
+            .iter()
+            .map(|partner| partner.item.id.as_str())
+            .collect::<Vec<_>>(),
+        vec![theirs.as_str()]
+    );
+
+    let created = create::create(
+        &project,
+        request("planned")
+            .with_soft_link(mine.as_str())
+            .with_soft_link(theirs.as_str()),
+        &owned_by_operator(),
+    )
+    .expect("creation succeeds");
+    assert_eq!(created.partners.len(), preview.partners.len());
+    assert_eq!(created.untouched.len(), preview.untouched.len());
+    assert_eq!(created.partners[0].item.id.as_str(), mine);
+    assert_eq!(created.untouched[0].item.id.as_str(), theirs);
 }
