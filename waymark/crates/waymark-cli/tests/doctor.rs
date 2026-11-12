@@ -308,6 +308,57 @@ fn doctor_reports_a_held_lock_without_waiting() {
 /// other command: an unopenable project is a `PROJECT_NOT_FOUND` failure with
 /// the registry's exit class, not a special diagnostic exit.
 #[test]
+fn doctor_observes_a_closed_parent_at_info_severity_and_stays_healthy() {
+    let (_dir, root) = project();
+    let parent = create_one(&root);
+    let child = create_one(&root);
+    for arguments in [
+        vec!["parent", "set", child.as_str(), parent.as_str()],
+        vec!["close", parent.as_str()],
+    ] {
+        let mut command = waymark();
+        command.arg("--project").arg(&root);
+        for argument in arguments {
+            command.arg(argument);
+        }
+        let result = run(&mut command);
+        assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
+    }
+
+    let result = run(waymark()
+        .arg("--json")
+        .arg("doctor")
+        .arg("--strict")
+        .arg("--project")
+        .arg(&root));
+    assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
+    let data = result.json()["data"].clone();
+    let observation = data["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|finding| finding["code"] == "CLOSED_PARENT")
+        .unwrap_or_else(|| panic!("{}", result.stdout()))
+        .clone();
+    assert_eq!(observation["severity"], serde_json::json!("info"));
+    assert_eq!(observation["fixable"], serde_json::json!(false));
+    assert!(
+        observation["message"].as_str().unwrap().contains(&child),
+        "{observation}"
+    );
+    // An observation never makes a project unhealthy.
+    assert_eq!(data["valid"], serde_json::json!(true));
+    assert_eq!(data["counts"]["errors"], serde_json::json!(0));
+
+    let human = run(waymark().arg("doctor").arg("--project").arg(&root));
+    assert!(
+        human.stderr().contains("CLOSED_PARENT"),
+        "{}",
+        human.stderr()
+    );
+}
+
+#[test]
 fn a_diagnostic_failure_uses_the_shared_exit_mapping() {
     let dir = tempfile::tempdir().expect("a temporary directory");
     let empty = Utf8PathBuf::from_path_buf(dir.path().to_path_buf())

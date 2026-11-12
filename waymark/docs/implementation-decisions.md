@@ -3581,3 +3581,19 @@ clap's own help is where a caller learns which verb consents to what.
 
 **Why:** with `cascade` meaning inbound cleanup, the bare sentence would read as a contradiction of a
 flag that now exists.
+
+## A closed parent is a row column, not a state
+
+**Choice:** `CLOSED_PARENT` is an info-severity registry code, and the list-family
+row carries a `closed_parent` column holding the parent's stable ID when the row
+itself is active and that one parent is `closed`. `doctor` reports the same
+condition as an info finding. Nothing is persisted and readiness is untouched.
+
+**Why:** the signal answers "what should I look at", which is what a `list` row
+is for; putting it only in `doctor` would hide it from the surface people read
+every day. Only the direct parent is inspected so the answer cannot depend on an
+ancestor walk, and a closed child under a closed parent is silent because
+nothing about it is surprising.
+
+**Open:** whether the Web view should render the same column; that is a separate
+read-only presentation decision.

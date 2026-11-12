@@ -51,6 +51,19 @@
     "retryable": false
   },
   {
+    "code": "CLOSED_PARENT",
+    "details": [
+      "id",
+      "parent"
+    ],
+    "exit": null,
+    "finding": "info",
+    "location_kinds": [
+      "work_item"
+    ],
+    "retryable": false
+  },
+  {
     "code": "CONFIG_INVALID",
     "details": [
       "path",

@@ -244,6 +244,10 @@ fn every_typed_constructor_fills_exactly_the_registered_details_keys() {
             "assets_version_mismatch",
             WaymarkError::assets_version_mismatch("version", "0.1.0", "0.2.0"),
         ),
+        (
+            "closed_parent",
+            WaymarkError::closed_parent(&id(), &other()),
+        ),
     ];
 
     let mut seen: Vec<Code> = Vec::new();
