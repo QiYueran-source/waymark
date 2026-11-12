@@ -114,33 +114,28 @@ fn options_at(seconds: i64) -> OpOptions {
 }
 
 #[test]
-fn adding_a_link_without_consent_is_refused_and_records_nothing() {
-    // The partner write is what a link is a claim about, so `add` asks for
-    // consent outright instead of leaving the pair one-sided behind the caller's
-    // back. Both documents keep their exact bytes and timestamps.
+fn adding_a_link_without_consent_records_it_on_the_callers_side_only() {
+    // Leaving a document alone is never a refusal: the partner is reported as
+    // unsynchronised and keeps its exact bytes and timestamp.
     let (_dir, project) = project();
     act_as(&project, "frank");
     let left = make(&project, "task", "left");
     let right = make(&project, "bug", "right");
     let right_document = document(&project, &right);
     let right_updated_at = read::read(&project, &right).unwrap().item.updated_at;
-    let left_document = document(&project, &left);
 
-    let error = add_soft_link(&project, &left, &right, &options_at(60)).unwrap_err();
+    let outcome = add_soft_link(&project, &left, &right, &options_at(60)).unwrap();
 
-    assert_eq!(error.code(), Code::CascadeConsentRequired);
-    assert_eq!(error.details()["option"], serde_json::json!("cascade"));
-    assert!(
-        error.message().contains("--cascade"),
-        "the refusal names the option to re-run with: {}",
-        error.message()
-    );
-    assert!(links(&project, &left).is_empty());
+    assert_eq!(links(&project, &left), vec![right.to_owned()]);
+    assert!(outcome.partner_unsynchronised);
+    assert_eq!(outcome.other_id.as_str(), right);
     assert_eq!(
-        document(&project, &left),
-        left_document,
-        "the caller's document was not written either"
+        outcome.fingerprints.len(),
+        1,
+        "only the caller's document was replaced"
     );
+    assert!(outcome.other.is_none());
+    assert!(links(&project, &right).is_empty());
     assert_eq!(
         document(&project, &right),
         right_document,
@@ -154,20 +149,22 @@ fn adding_a_link_without_consent_is_refused_and_records_nothing() {
 }
 
 #[test]
-fn repeating_a_link_add_without_consent_repeats_the_refusal_without_a_write() {
+fn repeating_a_link_add_without_consent_changes_nothing() {
     let (_dir, project) = project();
     act_as(&project, "frank");
     let left = make(&project, "task", "left");
     let right = make(&project, "bug", "right");
+
+    add_soft_link(&project, &left, &right, &options_at(30)).unwrap();
     let left_document = document(&project, &left);
     let right_document = document(&project, &right);
 
-    // A refusal stops the write, so a retry starts from the same state and gets
-    // the same answer: the only thing that changes it is the option it names.
-    for _ in 0..2 {
-        let error = add_soft_link(&project, &left, &right, &options_at(60)).unwrap_err();
-        assert_eq!(error.code(), Code::CascadeConsentRequired);
-    }
+    // The caller's half already exists and the partner was told nothing, so a
+    // retry answers with that state instead of writing a second timestamp.
+    let again = add_soft_link(&project, &left, &right, &options_at(60)).unwrap();
+    assert!(!again.changed && !again.written);
+    assert!(again.partner_unsynchronised);
+    assert!(again.fingerprints.is_empty());
     assert_eq!(document(&project, &left), left_document);
     assert_eq!(document(&project, &right), right_document);
 }

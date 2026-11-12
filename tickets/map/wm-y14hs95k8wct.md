@@ -782,7 +782,19 @@ Settled:
   1. Ownership: the other document's `owner` equals the effective operator. `creator` is provenance and never counts.
   2. Consent: `cascade` was explicitly given.
   `cascade` authorizes writing my own linked documents only. It never authorizes writing someone else's, so a call carrying `cascade` and naming another owner's document is still refused.
-- The two refusals are separate error codes because the recovery differs. `CASCADE_CONSENT_REQUIRED` (class 4) means the same request may be re-run with `cascade`; `OWNED_BY_OTHER` (class 4) means re-running cannot help and the caller must involve the other owner or transfer ownership first.
+- Every cross-item operation leaves a document it may not write alone and reports it; none of them fails for that reason. `link add` without `cascade` writes the caller's document and reports the partner as unsynchronised, exactly as `create --link` names it and `archive` names a foreign reference.
+- One refusal survives, because there the caller did ask for the second write: a consented `link add` or `link remove --cascade` against another owner's document is `OWNED_BY_OTHER` (class 4), and re-running cannot help — the owner must make the change or ownership is transferred first. `CASCADE_CONSENT_REQUIRED` stays registered but has no producer; removing a code costs a snapshot, a schema change and a documentation sweep, and reinstating it costs the same.
+- The behaviour, by operation and consent:
+
+| Operation | No consent | Consent, partner mine | Consent, partner foreign |
+|---|---|---|---|
+| `link add` | writes the caller's document, reports the partner unsynchronised | writes both as one batch | `OWNED_BY_OTHER`, writes nothing |
+| `link remove` | drops the caller's link, reports the partner left alone | drops both | `OWNED_BY_OTHER`, writes nothing |
+| `create` with a soft link | writes the new item, names the partner in `untouched` | rewrites the partner | leaves the partner, names it in `untouched` |
+| `archive` | writes the target, names every referencing document | cleans the operator's own inbound references | leaves foreign references, names them |
+| `dependency`, `parent` | writes the caller's document only | — | — |
+
+- This supersedes the earlier wording in this section that made `link add` and `link remove` exceptions and that refused a non-consenting add outright. The refusal came from a spec user story that contradicted its own implementation decisions; the table above is the single rule, and `docs/implementation-decisions.md` records it as well.
 - Single-document writes to an item owned by someone else keep today's semantics: an `OWNER_MISMATCH` warning and the write proceeds. Only cross-item writes are refused. No global permission model is introduced: documents are plain files anyone can hand-edit, so a blanket refusal would enforce nothing while breaking ordinary collaboration and every project that has no operator configured.
 - No `--force` flag exists. Writing another owner's document is not something to force; if the item should be mine, ownership is transferred first. A consent flag plus a bypass would be two overlapping doors to the same write.
 - The ownership condition uses the same effective operator resolution every other check uses: the local `user.toml` value, then Git `user.name`, then nothing. Ownership checks resolve it strictly rather than through the lenient path that warning generation uses, so a broken `user.toml` fails as a configuration problem rather than silently degrading to "no operator". When no operator resolves at all, a cross-item write is refused with a message saying which source is missing and how to set one; there is no silent pass-through.

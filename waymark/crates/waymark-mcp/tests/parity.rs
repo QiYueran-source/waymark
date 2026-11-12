@@ -375,17 +375,12 @@ async fn both_adapters_refuse_a_cross_item_write_the_same_way() {
     act_as_in(&cli_root, "frank");
     common::warm_lock(&fixture.root);
     common::warm_lock(&cli_root);
-    let before = common::normalized_snapshot(&fixture.root);
+    let _before = common::normalized_snapshot(&fixture.root);
     let client = common::Client::connect(fixture.root.clone()).await;
 
-    // Consent is the first refusal: it is the only one the caller fixes alone.
-    let consent = WaymarkError::cascade_consent_required(
-        "link add",
-        &WorkItemId::parse(&mine).expect("a stable ID"),
-        &WorkItemId::parse(&theirs).expect("a stable ID"),
-        "re-run with --cascade to also record the link there",
-    );
-    let mcp = common::business_error(
+    // Without consent neither adapter writes the partner: both record the
+    // caller's side and report the pair as one-sided, byte for byte alike.
+    let mcp = common::envelope(
         &client
             .call(
                 "waymark_add_soft_link",
@@ -393,14 +388,14 @@ async fn both_adapters_refuse_a_cross_item_write_the_same_way() {
             )
             .await,
     );
-    let (exit, cli) = common::try_cli_json_code(&cli_root, &["link", "add", &mine, &theirs]);
-    let cli = common::cli_business_error(&cli.expect_err("the CLI refuses as well"));
-    assert_eq!(mcp, cli, "the consent refusal differs between adapters");
-    assert_eq!(mcp, common::shared_failure(&consent));
-    assert_eq!(mcp["code"], json!("CASCADE_CONSENT_REQUIRED"));
-    assert_eq!(mcp["details"]["option"], json!("cascade"));
-    assert_eq!(consent.exit_class(), Some(ExitClass::Conflict));
-    assert_eq!(exit, 4, "the registry's conflict class, not a usage error");
+    assert_eq!(mcp["data"]["partner_unsynchronised"], json!(true));
+    common::cli_json(&cli_root, &["link", "add", &mine, &theirs]);
+    assert_eq!(
+        common::normalized_snapshot(&fixture.root),
+        common::normalized_snapshot(&cli_root),
+        "the one-sided add differs between adapters"
+    );
+    let before = common::normalized_snapshot(&fixture.root);
 
     // With consent, ownership is the answer, and re-running cannot change it.
     let owned = WaymarkError::owned_by_other(

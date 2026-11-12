@@ -7,24 +7,20 @@
 //!
 //! The association is stored on both sides, and writing the second side is a
 //! cross-item write: it needs (a) [`OpOptions::cascade`] and (b) that document's
-//! `owner` to equal the effective operator. `add` asks for the partner write
-//! *always* — a link is a claim about both ends — and `remove` asks for it only
-//! with consent. The two refusals carry different codes because their recoveries
-//! differ:
+//! `owner` to equal the effective operator.
 //!
-//! - a missing consent is [`crate::error::Code::CascadeConsentRequired`], and
-//!   the message names the option to re-run with;
-//! - a partner owned by somebody else is [`crate::error::Code::OwnedByOther`]
-//!   (reached once consent is given, since a non-consenting write is refused
-//!   before it), and the message says that re-running cannot help: the owner has
-//!   to be involved, or ownership transferred first.
+//! Without consent neither verb writes the partner: `add` records the link on
+//! the caller's document and reports the partner as unsynchronised, `remove`
+//! drops it from the caller's document and reports the partner as left alone.
+//! Leaving a document alone is never a refusal — a half-written pair is a
+//! reported state, not a failure, and `doctor` finds it later.
 //!
-//! The ownership comparison resolves the operator strictly
-//! ([`mediated::effective_operator_strict`]), so a broken local document is a
-//! configuration error rather than a silent "no operator". A project with no
-//! operator at all is refused as a missing identity source, because a
-//! cross-item write that cannot show who is entitled to it must not pass
-//! silently.
+//! Consent is where a request becomes a claim about both documents, and that is
+//! where ownership is enforced: a consented write against a partner owned by
+//! somebody else is [`crate::error::Code::OwnedByOther`], because the caller
+//! asked for that document explicitly and silently downgrading the request would
+//! report a two-sided change that never happened. Its message says re-running
+//! cannot help: the owner has to be involved, or ownership transferred first.
 //!
 //! With both, the two documents are replaced as one batch — see
 //! [`crate::write::replace_batch`] for the guarantee, which is what makes a
@@ -58,8 +54,9 @@
 //! - a target that does not exist (`ITEM_NOT_FOUND`) or is archived
 //!   (`ITEM_ARCHIVED`);
 //! - an archived source (`ITEM_ARCHIVED`);
-//! - a second-document write without consent (`CASCADE_CONSENT_REQUIRED`), or
-//!   one whose partner belongs to another owner (`OWNED_BY_OTHER`).
+//! - a consented second-document write whose partner belongs to another owner
+//!   (`OWNED_BY_OTHER`); without consent nothing is refused, because nothing but
+//!   the caller's own document is written.
 //!
 //! # Removal only needs the caller's side
 //!
@@ -175,14 +172,19 @@ pub fn add_soft_link(
         if let Some(outcome) = repeat(project, &left, &right, options)? {
             return Ok(outcome);
         }
-        require_partner_write(
-            project,
-            "link add",
-            left.id(),
-            &right,
-            options,
-            "re-run with --cascade to also record the link there",
-        )?;
+        // Without consent this is not a cross-item write at all: only the
+        // caller's document changes and the partner is reported as left alone.
+        // Consent is where the pair is judged as a pair.
+        if options.cascade {
+            require_partner_write(
+                project,
+                "link add",
+                left.id(),
+                &right,
+                options,
+                "re-run with --cascade to also record the link there",
+            )?;
+        }
         apply_add(project, left, right, options)
     })
 }
@@ -292,10 +294,10 @@ fn repeat(
     if options.cascade {
         return Ok(None);
     }
-    // One-sided, without consent: an earlier run of this same command recorded
-    // the caller's half, and the answer is that state — no write,
-    // `partner_unsynchronised` — so a retry is neither an error that hides it
-    // nor a timestamp for an edit nobody made.
+    // One-sided, without consent: the caller's half exists, so there is nothing
+    // to write. The answer is that state — no write, `partner_unsynchronised` —
+    // so a retry is neither an error that hides it nor a timestamp for an edit
+    // nobody made.
     let meta = link_meta(project, std::iter::once(&left.item), options);
     Ok(Some(LinkOutcome {
         item: left.item.clone(),

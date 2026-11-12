@@ -775,36 +775,32 @@ async fn removing_a_soft_link_without_consent_leaves_the_partner_alone() {
 }
 
 #[tokio::test]
-async fn a_soft_link_without_consent_is_refused_and_writes_nothing() {
+async fn a_soft_link_without_consent_records_one_side_only() {
     let fixture = common::fixture(&["one", "two"]);
     act_as_owner(&fixture);
     let left = fixture.ids[0].clone();
     let right = fixture.ids[1].clone();
-    let left_path = common::task_path(&fixture.root, &left);
     let right_path = common::task_path(&fixture.root, &right);
-    let before = (common::read(&left_path), common::read(&right_path));
+    let right_before = common::read(&right_path);
     let client = common::Client::connect(fixture.root.clone()).await;
 
     let result = client
         .call("waymark_add_soft_link", json!({"id": left, "other": right}))
         .await;
 
-    assert_eq!(result.is_error, Some(true), "a refusal is a tool failure");
-    let error = common::business_error(&result);
-    assert_eq!(error["code"], json!("CASCADE_CONSENT_REQUIRED"));
-    assert_eq!(error["retryable"], json!(false));
-    assert_eq!(error["details"]["option"], json!("cascade"));
-    assert!(
-        error["message"]
-            .as_str()
-            .expect("a message")
-            .contains("--cascade"),
-        "the refusal names the option to re-run with: {error}"
+    let envelope = common::envelope(&result);
+    assert_eq!(envelope["ok"], true, "{envelope}");
+    assert_eq!(envelope["data"]["soft_links"], json!([right]));
+    assert_eq!(envelope["data"]["other_item"], serde_json::Value::Null);
+    assert_eq!(
+        envelope["data"]["partner_unsynchronised"],
+        json!(true),
+        "the tool says the pair is one-sided"
     );
     assert_eq!(
-        (common::read(&left_path), common::read(&right_path)),
-        before,
-        "a refusal writes neither document"
+        common::read(&right_path),
+        right_before,
+        "the partner keeps its bytes and its updated_at"
     );
 
     client.shutdown().await;

@@ -1132,6 +1132,16 @@ impl WaymarkError {
 
     /// A cross-item write was asked for without the consent option.
     ///
+    /// Kept registered although no operation raises it today: every cross-item
+    /// operation either writes one document without consent or refuses with
+    /// `OWNED_BY_OTHER`. Retiring and later reinstating a code costs a golden
+    /// snapshot, a schema change and a documentation sweep, so the recovery unit
+    /// stays available for the next operation that needs it.
+    ///
+    /// `consent_hint` names the option to re-run with, so the caller can correct
+    /// its own request without guessing. Class 4: the request cannot proceed as
+    /// issued, and the same request with the same flags will fail again.
+    ///
     /// `consent_hint` names the option to re-run with, so the caller can correct
     /// its own request without guessing. Class 4: the request cannot proceed as
     /// issued, and the same request with the same flags will fail again.

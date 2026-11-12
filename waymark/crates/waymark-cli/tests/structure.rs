@@ -204,94 +204,84 @@ fn document(root: &Utf8PathBuf, id: &str) -> String {
 }
 
 #[test]
-fn link_add_without_cascade_is_a_consent_refusal_that_writes_nothing() {
+fn link_add_without_cascade_records_the_link_on_the_callers_side_only() {
     let (_dir, root) = project();
     act_as(&root, "frank");
     let left = create(&root, "left");
     let right = create(&root, "right");
-    let before = (document(&root, &left), document(&root, &right));
+    let right_before = document(&root, &right);
 
-    let (status, envelope) = json_err(&root, &["link", "add", &left, &right]);
+    let added = json_ok(&root, &["link", "add", &left, &right]);
 
-    assert_eq!(status, 4, "a refusal that consent can fix is a conflict");
-    assert_eq!(
-        envelope["error"]["code"],
-        serde_json::json!("CASCADE_CONSENT_REQUIRED")
-    );
-    assert_eq!(envelope["error"]["retryable"], serde_json::json!(false));
-    assert_eq!(envelope["error"]["details"]["option"], "cascade");
-    assert_eq!(envelope["error"]["details"]["id"], serde_json::json!(left));
-    assert_eq!(
-        envelope["error"]["details"]["other"],
-        serde_json::json!(right)
-    );
-    let message = envelope["error"]["message"]
-        .as_str()
-        .expect("the error carries a message");
-    assert!(
-        message.contains("--cascade"),
-        "the refusal names the option to re-run with: {message}"
-    );
-    assert_eq!(
-        (document(&root, &left), document(&root, &right)),
-        before,
-        "a refusal writes neither document"
-    );
-
-    // The same request with the option the message named succeeds on both sides.
-    let added = json_ok(&root, &["link", "add", &left, &right, "--cascade"]);
+    assert_eq!(added["data"]["changed"], serde_json::json!(true));
     assert_eq!(
         added["data"]["item"]["soft_links"],
         serde_json::json!([right])
     );
+    assert_eq!(added["data"]["other_item"], serde_json::Value::Null);
     assert_eq!(
-        added["data"]["other_item"]["soft_links"],
+        added["data"]["partner_unsynchronised"],
+        serde_json::json!(true),
+        "the result says the pair is one-sided"
+    );
+    assert_eq!(
+        document(&root, &right),
+        right_before,
+        "the partner keeps its bytes and its updated_at"
+    );
+
+    // The same request with the option records both halves.
+    let consented = json_ok(&root, &["link", "add", &left, &right, "--cascade"]);
+    assert_eq!(
+        consented["data"]["other_item"]["soft_links"],
         serde_json::json!([left])
     );
 }
 
 #[test]
-fn link_add_against_another_owners_item_is_owned_by_other_with_or_without_consent() {
+fn link_add_against_another_owners_item_is_left_alone_without_consent() {
     let (_dir, root) = project();
     act_as(&root, "frank");
     let mine = create(&root, "mine");
     let theirs = create_owned_by(&root, "theirs", "alice");
-    let before = (document(&root, &mine), document(&root, &theirs));
+    let theirs_before = document(&root, &theirs);
 
-    for flags in [&[][..], &["--cascade"][..]] {
-        let mut arguments = vec!["link", "add", mine.as_str(), theirs.as_str()];
-        arguments.extend_from_slice(flags);
-        let (status, envelope) = json_err(&root, &arguments);
-        if flags.is_empty() {
-            // Consent is the first answer: it is the only one the caller can
-            // fix alone, and it costs nothing to take next.
-            assert_eq!(envelope["error"]["code"], "CASCADE_CONSENT_REQUIRED");
-            continue;
-        }
-        assert_eq!(status, 4);
-        assert_eq!(
-            envelope["error"]["code"],
-            serde_json::json!("OWNED_BY_OTHER")
-        );
-        assert_eq!(envelope["error"]["retryable"], serde_json::json!(false));
-        assert_eq!(
-            envelope["error"]["details"]["id"],
-            serde_json::json!(theirs)
-        );
-        assert_eq!(envelope["error"]["details"]["owner"], "alice");
-        let message = envelope["error"]["message"]
-            .as_str()
-            .expect("the error carries a message");
-        assert!(
-            message.contains("re-running will not change the outcome"),
-            "the refusal says retrying cannot help: {message}"
-        );
-    }
+    // Without consent this is not a cross-item write: the caller's document
+    // records the link and the partner is reported as left alone.
+    let added = json_ok(&root, &["link", "add", &mine, &theirs]);
     assert_eq!(
-        (document(&root, &mine), document(&root, &theirs)),
-        before,
-        "neither refusal wrote anything"
+        added["data"]["partner_unsynchronised"],
+        serde_json::json!(true)
     );
+    assert_eq!(document(&root, &theirs), theirs_before);
+
+    // Consent is the request to write the partner, and ownership refuses it.
+    let mine_before = document(&root, &mine);
+    let (status, envelope) = json_err(&root, &["link", "add", &mine, &theirs, "--cascade"]);
+    assert_eq!(status, 4);
+    assert_eq!(
+        envelope["error"]["code"],
+        serde_json::json!("OWNED_BY_OTHER")
+    );
+    assert_eq!(envelope["error"]["retryable"], serde_json::json!(false));
+    assert_eq!(
+        envelope["error"]["details"]["id"],
+        serde_json::json!(theirs)
+    );
+    assert_eq!(envelope["error"]["details"]["owner"], "alice");
+    let message = envelope["error"]["message"]
+        .as_str()
+        .expect("the error carries a message");
+    assert!(
+        message.contains("re-running will not change the outcome"),
+        "the refusal says retrying cannot help: {message}"
+    );
+    assert_eq!(
+        document(&root, &mine),
+        mine_before,
+        "the refusal wrote nothing"
+    );
+    assert_eq!(document(&root, &theirs), theirs_before);
 }
 
 #[test]
@@ -367,19 +357,28 @@ fn link_remove_cascade_against_another_owners_item_is_owned_by_other() {
 }
 
 #[test]
-fn a_repeated_link_add_without_cascade_repeats_the_consent_refusal() {
+fn a_repeated_link_add_without_cascade_changes_nothing() {
     let (_dir, root) = project();
     act_as(&root, "frank");
     let left = create(&root, "left");
     let right = create(&root, "right");
-    let before = (document(&root, &left), document(&root, &right));
 
-    for _ in 0..2 {
-        let (status, envelope) = json_err(&root, &["link", "add", &left, &right]);
-        assert_eq!(status, 4);
-        assert_eq!(envelope["error"]["code"], "CASCADE_CONSENT_REQUIRED");
-    }
-    assert_eq!((document(&root, &left), document(&root, &right)), before);
+    json_ok(&root, &["link", "add", &left, &right]);
+    let after_first = (document(&root, &left), document(&root, &right));
+
+    // The caller's half already exists and the partner was told nothing, so the
+    // answer is that state: no write, no new timestamp, no error.
+    let again = json_ok(&root, &["link", "add", &left, &right]);
+    assert_eq!(again["data"]["changed"], serde_json::json!(false));
+    assert_eq!(again["data"]["written"], serde_json::json!(false));
+    assert_eq!(
+        again["data"]["partner_unsynchronised"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        (document(&root, &left), document(&root, &right)),
+        after_first
+    );
 }
 
 #[test]
@@ -410,7 +409,7 @@ fn a_cross_item_write_with_no_operator_names_the_identity_source() {
 }
 
 #[test]
-fn the_consent_refusal_is_what_the_human_output_reports() {
+fn the_human_output_says_the_partner_did_not_change() {
     let (_dir, root) = project();
     act_as(&root, "frank");
     let left = create(&root, "left");
@@ -424,27 +423,41 @@ fn the_consent_refusal_is_what_the_human_output_reports() {
         .arg(&left)
         .arg(&right));
 
-    assert_eq!(result.status(), 4, "stderr: {}", result.stderr());
+    assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
     let stderr = result.stderr();
     assert!(
-        stderr.starts_with("error: "),
-        "human output leads with the failure: {stderr}"
+        stderr.contains(&format!("{left} linked to {right}")),
+        "the caller's result is reported: {stderr}"
     );
     assert!(
-        stderr.contains(left.as_str()),
-        "the caller's item is named: {stderr}"
-    );
-    assert!(
-        stderr.contains(right.as_str()),
-        "the document that would also be written is named: {stderr}"
+        stderr.contains(&format!("{right} was not changed")),
+        "the partner is named as untouched: {stderr}"
     );
     assert!(
         stderr.contains("--cascade"),
-        "human output names the option to re-run with: {stderr}"
+        "the message names the option that would record both sides: {stderr}"
+    );
+
+    // A consented write against somebody else's item is the refusal, and the
+    // human output leads with it.
+    let theirs = create_owned_by(&root, "theirs", "alice");
+    let refused = run(waymark()
+        .arg("--project")
+        .arg(&root)
+        .arg("link")
+        .arg("add")
+        .arg(&left)
+        .arg(&theirs)
+        .arg("--cascade"));
+    assert_eq!(refused.status(), 4, "stderr: {}", refused.stderr());
+    let message = refused.stderr();
+    assert!(
+        message.starts_with("error: "),
+        "human output leads with the failure: {message}"
     );
     assert!(
-        !stderr.contains("was not changed"),
-        "no document was written, so nothing is reported as left alone: {stderr}"
+        message.contains("re-running will not change the outcome"),
+        "the refusal says retrying cannot help: {message}"
     );
 }
 

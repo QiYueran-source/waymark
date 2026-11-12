@@ -533,17 +533,16 @@ impl WaymarkServer {
         })
     }
 
-    /// Associate two items with a symmetric, non-blocking soft link. Both
-    /// documents are replaced as one all-or-nothing batch.
+    /// Associate two items with a symmetric, non-blocking soft link.
     ///
-    /// `cascade` is the consent flag for a cross-item write and is required: a
-    /// link is a claim about both ends, so without it the call fails with
-    /// `CASCADE_CONSENT_REQUIRED` and writes nothing. With it, the other item's
-    /// document must belong to the operator, or the call fails with
-    /// `OWNED_BY_OTHER`, which re-running cannot change; give both items the
-    /// same owner or transfer ownership first. `lock_timeout_ms` bounds the
-    /// wait for the project write lock; `0` fails immediately with retryable
-    /// `LOCK_TIMEOUT`.
+    /// Without `cascade` only the item named by `id` is written; the other item
+    /// keeps its bytes and the result reports `partner_unsynchronised: true`.
+    /// With `cascade` both documents are replaced as one all-or-nothing batch,
+    /// and the other item's document must belong to the operator, or the call
+    /// fails with `OWNED_BY_OTHER`, which re-running cannot change; give both
+    /// items the same owner or transfer ownership first. `lock_timeout_ms`
+    /// bounds the wait for the project write lock; `0` fails immediately with
+    /// retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_add_soft_link",
         annotations(

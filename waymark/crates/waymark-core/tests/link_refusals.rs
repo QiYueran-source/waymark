@@ -11,7 +11,7 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use waymark_core::error::{Code, ExitClass};
+use waymark_core::error::Code;
 use waymark_core::ops::create::CreateRequest;
 use waymark_core::ops::link::{add_soft_link, remove_soft_link};
 use waymark_core::ops::{config::Scalar, create, local_config, read, OpOptions};
@@ -113,44 +113,33 @@ fn seed_caller_side(project: &Project, from: &str, to: &str) {
 }
 
 #[test]
-fn an_add_without_consent_stops_when_the_partner_is_my_own_and_records_nothing() {
+fn an_add_without_consent_records_only_the_callers_side_even_for_my_own_pair() {
     let (_dir, project) = project();
     act_as(&project, "frank");
     let left = make(&project, "left");
     let right = make(&project, "right");
-    let before = (document(&project, &left), document(&project, &right));
+    let right_before = document(&project, &right);
 
-    let error =
-        add_soft_link(&project, &left, &right, &options()).expect_err("consent is asked for");
+    let outcome = add_soft_link(&project, &left, &right, &options())
+        .expect("leaving a document alone is not a refusal");
 
-    assert_eq!(error.code(), Code::CascadeConsentRequired, "{error:?}");
-    assert!(!error.retryable());
-    assert_eq!(error.exit_class(), Some(ExitClass::Conflict));
-    assert_eq!(error.details()["operation"], serde_json::json!("link add"));
-    assert_eq!(error.details()["id"], serde_json::json!(left));
-    assert_eq!(error.details()["other"], serde_json::json!(right));
-    assert_eq!(error.details()["option"], serde_json::json!("cascade"));
-    assert!(
-        error.message().contains("--cascade"),
-        "the refusal names the option to re-run with: {}",
-        error.message()
-    );
-    assert!(!error.message().contains("will not change"), "{error}");
-    assert_eq!(
-        (document(&project, &left), document(&project, &right)),
-        before,
-        "a refusal writes nothing"
-    );
+    assert!(outcome.changed && outcome.written);
+    assert!(outcome.partner_unsynchronised);
+    assert_eq!(outcome.fingerprints.len(), 1);
+    assert_eq!(links(&project, &left), vec![right.clone()]);
+    assert!(links(&project, &right).is_empty());
+    assert_eq!(document(&project, &right), right_before);
 
-    // The refusal is the same on a dry run: a preview never promises a write
-    // the real run would refuse.
-    let error = add_soft_link(&project, &left, &right, &options().dry_run())
-        .expect_err("the preview refuses too");
-    assert_eq!(error.code(), Code::CascadeConsentRequired);
-    assert_eq!(
-        (document(&project, &left), document(&project, &right)),
-        before
-    );
+    // The preview answers the same question as the write.
+    let (_preview_dir, preview_project) = self::project();
+    act_as(&preview_project, "frank");
+    let a = make(&preview_project, "left");
+    let b = make(&preview_project, "right");
+    let preview = add_soft_link(&preview_project, &a, &b, &options().dry_run())
+        .expect("the preview reports the same outcome");
+    assert!(preview.changed);
+    assert!(!preview.written);
+    assert!(preview.partner_unsynchronised);
 }
 
 #[test]
@@ -209,67 +198,69 @@ fn a_consented_add_against_a_foreign_partner_is_owned_by_other_and_writes_nothin
 }
 
 #[test]
-fn an_add_without_consent_against_a_foreign_partner_asks_for_consent_first() {
-    // Consent alone never decides — the ownership answer is the same with and
-    // without it — but the caller is told the one thing it can fix by itself
-    // first. The foreign owner is reported as soon as consent is given.
+fn an_add_without_consent_leaves_a_foreign_partner_alone_and_consent_refuses_it() {
+    // Without consent the partner is not a cross-item write at all: it is left
+    // alone and reported. Consent is the request to write it, and that is where
+    // ownership answers.
     let (_dir, project) = project();
     act_as(&project, "frank");
     let mine = make(&project, "mine");
     let theirs = make_owned_by(&project, "theirs", "alice");
-    let before = (document(&project, &mine), document(&project, &theirs));
+    let theirs_before = document(&project, &theirs);
 
-    let error = add_soft_link(&project, &mine, &theirs, &options())
-        .expect_err("a foreign partner is refused without consent as well");
-    assert_eq!(error.code(), Code::CascadeConsentRequired, "{error:?}");
+    let outcome = add_soft_link(&project, &mine, &theirs, &options())
+        .expect("the caller's document is all this write touches");
+    assert!(outcome.partner_unsynchronised);
+    assert_eq!(links(&project, &mine), vec![theirs.clone()]);
+    assert_eq!(document(&project, &theirs), theirs_before);
 
     let error = add_soft_link(&project, &mine, &theirs, &options().with_cascade())
-        .expect_err("and still refused once consent is given");
+        .expect_err("consent does not grant access to another owner's document");
     assert_eq!(error.code(), Code::OwnedByOther, "{error:?}");
-    assert_eq!(
-        (document(&project, &mine), document(&project, &theirs)),
-        before
-    );
+    assert_eq!(document(&project, &theirs), theirs_before);
 }
 
 #[test]
-fn the_ownership_refusal_waits_for_consent_when_both_conditions_fail() {
-    // Both are wrong at once. The cheap, self-correcting refusal comes first, so
-    // the caller is not sent looking for an owner before it has even consented.
+fn without_consent_nobody_is_asked_and_nothing_is_refused() {
+    // The ownership answer only exists once the caller has asked to write the
+    // other document. Before that there is no cross-item write to refuse.
     let (_dir, project) = project();
     act_as(&project, "frank");
     let mine = make(&project, "mine");
     let theirs = make_owned_by(&project, "theirs", "alice");
 
-    let error = add_soft_link(&project, &mine, &theirs, &options()).expect_err("both fail");
-    assert_eq!(error.code(), Code::CascadeConsentRequired);
+    let outcome = add_soft_link(&project, &mine, &theirs, &options())
+        .expect("a caller's own document is always writable");
+    assert!(outcome.partner_unsynchronised);
 
     let error = add_soft_link(&project, &mine, &theirs, &options().with_cascade())
-        .expect_err("the owner is still somebody else");
+        .expect_err("the owner is somebody else");
     assert_eq!(error.code(), Code::OwnedByOther);
 }
 
 #[test]
-fn re_running_an_add_after_a_refusal_asks_for_consent_and_writes_nothing() {
-    // A refusal stops the write, and re-running the same command repeats the
-    // same refusal. The one thing that changes it is the option the message
-    // names, which completes the pair in a single step.
+fn a_second_non_consenting_add_changes_nothing_and_consent_completes_the_pair() {
     let (_dir, project) = project();
     act_as(&project, "frank");
     let left = make(&project, "left");
     let right = make(&project, "right");
 
-    for _ in 0..2 {
-        let error = add_soft_link(&project, &left, &right, &options())
-            .expect_err("a non-consenting add never writes the partner");
-        assert_eq!(error.code(), Code::CascadeConsentRequired, "{error:?}");
-        assert!(error.message().contains("--cascade"));
-        assert!(links(&project, &left).is_empty(), "nothing was recorded");
-        assert!(links(&project, &right).is_empty(), "nothing was recorded");
-    }
+    add_soft_link(&project, &left, &right, &options()).expect("the caller's half is recorded");
+    let left_after_first = document(&project, &left);
 
-    let outcome = add_soft_link(&project, &left, &right, &options().with_cascade())
-        .expect("consent completes what the refusal asked for");
+    let again = add_soft_link(&project, &left, &right, &options_at(120))
+        .expect("the caller's half already exists");
+    assert!(!again.changed && !again.written);
+    assert!(again.fingerprints.is_empty());
+    assert!(again.partner_unsynchronised);
+    assert_eq!(
+        document(&project, &left),
+        left_after_first,
+        "a retry does not move a timestamp"
+    );
+
+    let outcome = add_soft_link(&project, &left, &right, &options_at(180).with_cascade())
+        .expect("consent completes the pair");
     assert!(outcome.written);
     assert!(!outcome.partner_unsynchronised);
     assert_eq!(links(&project, &right), vec![left.clone()]);
@@ -333,7 +324,8 @@ fn a_consented_repeat_of_a_complete_pair_is_the_duplicate() {
 #[test]
 fn an_add_as_the_far_side_of_a_one_sided_pair_records_only_its_own_half() {
     // The far side has not recorded the link, so this is a first add for that
-    // document — and a first add needs consent like any other.
+    // document: without consent only that document changes, and the side that
+    // already recorded the link is left alone.
     let (_dir, project) = project();
     act_as(&project, "frank");
     let left = make(&project, "left");
@@ -341,16 +333,16 @@ fn an_add_as_the_far_side_of_a_one_sided_pair_records_only_its_own_half() {
     seed_caller_side(&project, &left, &right);
     let left_before = document(&project, &left);
 
-    let error = add_soft_link(&project, &right, &left, &options())
-        .expect_err("the partner write is not consented to");
-    assert_eq!(error.code(), Code::CascadeConsentRequired);
+    let outcome = add_soft_link(&project, &right, &left, &options())
+        .expect("the caller's own document is writable");
+    assert!(outcome.partner_unsynchronised);
     assert_eq!(document(&project, &left), left_before);
-
-    let outcome = add_soft_link(&project, &right, &left, &options().with_cascade())
-        .expect("both ends are mine and consent was given");
-    assert_eq!(outcome.fingerprints.len(), 2);
-    assert_eq!(links(&project, &left), vec![right.clone()]);
     assert_eq!(links(&project, &right), vec![left.clone()]);
+    assert_eq!(
+        links(&project, &left),
+        vec![right.clone()],
+        "the pair now agrees"
+    );
 }
 
 #[test]

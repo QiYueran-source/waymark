@@ -578,9 +578,9 @@ async fn dependency_matches_the_cli() {
 #[tokio::test]
 async fn soft_link_matches_the_cli() {
     // Consent is the only way either adapter writes the partner, and both write
-    // the same bytes for it: one pair recorded on both sides by this add, then
-    // the removal that takes it back. Without consent both adapters refuse the
-    // same way, so the project stays byte-identical after either attempt.
+    // the same bytes for it: the plain add records one side and leaves the other
+    // alone, the consented add completes the pair, and the removal takes it back
+    // from both sides. Each step is compared byte for byte across the adapters.
     let fixture = common::fixture(&["one", "two"]);
     let left = fixture.ids[0].clone();
     let right = fixture.ids[1].clone();
@@ -592,17 +592,20 @@ async fn soft_link_matches_the_cli() {
     act_as_in(&cli_root, "frank");
     let client = common::Client::connect(fixture.root.clone()).await;
 
-    let refused = client
+    let one_sided = client
         .call("waymark_add_soft_link", json!({"id": left, "other": right}))
         .await;
-    assert_eq!(refused.is_error, Some(true));
     assert_eq!(
-        common::business_error(&refused)["code"],
-        json!("CASCADE_CONSENT_REQUIRED")
+        common::envelope(&one_sided)["data"]["partner_unsynchronised"],
+        json!(true),
+        "the plain add records one side only: {:?}",
+        common::envelope(&one_sided)
     );
-    assert!(
-        common::try_cli_json(&cli_root, &["link", "add", &left, &right]).is_err(),
-        "the CLI refuses it as well"
+    common::cli_json(&cli_root, &["link", "add", &left, &right]);
+    assert_eq!(
+        common::normalized_snapshot(&fixture.root),
+        common::normalized_snapshot(&cli_root),
+        "the one-sided add diverges from the CLI"
     );
 
     let result = client

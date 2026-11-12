@@ -3623,7 +3623,9 @@ caller's side — so the ownership refusal the spec reserves for cross-item writ
 cannot apply here. Keeping the same load call means an archived or vanished
 partner behaves identically with and without consent.
 
-### A non-consenting `link add` is refused, not half-written
+### SUPERSEDED: a non-consenting `link add` was refused, not half-written
+
+The choice below was reversed on 2026-11-12; see *Consent decides whether the partner is written, not whether the command fails* at the end of this section.
 
 **Choice:** `add_soft_link` without `options.cascade` is refused with `CASCADE_CONSENT_REQUIRED`
 before anything is staged: neither document is written, neither `updated_at` moves. The earlier choice
@@ -3704,16 +3706,38 @@ proceed as issued, and neither is retryable because the same request produces th
 
 ### Consent is checked before ownership
 
-**Choice:** `link add` and `link remove --cascade` answer the consent question first: without
-`cascade`, the refusal is always `CASCADE_CONSENT_REQUIRED`, even when the partner is somebody else's.
-With `cascade`, the operator is resolved and the partner's owner compared, and a mismatch is
-`OWNED_BY_OTHER`. A partner that is not the operator's therefore produces both codes in sequence:
-consent, then ownership.
+**Choice:** consent is what turns a request into a cross-item write, so only a consented request is
+checked for ownership. Without `cascade` neither verb writes the partner and neither can refuse for
+its owner's sake; with `cascade`, the operator is resolved and the partner's owner compared, and a
+mismatch is `OWNED_BY_OTHER`. `CASCADE_CONSENT_REQUIRED` therefore has no producer any more and is
+kept registered but dormant, because retiring a code costs a snapshot, a schema change and a
+documentation sweep while reinstating it costs the same again.
 
-**Why:** the consent refusal is the only one the caller can act on alone, and it costs nothing to take
-that step before being told about an owner. The mixed case still becomes `OWNED_BY_OTHER` on the very
-next attempt, so the ownership rule is never hidden — it is ordered. `add` is judged on its first
-attempt every time, because a non-consenting add is refused outright rather than half-written.
+**Why:** refusing a request that writes nothing would be a refusal about a write the caller never
+asked for. The ownership rule is not hidden by this: it fires the moment the caller does ask.
+
+### Consent decides whether the partner is written, not whether the command fails
+
+**Choice:** every cross-item operation leaves a document it may not write alone and reports it, and
+none of them fails because of it. `OWNED_BY_OTHER` survives for exactly one case — a consented
+request against another owner's document — because there the caller did ask for that write and
+quietly downgrading it would report a change that never happened.
+
+| Operation | No consent | Consent, partner mine | Consent, partner foreign |
+|---|---|---|---|
+| `link add` | writes the caller's document, reports `partner_unsynchronised` | writes both as one batch | `OWNED_BY_OTHER`, writes nothing |
+| `link remove` | drops the caller's link, reports `other_untouched` | drops both | `OWNED_BY_OTHER`, writes nothing |
+| `create` with a soft link | writes the new item, names the partner in `untouched` | rewrites the partner | leaves the partner, names it in `untouched` |
+| `archive` | writes the target, names every referencing document | cleans the operator's own inbound references | leaves foreign references, names them |
+| `dependency`, `parent` | writes the caller's document only | — | — |
+
+**Why:** the earlier split — link verbs refusing, archive and create reporting — was not a decision
+anyone made; it came from a spec whose user story asked for a refusal while its implementation
+decisions asked for a half-write. One rule is easier to hold in the head and easier to test, and the
+one genuine asymmetry (a consented request that cannot be honoured) keeps its own code.
+
+**Open:** the Web view does not surface any of this; it is read-only and shows the documents as they
+are, including one-sided links.
 
 ### `link remove` without consent takes no ownership check
 
