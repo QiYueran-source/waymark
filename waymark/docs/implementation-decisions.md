@@ -2152,15 +2152,18 @@ document/configuration rewrites (a category-key migration's value rewrites can r
   `BatchTarget`'s public shape did not change, so archive and migration callers are
   untouched.
 - **Parent and dependency edges write only the new document.** A soft link is
-  symmetric, so every link partner is loaded for writing under the lock (archived
-  or changed partners refuse the whole create), gains the new ID in sorted
-  position, and is stamped with the same operation instant. The new document and
-  all partners go through one `replace_batch_with_creates` call.
+  symmetric, so every link partner is loaded for writing (archived, missing, or
+  changed partners refuse the whole create) and, **from the consent change on**,
+  only a partner the new item's owner, the partner's owner, and the operator all
+  share is rewritten with `cascade`; every other partner is left byte-identical
+  and named in `untouched`. A rewritten partner gains the new ID in sorted
+  position and is stamped with the same operation instant. The new document and
+  all rewritten partners go through one `replace_batch_with_creates` call.
 - **The result reports partners and fingerprints.** `Created` carries the item,
-  path, `partners` (the rewritten items with their own paths), `fingerprint` for
-  the new document, and `fingerprints` in `[new, partners…]` order. A dry run
-  returns the same shape with no fingerprints and `written: false`, and takes no
-  lock.
+  path, `partners` (the rewritten items with their own paths), `untouched` (the
+  partners left alone, with their paths), `fingerprint` for the new document, and
+  `fingerprints` in `[new, partners…]` order. A dry run returns the same shape
+  with no fingerprints and `written: false`, and takes no lock.
 - **CLI surface:** `--creator NAME`, `--body`/`--body-file` (mutually exclusive,
   `-` means stdin), repeatable `--field KEY=VALUE` using the same text grammar as
   `field update --set` (the parser is shared), `--parent ID`, repeatable
@@ -3552,15 +3555,15 @@ decision of its own, not a silent consequence of where the package job happens t
 
 **Choice:** the consent flag is `OpOptions::cascade`, a plain `bool` whose default is `false`, with
 `OpOptions::with_cascade()` as the builder and the public field for an adapter that has it as a flag.
-The CLI exposes it as `--cascade` on `archive`, `link add`, and `link remove`; the MCP tools expose it
-as the optional boolean `cascade` on `waymark_archive_work_item`, `waymark_add_soft_link`, and
-`waymark_remove_soft_link`. `params::write_options(dry_run, cascade, lock_timeout_ms)` is the one
+The CLI exposes it as `--cascade` on `archive`, `link add`, `link remove`, and `create`; the MCP
+tools expose it as the optional boolean `cascade` on `waymark_archive_work_item`,
+`waymark_add_soft_link`, `waymark_remove_soft_link`, and `waymark_create_work_item`. `params::write_options(dry_run, cascade, lock_timeout_ms)` is the one
 place the MCP adapter turns the flag into options.
 
 **Why:** the flag belongs to the options every operation already receives, so an operation that can
 reach a second document reads it without a parameter per function and an operation that cannot simply
-ignores it. `create --link` will read the same field when it lands; giving it a second spelling now
-would be two vocabularies for one rule.
+ignores it. `create` with soft links reads the same field; a second spelling would be two
+vocabularies for one rule.
 
 ### Archive's outcome carries the untouched documents and their relations
 
@@ -3794,3 +3797,91 @@ the view layer keeps the CLI, MCP, and JSON from each deciding which case is whi
 issue carries a suggested command: completing or dropping the other side rewrites a document its
 owner may not have consented to, and the manual repair follows Git, so the diagnosis states the fact
 and names the document that would have to change.
+
+# Cross-item write consent — `create` with soft links (wm-4y03e40qvzy1)
+
+### A create consent never rewrites another owner's partner, and never refuses for it
+
+**Choice:** `create` with soft links applies the same two conditions the spec gives every cross-item
+write — `cascade` given, and the partner's `owner` equal to the effective operator — plus the third
+identity the spec names for creation: the new item's `owner` must equal the partner's `owner` too.
+A partner that fails any of them is not rewritten; the new item is created with the link recorded on
+its own side only, and the partner is listed in the result's `untouched`. There is no
+`OWNED_BY_OTHER` / `CASCADE_CONSENT_REQUIRED` refusal on `create`.
+
+**Why:** the spec's sentence "`create --link` is refused when the partner belongs to somebody else"
+describes the `link add` shape, where the caller names two existing documents. On `create` the caller
+asks for one new document, and refusing would throw away a create the operator is entitled to make
+for a side effect on a document that is not theirs. The `archive` decisions resolve the same tension
+the same way — a foreign document never aborts the operation, it is left and named — and this
+ticket's acceptance criteria ask for the partner to be named as written or left alone, not for a
+refusal. The two refusal codes stay with `link add`, where re-running with `--cascade` or transferring
+ownership is the actual recovery.
+
+**Consequence:** a create can produce a one-sided link exactly as a non-cascading `link add` does, and
+`show`/`doctor` report it as one-sided (`soft_link_issues`, `ONE_SIDED_SOFT_LINK`). That is already
+the spec's "normal, reachable state".
+
+### An archived, missing, or stale partner still refuses the create
+
+**Choice:** every partner is loaded through the same mediated write check as before, with or without
+`cascade`. A partner that is archived (`ITEM_ARCHIVED {operation: "create"}`), missing
+(`ITEM_NOT_FOUND {relation: "soft_links"}`), or of an older format generation
+(`ITEM_NEEDS_MIGRATION`) refuses the whole create and writes nothing.
+
+**Why:** the answer must not depend on consent or ownership: the caller asked to link to a document
+that no longer accepts writes, and that is a defect in the request, not a permission question.
+Leaving such a partner "untouched" would store a link to a tombstone as if the request had succeeded.
+
+### The operator is resolved strictly only when consent is given
+
+**Choice:** `effective_operator_strict` runs for a create with `cascade` and soft links, before
+anything is staged. Without `cascade` it is not consulted at all, so a malformed `.waymark/user.toml`
+does not fail an ordinary create.
+
+**Why:** the strict resolution exists because ownership is a permission question. Without consent no
+partner can be rewritten and no permission question is asked, so turning an unrelated create into
+`CONFIG_INVALID` would be a new failure mode for a write the rule never governs. With consent, a
+broken local document is a configuration error exactly as the spec's "strict for ownership" rule
+requires.
+
+### The result names partners as `partners` or `untouched`, and warns only for what it moved
+
+**Choice:** `Created` gains `untouched: Vec<UntouchedPartner>` (`item` + `path`), and `Created.meta`
+carries `OWNER_MISMATCH` warnings for every partner document that was rewritten. Both adapters render
+`data.untouched` through a new shared `view::leftover_partners_json` (one entry per partner,
+`{id, path}`), next to the existing `partners` and `fingerprints`; the human CLI line is
+`<id> left alone (it did not record the link)`. `fingerprints` stays `[new, partners…]`, so a create
+that rewrote nothing carries exactly one fingerprint.
+
+**Why:** the ticket's complaint is that a rewritten partner used to appear with no warning at all, so
+the warning must accompany the rewrite, not the relation. The one case that reaches a rewrite without
+an `OWNER_MISMATCH` is the operator rewriting their own partner while creating the item for somebody
+else — that document is theirs, so there is nothing to warn about — and the partner still appears in
+`partners` with its new `updated_at`, which is the part of the old complaint the listing fixes. A
+create whose owner is somebody else never warns for the new document — that is ordinary and
+unchanged — and a create that moved nothing but its own document stays quiet, matching the spec's "a
+non-cascading write that rewrote nothing reports nothing". `view` owns the renderer because the CLI
+and MCP must not grow two spellings.
+
+### The dry run decides partners exactly as the write does
+
+**Choice:** the dry-run path loads the partners through the same mediated check, resolves the operator
+the same way when `cascade` is present, and fills `partners` / `untouched` from the same predicate as
+the write half (`is_planned_for`).
+
+**Why:** the spec's preview rule — a preview never promises a write the real run would refuse — cuts
+both ways: it must not promise a partner rewrite the write will not perform, and it must not hide a
+partner the write will actually leave alone.
+
+### The new-item owner condition is read in both directions
+
+**Choice:** with `cascade`, a partner is rewritten only when the new item's owner, the partner's owner,
+and the operator are one identity — so a partner the operator owns is still left alone when the item
+is being created for somebody else. The module documentation of `ops::create` states the rule; this
+paragraph records that the reverse reading was considered and rejected.
+
+**Why:** "the operator may rewrite partners it owns" alone would let `create --owner alice --link
+x --cascade` attach alice's new item to a partner while the operator is a third person. The spec
+states the three-way condition, and the stricter reading is the one that cannot surprise an owner
+whose partner suddenly lists a link they never asked for.

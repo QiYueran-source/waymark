@@ -705,6 +705,27 @@ pub fn archive_leftovers_json(
     )
 }
 
+/// The soft-link partners a creation deliberately left as they are.
+///
+/// The create twin of [`archive_leftovers_json`]: one entry per partner, in the
+/// outcome's stable-ID order, with the document and the path its owner would
+/// open. No relation list, because a creation references a partner one way only
+/// — the new item's `soft_links` — and that side is always written. A creation
+/// that left nothing alone renders an empty list.
+pub fn leftover_partners_json(untouched: &[crate::ops::create::UntouchedPartner]) -> Value {
+    Value::Array(
+        untouched
+            .iter()
+            .map(|partner| {
+                json!({
+                    "id": partner.item.id.as_str(),
+                    "path": partner.path.as_str(),
+                })
+            })
+            .collect(),
+    )
+}
+
 /// The one human sentence that precedes an archive's leftover list.
 ///
 /// It names the target and the count so the line stands on its own in a

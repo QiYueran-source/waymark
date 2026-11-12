@@ -22,7 +22,6 @@ use rmcp::tool_router;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use waymark_core::envelope::Meta;
 use waymark_core::model::FieldKey;
 use waymark_core::ops::edit::{self, EditOutcome, FieldOutcome};
 use waymark_core::ops::{archive, create, link, owner, parent, r#move, relationship, status};
@@ -66,9 +65,17 @@ pub struct CreateWorkItemArgs {
     #[serde(default)]
     pub dependencies: Vec<String>,
 
-    /// Stable IDs to soft-link to. Stored symmetrically on both sides.
+    /// Stable IDs to soft-link to. The link is stored on the new item; the
+    /// other side records it only with `cascade`.
     #[serde(default)]
     pub soft_links: Vec<String>,
+
+    /// Consent to a cross-item write: also record the links on the other side,
+    /// which requires you to own those items. Defaults to off, which writes
+    /// nothing but the new document; a partner left alone is reported in
+    /// `untouched`.
+    #[serde(default)]
+    pub cascade: bool,
 
     /// Validate and report what would be written, without writing.
     #[serde(default)]
@@ -164,10 +171,15 @@ impl WaymarkServer {
     /// callers cannot supply them. The request may also carry a creator, custom
     /// fields, a parent, dependencies, and soft links, all written as one
     /// atomic operation. Returns the complete created item, its path, every
-    /// rewritten soft-link partner, one fingerprint per written document, and
-    /// whether the store changed. `dry_run` performs every check and reports the
-    /// same shape without writing.
+    /// rewritten soft-link partner, every partner left alone, one fingerprint per
+    /// written document, and whether the store changed. `dry_run` performs every
+    /// check and reports the same shape without writing.
     ///
+    /// `cascade` is the consent flag for a cross-item write: off by default,
+    /// which records the soft links on the new item only and leaves every
+    /// partner byte-identical. With it, a partner is also rewritten when the new
+    /// item's owner, the partner's owner, and the operator are the same
+    /// identity; any other partner is left alone and named in `untouched`.
     /// `lock_timeout_ms` bounds the wait for the project write lock; `0`
     /// fails immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
@@ -206,7 +218,7 @@ impl WaymarkServer {
             let created = create::create(
                 &project,
                 request,
-                &params::options(args.dry_run, args.lock_timeout_ms),
+                &params::write_options(args.dry_run, args.cascade, args.lock_timeout_ms),
             )?;
             Ok(envelope::success(
                 json!({
@@ -217,9 +229,10 @@ impl WaymarkServer {
                     "partners": created.partners.iter().map(|partner| {
                         item_json(&partner.item, &partner.path)
                     }).collect::<Vec<_>>(),
+                    "untouched": waymark_core::view::leftover_partners_json(&created.untouched),
                     "fingerprints": created.fingerprints.iter().map(|fingerprint| fingerprint.as_str()).collect::<Vec<_>>(),
                 }),
-                Meta::direct_file_scoped(),
+                created.meta.clone(),
             ))
         })
     }

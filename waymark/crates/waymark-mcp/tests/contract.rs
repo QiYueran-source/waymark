@@ -478,6 +478,7 @@ async fn every_cross_item_tool_exposes_the_consent_flag_and_no_other_write_tool_
     let fixture = common::fixture(&[]);
     let client = common::Client::connect(fixture.root.clone()).await;
     let cross_item = [
+        "waymark_create_work_item",
         "waymark_add_soft_link",
         "waymark_remove_soft_link",
         "waymark_archive_work_item",

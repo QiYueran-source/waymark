@@ -27,6 +27,15 @@ async fn create_accepts_the_complete_initial_state() {
     add_field(&fixture, "note", FieldType::String, false);
     let parent = fixture.ids[0].clone();
     let linked = fixture.ids[1].clone();
+    // The partner is frank's; the operator is recorded the way a person records
+    // one, so `cascade` can rewrite it.
+    waymark_core::ops::local_config::set_scalar(
+        &fixture.project(),
+        waymark_core::ops::config::Scalar::Operator,
+        "frank",
+        &common::options(),
+    )
+    .expect("the operator is recorded");
     let client = common::Client::connect(fixture.root.clone()).await;
 
     let result = client
@@ -41,7 +50,8 @@ async fn create_accepts_the_complete_initial_state() {
                 "custom_fields": {"points": 7, "note": "hello"},
                 "parent": parent,
                 "dependencies": [parent],
-                "soft_links": [linked]
+                "soft_links": [linked],
+                "cascade": true
             }),
         )
         .await;
@@ -61,6 +71,7 @@ async fn create_accepts_the_complete_initial_state() {
         json!([fixture.ids[1].clone()])
     );
     assert_eq!(envelope["data"]["partners"].as_array().unwrap().len(), 1);
+    assert_eq!(envelope["data"]["untouched"], json!([]));
     assert_eq!(
         envelope["data"]["fingerprints"].as_array().unwrap().len(),
         2

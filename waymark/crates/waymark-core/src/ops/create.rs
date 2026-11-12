@@ -10,9 +10,33 @@
 //! `title`, `category`, `owner`, an optional `creator`, a body, custom fields,
 //! and the initial `parent`, `dependencies`, and `soft_links`. All of it is one
 //! operation. A create with initial relations is an *application-level
-//! all-or-nothing batch*: the new document and every symmetric soft-link partner
-//! it updates are staged and renamed together, and a failure anywhere leaves the
+//! all-or-nothing batch*: the new document and every soft-link partner it
+//! rewrites are staged and renamed together, and a failure anywhere leaves the
 //! store exactly as it was.
+//!
+//! # Soft-link partners need consent and ownership
+//!
+//! A soft link is symmetric, so a symmetric write would edit a document the
+//! caller never named. Creation therefore only rewrites a partner when both
+//! conditions hold:
+//!
+//! - `options.cascade` was given, and
+//! - the partner's `owner`, the new item's `owner`, and the effective operator
+//!   are the same identity. `creator` never participates.
+//!
+//! With `cascade` the operator is resolved strictly (a broken local document is
+//! `CONFIG_INVALID`) once, before anything is staged. A partner that is left
+//! alone — no consent, or an identity mismatch — keeps its bytes and its
+//! `updated_at` and is reported in [`Created::untouched`]; a partner that was
+//! rewritten is reported in [`Created::partners`]. Because the operator can
+//! only ever rewrite partners it owns, the consent rule needs no refusal of its
+//! own: the new item is still created and a partner that is not the operator's
+//! is simply named as left alone.
+//!
+//! An archived, missing, or older-generation partner is refused exactly as
+//! before whether or not it would have been rewritten: the link the caller asked
+//! for cannot be half-formed against a document that no longer accepts writes,
+//! and that answer must not depend on consent.
 //!
 //! # Validation order
 //!
@@ -42,6 +66,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use camino::Utf8PathBuf;
 
+use crate::envelope::Meta;
 use crate::error::{ValidationIssue, WaymarkError};
 use crate::id::WorkItemId;
 use crate::location::Location;
@@ -156,8 +181,12 @@ pub struct Created {
     pub item: WorkItem,
     /// The document path.
     pub path: Utf8PathBuf,
-    /// Every partner document rewritten, in stable-ID order.
+    /// Every soft-link partner document rewritten, in stable-ID order.
     pub partners: Vec<ChangedPartner>,
+    /// Every soft-link partner left exactly as it was, in stable-ID order: no
+    /// consent, or an identity that is not the operator's. Empty when every
+    /// partner was rewritten or the request named none.
+    pub untouched: Vec<UntouchedPartner>,
     /// The fingerprint of the new document; `None` on a dry run.
     pub fingerprint: Option<Fingerprint>,
     /// One fingerprint per written document, in `[new, partners…]` order; empty
@@ -165,6 +194,22 @@ pub struct Created {
     pub fingerprints: Vec<Fingerprint>,
     /// Whether the store changed.
     pub written: bool,
+    /// The `_meta` block this creation justifies.
+    pub meta: Meta,
+}
+
+/// One soft-link partner the creation left exactly as it was.
+///
+/// The partner does not know about the new item: its document, its
+/// `updated_at`, and its `soft_links` are unchanged. The new item still records
+/// the link on its own side, so the pair is one-sided until each side runs its
+/// own command.
+#[derive(Debug, Clone)]
+pub struct UntouchedPartner {
+    /// The partner, as it is on disk.
+    pub item: WorkItem,
+    /// The partner's document.
+    pub path: Utf8PathBuf,
 }
 
 /// Create one work item in `project`.
@@ -203,12 +248,27 @@ fn prepare_only(
     let now = Timestamp::new(options.clock.now());
     let item = build_item(&id, &prepared, now);
 
-    let mut partners = Vec::with_capacity(prepared.soft_links.len());
-    for partner_id in &prepared.soft_links {
-        // The same mediated read the real write uses: a partner that is archived
-        // or older-generation must refuse the preview too, otherwise the dry run
-        // would promise a creation the write cannot perform.
-        let partner = mediated::load_for_write(project, partner_id.as_str(), "create")?;
+    // The same mediated read the real write uses: a partner that is archived
+    // or older-generation must refuse the preview too, otherwise the dry run
+    // would promise a creation the write cannot perform.
+    let loaded = load_partners(project, &prepared.soft_links)?;
+    // Ownership is resolved here exactly as the real write resolves it, so the
+    // preview and the write name the same partners as untouched.
+    let operator = match options.cascade {
+        true => mediated::effective_operator_strict(project, options)?,
+        false => None,
+    };
+
+    let mut partners = Vec::new();
+    let mut untouched = Vec::new();
+    for partner in loaded {
+        if !is_planned_for(&partner, &item, options.cascade, operator.as_deref()) {
+            untouched.push(UntouchedPartner {
+                item: partner.item,
+                path: partner.path,
+            });
+            continue;
+        }
         partners.push(ChangedPartner {
             item: link_partner(partner.item, &id, now),
             path: partner.path,
@@ -216,13 +276,17 @@ fn prepare_only(
         });
     }
 
+    let warnings = creation_warnings(project, &partners, options);
+
     Ok(Created {
         item,
         path,
         partners,
+        untouched,
         fingerprint: None,
         fingerprints: Vec::new(),
         written: false,
+        meta: mediated::write_meta(warnings),
     })
 }
 
@@ -276,16 +340,34 @@ fn write_new_item(
     let item = build_item(&id, &prepared, now);
     let new_document = crate::serialize::to_document(&item);
 
-    let partner_documents: Vec<PartnerDocument> = loaded_partners
-        .into_iter()
-        .map(|loaded| {
-            PartnerDocument::new(
-                link_partner(loaded.item, &id, now),
-                loaded.path,
-                loaded.fingerprint,
-            )
-        })
-        .collect();
+    // Both conditions of a cross-item write are decoded from the loaded
+    // partners before anything is staged: consent, and the three identities —
+    // the new item's owner, the partner's owner, the operator — that must agree.
+    // The operator is only resolved strictly when consent was given; without it
+    // no partner can be rewritten, so a broken local document cannot change the
+    // answer, and resolving it would turn an otherwise valid create into a
+    // configuration error for a write that will not happen.
+    let operator = match options.cascade {
+        true => mediated::effective_operator_strict(project, options)?,
+        false => None,
+    };
+
+    let mut partner_documents: Vec<PartnerDocument> = Vec::new();
+    let mut untouched: Vec<UntouchedPartner> = Vec::new();
+    for loaded in loaded_partners {
+        if !is_planned_for(&loaded, &item, options.cascade, operator.as_deref()) {
+            untouched.push(UntouchedPartner {
+                item: loaded.item,
+                path: loaded.path,
+            });
+            continue;
+        }
+        partner_documents.push(PartnerDocument::new(
+            link_partner(loaded.item, &id, now),
+            loaded.path,
+            loaded.fingerprint,
+        ));
+    }
 
     let targets: Vec<BatchTarget<'_>> = partner_documents
         .iter()
@@ -317,14 +399,54 @@ fn write_new_item(
         })
         .collect();
 
+    let warnings = creation_warnings(project, &partners, options);
+
     Ok(Created {
         item,
         path,
         partners,
+        untouched,
         fingerprint: fingerprints.first().cloned(),
         fingerprints,
         written: true,
+        meta: mediated::write_meta(warnings),
     })
+}
+
+/// The `OWNER_MISMATCH` notes this creation justifies.
+///
+/// `_meta.warnings` matches the documents this write actually moved: an owner
+/// mismatch on a rewritten soft-link partner. The new item itself never warns —
+/// creating an item for somebody else is ordinary and unchanged — so a plain
+/// create, and a create whose partners were all left alone, stays quiet.
+fn creation_warnings(
+    project: &Project,
+    partners: &[ChangedPartner],
+    options: &OpOptions,
+) -> Vec<crate::envelope::Warning> {
+    let mut warnings = Vec::new();
+    for partner in partners {
+        warnings.extend(mediated::owner_warnings(project, &partner.item, options));
+    }
+    warnings
+}
+
+/// Whether one loaded soft-link partner is planned for a rewrite.
+///
+/// Two independent conditions, both required: consent was given, and the new
+/// item's owner, the partner's owner, and the operator are the same identity.
+/// A partner this returns `false` for is left exactly as it is and reported in
+/// [`Created::untouched`]; nothing is refused, because a partner nobody asked
+/// this operation to own is simply somebody else's document.
+fn is_planned_for(
+    partner: &mediated::Loaded,
+    new_item: &WorkItem,
+    cascade: bool,
+    operator: Option<&str>,
+) -> bool {
+    cascade
+        && mediated::is_operators(&partner.item.owner, operator)
+        && partner.item.owner == new_item.owner
 }
 
 /// One partner document computed for the batch.

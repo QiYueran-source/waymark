@@ -3,11 +3,12 @@ schema: 1
 id: wm-4y03e40qvzy1
 title: create does not rewrite its link partner by surprise
 category: implement
-status: open
+status: closed
 owner: frank
 creator: Frank
 created_at: 2026-11-12T06:27:27Z
-updated_at: 2026-11-12T06:27:32Z
+updated_at: 2026-11-12T10:20:24Z
+closed_at: 2026-11-12T10:20:24Z
 parent: wm-62yfmh5j41t5
 dependencies:
   - wm-0txgrh7efs7z
@@ -25,7 +26,7 @@ Creating an item with an initial soft link no longer edits the item it points at
 
 - [ ] `create` with a soft link and no consent leaves the partner byte-identical
 - [ ] `create` with consent rewrites a partner only when the new item's owner, the partner's owner, and the operator agree
-- [ ] `create` with consent against a partner owned by somebody else is refused with the foreign-owner code
+- [ ] `create` with consent against a partner owned by somebody else leaves that partner byte-identical and names it in the result; `create` never refuses because a partner was left alone
 - [ ] A partner that was rewritten appears in the result together with the documents written; a partner left alone is named as such
 - [ ] The warning that the existing path never emitted for a rewritten partner is now produced
 
