@@ -24,7 +24,7 @@ This is the expand step: the new form exists beside the old, so every later tick
 
 - [ ] The operation options carry a consent flag that defaults to off, and every existing caller keeps its behaviour with no source change beyond the mechanical one
 - [ ] The archive result can describe the documents it did not touch and the relation that referenced the target, even before anything populates it
-- [ ] The CLI accepts the flag on `archive` and `link`, and the MCP tools accept the equivalent boolean; both forward it to the domain layer, which still ignores it
+- [ ] The CLI accepts the flag on `archive` and both `link` subcommands, and the MCP tools accept the equivalent boolean; both forward it to the domain layer, which still ignores it, and the existing CLI tests for `link` and `archive` keep passing with `--cascade` supplied
 - [ ] The full workspace test suite passes unchanged
 - [ ] The help text and the agent-facing capability reference list the new flag
 
