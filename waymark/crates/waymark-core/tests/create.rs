@@ -448,20 +448,17 @@ fn a_create_with_parent_dependencies_and_links_matches_applying_them_one_by_one(
         &options(),
     )
     .expect("dependency");
-    link::add_soft_link(
-        &sequential,
-        sequential_created.item.id.as_str(),
-        &sequential_ids[0],
-        &options(),
-    )
-    .expect("link");
-    link::add_soft_link(
-        &sequential,
-        sequential_created.item.id.as_str(),
-        &sequential_ids[2],
-        &options(),
-    )
-    .expect("link");
+    // `create --link` consents to the partner write, so the equivalent of one
+    // create call is one consented `link add` per link.
+    for partner in [&sequential_ids[0], &sequential_ids[2]] {
+        link::add_soft_link(
+            &sequential,
+            sequential_created.item.id.as_str(),
+            partner,
+            &options().with_cascade(),
+        )
+        .expect("link");
+    }
 
     assert_eq!(
         snapshot(composite.root()),

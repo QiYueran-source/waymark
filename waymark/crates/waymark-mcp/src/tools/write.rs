@@ -1000,6 +1000,7 @@ fn link_result(outcome: &link::LinkOutcome, verb: LinkVerb) -> ToolResult {
             json!({
                 "other": outcome.other_id.as_str(),
                 "other_path": outcome.other_path.as_ref().map(|path| path.to_string()),
+                "partner_unsynchronised": outcome.partner_unsynchronised,
                 "verb": match verb {
                     LinkVerb::Add => "add",
                     LinkVerb::Remove => "remove",

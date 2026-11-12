@@ -174,25 +174,35 @@ fn parent_dry_run_reports_the_change_without_writing_it() {
 }
 
 #[test]
-fn link_add_consents_to_both_documents_but_remove_needs_its_own() {
+fn link_add_without_cascade_touches_only_the_callers_document() {
     let (_dir, root) = project();
     let left = create(&root, "left");
     let right = create(&root, "right");
+    let right_path = root.join("work").join("task").join(format!("{right}.md"));
+    let right_document = std::fs::read_to_string(&right_path).expect("the partner is readable");
 
     let added = json_ok(&root, &["link", "add", &left, &right]);
+
     assert_eq!(added["data"]["other"], serde_json::json!(right));
     assert_eq!(
         added["data"]["item"]["soft_links"],
         serde_json::json!([right])
     );
+    assert_eq!(added["data"]["other_item"], serde_json::Value::Null);
+    assert_eq!(added["data"]["other_path"], serde_json::Value::Null);
     assert_eq!(
-        added["data"]["other_item"]["soft_links"],
-        serde_json::json!([left])
+        added["data"]["partner_unsynchronised"],
+        serde_json::json!(true)
     );
     assert_eq!(
         added["data"]["fingerprints"].as_array().map(|f| f.len()),
-        Some(2),
-        "both documents were replaced"
+        Some(1),
+        "the partner's document was not replaced"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&right_path).expect("the partner is readable"),
+        right_document,
+        "the partner is byte-identical, updated_at included"
     );
 
     let removed = json_ok(&root, &["link", "remove", &left, &right, "--cascade"]);
@@ -241,6 +251,28 @@ fn link_remove_without_cascade_reports_the_partner_left_alone() {
 }
 
 #[test]
+fn a_repeated_link_add_without_cascade_succeeds_without_writing() {
+    let (_dir, root) = project();
+    let left = create(&root, "left");
+    let right = create(&root, "right");
+    json_ok(&root, &["link", "add", &left, &right]);
+
+    let again = json_ok(&root, &["link", "add", &left, &right]);
+
+    assert_eq!(again["ok"], serde_json::json!(true));
+    assert_eq!(again["data"]["changed"], serde_json::json!(false));
+    assert_eq!(again["data"]["written"], serde_json::json!(false));
+    assert_eq!(
+        again["data"]["partner_unsynchronised"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        again["data"]["fingerprints"].as_array().map(|f| f.len()),
+        Some(0)
+    );
+}
+
+#[test]
 fn link_remove_reports_an_absent_link_the_same_with_or_without_consent() {
     let (_dir, root) = project();
     let left = create(&root, "left");
@@ -251,6 +283,40 @@ fn link_remove_reports_an_absent_link_the_same_with_or_without_consent() {
     let (cascaded, consenting) = json_err(&root, &["link", "remove", &left, &right, "--cascade"]);
     assert_eq!(consenting["error"]["code"], "INVALID_RELATIONSHIP");
     assert_eq!(plain, cascaded, "consent does not change the refusal");
+}
+
+#[test]
+fn the_human_output_says_the_other_side_did_not_change() {
+    let (_dir, root) = project();
+    let left = create(&root, "left");
+    let right = create(&root, "right");
+
+    let result = run(waymark()
+        .arg("--project")
+        .arg(&root)
+        .arg("link")
+        .arg("add")
+        .arg(&left)
+        .arg(&right));
+
+    assert_eq!(result.status(), 0, "stderr: {}", result.stderr());
+    let stderr = result.stderr();
+    assert!(
+        stderr.contains(&format!("{left} linked to {right}")),
+        "stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains(&format!("{right} was not changed")),
+        "the output names the document that did not change: {stderr}"
+    );
+    assert!(
+        stderr.contains("one side only"),
+        "the output says the link is one-sided: {stderr}"
+    );
+    assert!(
+        !stderr.contains("had no document"),
+        "the partner exists; that line is for a missing document: {stderr}"
+    );
 }
 
 #[test]
@@ -298,9 +364,9 @@ fn a_duplicate_link_is_an_invalid_relationship() {
     let (_dir, root) = project();
     let left = create(&root, "left");
     let right = create(&root, "right");
-    json_ok(&root, &["link", "add", &left, &right]);
+    json_ok(&root, &["link", "add", &left, &right, "--cascade"]);
 
-    let (status, envelope) = json_err(&root, &["link", "add", &left, &right]);
+    let (status, envelope) = json_err(&root, &["link", "add", &left, &right, "--cascade"]);
 
     assert_eq!(
         envelope["error"]["code"],

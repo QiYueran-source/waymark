@@ -319,25 +319,36 @@ async fn dependency_matches_the_cli() {
 
 #[tokio::test]
 async fn soft_link_matches_the_cli() {
-    let fixture = common::fixture(&["one", "two"]);
-    let left = fixture.ids[0].clone();
-    let right = fixture.ids[1].clone();
-    let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
-    let client = common::Client::connect(fixture.root.clone()).await;
+    // Both consent states write the same bytes through either adapter: without
+    // `cascade` the same single-sided document, with it both documents.
+    for cascade in [false, true] {
+        let fixture = common::fixture(&["one", "two"]);
+        let left = fixture.ids[0].clone();
+        let right = fixture.ids[1].clone();
+        let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
+        let client = common::Client::connect(fixture.root.clone()).await;
 
-    let result = client
-        .call("waymark_add_soft_link", json!({"id": left, "other": right}))
-        .await;
-    assert_eq!(common::envelope(&result)["ok"], true);
-    common::cli_json(&cli_root, &["link", "add", &left, &right]);
+        let result = client
+            .call(
+                "waymark_add_soft_link",
+                json!({"id": left, "other": right, "cascade": cascade}),
+            )
+            .await;
+        assert_eq!(common::envelope(&result)["ok"], true);
+        if cascade {
+            common::cli_json(&cli_root, &["link", "add", &left, &right, "--cascade"]);
+        } else {
+            common::cli_json(&cli_root, &["link", "add", &left, &right]);
+        }
 
-    assert_eq!(
-        common::normalized_snapshot(&fixture.root),
-        common::normalized_snapshot(&cli_root),
-        "the soft-link write diverges from the CLI"
-    );
+        assert_eq!(
+            common::normalized_snapshot(&fixture.root),
+            common::normalized_snapshot(&cli_root),
+            "the soft-link write diverges from the CLI (cascade={cascade})"
+        );
 
-    client.shutdown().await;
+        client.shutdown().await;
+    }
 }
 
 #[tokio::test]

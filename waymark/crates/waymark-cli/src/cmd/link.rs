@@ -1,7 +1,8 @@
 //! `waymark link add|remove`: symmetric soft links.
 //!
-//! A soft link is stored on both ends and both documents are replaced as one
-//! all-or-nothing batch; that rule lives in `waymark_core::ops::link`, and this
+//! A soft link is stored on both ends, but only `link add --cascade` writes the
+//! other end: without it the pair is left one-sided and this module says so in
+//! both output modes. Those rules live in `waymark_core::ops::link`; this
 //! module only parses the IDs and flags and renders the result.
 
 use clap::{Args, Subcommand};
@@ -24,8 +25,9 @@ pub struct LinkArgs {
 /// The link family.
 ///
 /// `add` and `remove` take their own argument sets instead of sharing one
-/// struct, because the two verbs carry different consent flags: `add` can
-/// rewrite the partner, `remove` cannot.
+/// struct, because the two verbs carry different consent flags: `add` without
+/// `--cascade` records the caller's side only, while `remove` without it
+/// removes the caller's side only.
 #[derive(Debug, Subcommand)]
 pub enum LinkCommand {
     /// Associate two items with each other.
@@ -171,6 +173,8 @@ fn apply(
         outcome.item.id, outcome.other_id
     ));
     if let Some(untouched) = &outcome.other_untouched {
+        // A removal without consent: the partner keeps its document and the
+        // link it still lists.
         err_line(&format!(
             "  {} {unchanged}",
             untouched.id,
@@ -179,6 +183,13 @@ fn apply(
             } else {
                 "was left alone"
             }
+        ));
+    } else if outcome.partner_unsynchronised {
+        // An addition without consent: the caller's document records the link
+        // and the partner's does not.
+        err_line(&format!(
+            "  {} was not changed: the link is recorded on one side only; re-run with --cascade to record it there too",
+            outcome.other_id
         ));
     } else if outcome.other.is_none() {
         err_line(&format!(
@@ -202,6 +213,7 @@ fn payload(outcome: &LinkOutcome, verb: Verb) -> serde_json::Value {
         serde_json::json!({
             "other": outcome.other_id.as_str(),
             "other_path": outcome.other_path.as_ref().map(|path| path.to_string()),
+            "partner_unsynchronised": outcome.partner_unsynchronised,
             "verb": match verb {
                 Verb::Add => "add",
                 Verb::Remove => "remove",
