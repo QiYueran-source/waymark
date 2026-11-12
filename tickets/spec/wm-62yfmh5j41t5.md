@@ -31,10 +31,10 @@ A closed parent stays a read signal: active children of a `closed` item are labe
 2. As a contributor, I want a write to another person's item to keep producing an `OWNER_MISMATCH` warning and still succeed, so that shared checkouts and projects with no operator configured keep working.
 3. As a contributor, I want `link add` without `cascade` to record the link on my item only, so that adding a link never rewrites someone else's file.
 4. As a contributor, I want `link add --cascade` to write both sides when the partner is mine, so that I can complete a link in one step when I own both items.
-5. As a contributor, I want `link add` without `cascade` to record the link on my item and leave the partner alone whatever its owner, so that leaving a document alone is reported rather than turned into a failure.
+5. As a contributor, I want `link add` without `cascade` to record the link on my item and leave the partner alone whatever its owner, with the partner named in the result, so that leaving a document alone is reported rather than turned into a failure and I can see whose file still lacks the link.
 6. As a contributor, I want `link add --cascade` to be refused when the partner belongs to someone else, so that consent alone cannot grant me access to their document.
-7. As an agent, I want the refusal for a missing consent to tell me the exact option to re-run with, so that I can correct my own request without guessing.
-8. As an agent, I want the refusal for a foreign partner to tell me that re-running cannot help, so that I stop retrying and involve the owner instead.
+7. As an agent, I want the refusal for a foreign partner to tell me that re-running cannot help, so that I stop retrying and involve the owner instead.
+8. As an agent, I want a consented request refused with no operator to name the identity source that is missing, so that I fix my configuration rather than retrying.
 9. As a contributor, I want `link remove` without `cascade` to succeed by removing only my side, so that disconnecting a link is always possible without someone else's cooperation.
 10. As a contributor, I want `link remove --cascade` to remove both sides when the partner is mine, so that a link I created on both sides can be undone in one step.
 11. As a contributor, I want every command that rewrote a second document to list the documents it wrote, so that I can see the full footprint of my action after the fact.
