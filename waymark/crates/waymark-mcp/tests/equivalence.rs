@@ -118,11 +118,40 @@ fn normalized_created_tree(root: &Utf8Path, created: &str) -> BTreeMap<String, V
 
 #[tokio::test]
 async fn composite_create_matches_the_cli() {
+    composite_create_matches_the_cli_with(false).await;
+}
+
+#[tokio::test]
+async fn cascading_composite_create_matches_the_cli() {
+    composite_create_matches_the_cli_with(true).await;
+}
+
+/// The IDs in a creation's `untouched` list, in order.
+fn untouched_ids(envelope: &serde_json::Value) -> Vec<String> {
+    envelope["data"]["untouched"]
+        .as_array()
+        .expect("untouched is a list")
+        .iter()
+        .map(|partner| partner["id"].as_str().expect("a partner id").to_owned())
+        .collect()
+}
+
+/// One composite create, with or without consent, through both adapters.
+async fn composite_create_matches_the_cli_with(cascade: bool) {
     let fixture = common::fixture(&["one", "two"]);
     add_field(&fixture, "note", FieldType::String);
     add_field(&fixture, "points", FieldType::Integer);
     let parent = fixture.ids[0].clone();
     let linked = fixture.ids[1].clone();
+    // The partners are frank's; the operator is recorded the way a person
+    // records one, so `cascade` can rewrite them in both adapters.
+    waymark_core::ops::local_config::set_scalar(
+        &fixture.project(),
+        waymark_core::ops::config::Scalar::Operator,
+        "frank",
+        &common::options(),
+    )
+    .expect("the operator is recorded");
     let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
     let client = common::Client::connect(fixture.root.clone()).await;
 
@@ -138,7 +167,8 @@ async fn composite_create_matches_the_cli() {
                 "custom_fields": {"note": "hello", "points": 7},
                 "parent": parent,
                 "dependencies": [parent],
-                "soft_links": [linked]
+                "soft_links": [linked],
+                "cascade": cascade
             }),
         )
         .await;
@@ -146,32 +176,33 @@ async fn composite_create_matches_the_cli() {
     assert_eq!(mcp["ok"], true, "{mcp}");
     let mcp_id = mcp["data"]["id"].as_str().expect("the MCP id").to_owned();
 
-    let cli = common::cli_json(
-        &cli_root,
-        &[
-            "create",
-            "--title",
-            "Composite item",
-            "--category",
-            "task",
-            "--owner",
-            "frank",
-            "--creator",
-            "alice",
-            "--body",
-            "the body\n",
-            "--field",
-            "note=hello",
-            "--field",
-            "points=7",
-            "--parent",
-            &parent,
-            "--dependency",
-            &parent,
-            "--link",
-            &linked,
-        ],
-    );
+    let mut arguments = vec![
+        "create",
+        "--title",
+        "Composite item",
+        "--category",
+        "task",
+        "--owner",
+        "frank",
+        "--creator",
+        "alice",
+        "--body",
+        "the body\n",
+        "--field",
+        "note=hello",
+        "--field",
+        "points=7",
+        "--parent",
+        &parent,
+        "--dependency",
+        &parent,
+        "--link",
+        &linked,
+    ];
+    if cascade {
+        arguments.push("--cascade");
+    }
+    let cli = common::cli_json(&cli_root, &arguments);
     let cli_id = cli["data"]["id"].as_str().expect("the CLI id").to_owned();
 
     for field in [
@@ -191,15 +222,33 @@ async fn composite_create_matches_the_cli() {
             "the adapters disagree about `{field}`"
         );
     }
-    assert_eq!(mcp["data"]["partners"].as_array().unwrap().len(), 1);
-    assert_eq!(cli["data"]["partners"].as_array().unwrap().len(), 1);
-    assert_eq!(mcp["data"]["fingerprints"].as_array().unwrap().len(), 2);
-    assert_eq!(cli["data"]["fingerprints"].as_array().unwrap().len(), 2);
+    let partners = usize::from(cascade);
+    assert_eq!(mcp["data"]["partners"].as_array().unwrap().len(), partners);
+    assert_eq!(cli["data"]["partners"].as_array().unwrap().len(), partners);
+    assert_eq!(
+        mcp["data"]["fingerprints"].as_array().unwrap().len(),
+        partners + 1
+    );
+    assert_eq!(
+        cli["data"]["fingerprints"].as_array().unwrap().len(),
+        partners + 1
+    );
+    assert_eq!(
+        untouched_ids(&mcp),
+        untouched_ids(&cli),
+        "the adapters disagree about the partners they left alone"
+    );
+    let expected_untouched = if cascade {
+        Vec::new()
+    } else {
+        vec![linked.clone()]
+    };
+    assert_eq!(untouched_ids(&mcp), expected_untouched);
 
     assert_eq!(
         normalized_created_tree(&fixture.root, &mcp_id),
         normalized_created_tree(&cli_root, &cli_id),
-        "composite creation must write the same tree through both adapters"
+        "composite creation must write the same tree through both adapters (cascade={cascade})"
     );
 
     client.shutdown().await;

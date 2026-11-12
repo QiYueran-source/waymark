@@ -11,7 +11,7 @@ use std::io::Read;
 
 use camino::Utf8PathBuf;
 use clap::Args;
-use waymark_core::envelope::{success_envelope, Meta};
+use waymark_core::envelope::success_envelope;
 use waymark_core::error::{ValidationIssue, WaymarkError};
 use waymark_core::model::{FieldKey, FieldValue};
 use waymark_core::ops::create::CreateRequest;
@@ -60,9 +60,15 @@ pub struct CreateArgs {
     #[arg(long = "dependency", value_name = "ID", action = clap::ArgAction::Append)]
     pub dependency: Vec<String>,
 
-    /// Stable ID to soft-link to. Repeatable; the link is stored on both sides.
+    /// Stable ID to soft-link to. Repeatable; the link is stored on the new item,
+    /// and on the other side only with `--cascade`.
     #[arg(long = "link", value_name = "ID", action = clap::ArgAction::Append)]
     pub link: Vec<String>,
+
+    /// Consent to a cross-item write: also record the link on the other side,
+    /// which requires you to own it. Defaults to off.
+    #[arg(long)]
+    pub cascade: bool,
 
     /// Validate and report what would be written, without writing.
     #[arg(long)]
@@ -98,11 +104,13 @@ pub fn run(
     for link in args.link {
         request = request.with_soft_link(link);
     }
-    let options = if args.dry_run {
-        options.clone().dry_run()
-    } else {
-        options.clone()
-    };
+    let mut options = options.clone();
+    if args.dry_run {
+        options = options.dry_run();
+    }
+    if args.cascade {
+        options.cascade = true;
+    }
 
     let created = create::create(project, request, &options)?;
 
@@ -116,9 +124,10 @@ pub fn run(
                 "partners": created.partners.iter().map(|partner| {
                     item_json(&partner.item, &partner.path)
                 }).collect::<Vec<_>>(),
+                "untouched": waymark_core::view::leftover_partners_json(&created.untouched),
                 "fingerprints": created.fingerprints.iter().map(|fingerprint| fingerprint.as_str()).collect::<Vec<_>>(),
             }),
-            Meta::direct_file_scoped(),
+            created.meta.clone(),
         ))?;
     } else if created.written {
         err_line(&format!("created {}", created.item.id));
@@ -132,6 +141,15 @@ pub fn run(
         for partner in &created.partners {
             err_line(&format!("  would update {}", partner.item.id));
         }
+    }
+    for partner in &created.untouched {
+        err_line(&format!(
+            "  {} left alone (it did not record the link)",
+            partner.item.id
+        ));
+    }
+    for warning in &created.meta.warnings {
+        err_line(&format!("  {}: {}", warning.code, warning.message));
     }
     Ok(())
 }
