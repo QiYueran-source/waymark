@@ -49,6 +49,81 @@ async fn get_work_item_returns_the_item_with_relationships_and_archive_metadata(
 }
 
 #[tokio::test]
+async fn get_work_item_reports_a_one_sided_soft_link_without_a_repair_command() {
+    let fixture = common::fixture(&["records the link", "never records it"]);
+    let here = fixture.ids[0].clone();
+    let silent = fixture.ids[1].clone();
+    let path = common::task_path(&fixture.root, &here);
+    let mut item = waymark_core::parse::parse_item_file(&path).expect("the document parses");
+    item.soft_links = vec![waymark_core::WorkItemId::parse(&silent).unwrap()];
+    std::fs::write(&path, waymark_core::serialize::to_document(&item)).unwrap();
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    let result = client
+        .call("waymark_get_work_item", json!({"id": here}))
+        .await;
+    let envelope = common::envelope(&result);
+    assert_eq!(envelope["ok"], true, "{envelope}");
+    let issues = envelope["data"]["relationships"]["soft_link_issues"]
+        .as_array()
+        .cloned()
+        .unwrap_or_else(|| panic!("{envelope}"));
+    assert_eq!(issues.len(), 1, "{issues:?}");
+    assert_eq!(issues[0]["partner"], silent.as_str());
+    assert_eq!(issues[0]["missing"], "link");
+    assert!(
+        !issues[0].to_string().contains("waymark "),
+        "the diagnosis carries no runnable repair: {}",
+        issues[0]
+    );
+
+    client.shutdown().await;
+}
+
+#[tokio::test]
+async fn doctor_reports_a_reference_to_an_archived_item_as_the_shared_finding() {
+    let fixture = common::fixture(&["retired", "still points here"]);
+    let retired = fixture.ids[0].clone();
+    let user = fixture.ids[1].clone();
+    let project = fixture.project();
+    common::depend(&project, &user, &retired);
+    waymark_core::ops::archive::archive(&project, &retired, None, &common::options())
+        .expect("a non-cascading archive leaves the reference alone");
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    let result = client.call("waymark_doctor", json!({})).await;
+    let envelope = common::envelope(&result);
+    assert_eq!(envelope["ok"], true, "{envelope}");
+    let findings = envelope["data"]["findings"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let dangling: Vec<&Value> = findings
+        .iter()
+        .filter(|finding| finding["code"] == "DANGLING_REFERENCE")
+        .collect();
+    assert_eq!(dangling.len(), 1, "{findings:#?}");
+    assert_eq!(dangling[0]["fixable"], false);
+    assert!(
+        dangling[0]["message"].as_str().unwrap().contains(&retired),
+        "{dangling:?}"
+    );
+    assert!(
+        !dangling[0].to_string().contains("waymark "),
+        "the diagnosis carries no runnable repair: {}",
+        dangling[0]
+    );
+    assert!(
+        !findings
+            .iter()
+            .any(|finding| finding["code"] == "ONE_SIDED_SOFT_LINK"),
+        "an archived partner is not a one-sided link: {findings:#?}"
+    );
+
+    client.shutdown().await;
+}
+
+#[tokio::test]
 async fn list_returns_a_page_with_filters_projection_and_meta() {
     let fixture = common::fixture(&["alpha", "bravo", "charlie"]);
     let client = common::Client::connect(fixture.root.clone()).await;

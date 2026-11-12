@@ -135,6 +135,8 @@ pub enum Code {
     TimeZoneUndetected,
     /// An active item's direct parent is in the closed lifecycle state.
     ClosedParent,
+    /// A soft link is recorded on one side but not the other.
+    OneSidedSoftLink,
 }
 
 /// The process exit class of a failure.
@@ -308,6 +310,7 @@ impl Code {
         Code::AssetsVersionMismatch,
         Code::TimeZoneUndetected,
         Code::ClosedParent,
+        Code::OneSidedSoftLink,
     ];
 
     /// The registry row for this code.
@@ -562,6 +565,13 @@ impl Code {
                 &["id", "parent"],
                 &[WorkItem],
             ),
+            Self::OneSidedSoftLink => spec(
+                None,
+                false,
+                Some(Severity::Warning),
+                &["from", "to", "missing"],
+                &[WorkItem, Relationship],
+            ),
         }
     }
 
@@ -611,6 +621,7 @@ impl Code {
             Self::AssetsVersionMismatch => "ASSETS_VERSION_MISMATCH",
             Self::TimeZoneUndetected => "TIME_ZONE_UNDETECTED",
             Self::ClosedParent => "CLOSED_PARENT",
+            Self::OneSidedSoftLink => "ONE_SIDED_SOFT_LINK",
         }
     }
 
@@ -669,6 +680,7 @@ impl Code {
             "ASSETS_VERSION_MISMATCH" => Ok(Self::AssetsVersionMismatch),
             "TIME_ZONE_UNDETECTED" => Ok(Self::TimeZoneUndetected),
             "CLOSED_PARENT" => Ok(Self::ClosedParent),
+            "ONE_SIDED_SOFT_LINK" => Ok(Self::OneSidedSoftLink),
             other => Err(UnknownCode(other.to_owned())),
         }
     }
@@ -1436,6 +1448,26 @@ impl WaymarkError {
             "parent": parent.as_str(),
         }))
         .with_location(Location::work_item(id))
+    }
+
+    /// A soft link is recorded on one side but not the other.
+    ///
+    /// `from` is the document that records the link and `to` is the partner
+    /// that does not. The message states the fact and names the side that would
+    /// have to record it; it never spells out a command to run, because the
+    /// document that needs the link belongs to somebody who may not have
+    /// consented to it being written.
+    pub fn one_sided_soft_link(from: &WorkItemId, to: &WorkItemId) -> Self {
+        Self::new(
+            Code::OneSidedSoftLink,
+            format!("{from} soft_links {to}, but {to} does not record the link back"),
+        )
+        .with_details(json!({
+            "from": from.as_str(),
+            "to": to.as_str(),
+            "missing": to.as_str(),
+        }))
+        .with_location(Location::work_item(from))
     }
 
     /// The embedded frontend manifest disagrees with this build.

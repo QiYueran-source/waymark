@@ -390,6 +390,21 @@
     "retryable": false
   },
   {
+    "code": "ONE_SIDED_SOFT_LINK",
+    "details": [
+      "from",
+      "to",
+      "missing"
+    ],
+    "exit": null,
+    "finding": "warning",
+    "location_kinds": [
+      "work_item",
+      "relationship"
+    ],
+    "retryable": false
+  },
+  {
     "code": "OWNER_MISMATCH",
     "details": [
       "item",

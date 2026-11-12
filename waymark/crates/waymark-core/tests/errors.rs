@@ -248,6 +248,10 @@ fn every_typed_constructor_fills_exactly_the_registered_details_keys() {
             "closed_parent",
             WaymarkError::closed_parent(&id(), &other()),
         ),
+        (
+            "one_sided_soft_link",
+            WaymarkError::one_sided_soft_link(&id(), &other()),
+        ),
     ];
 
     let mut seen: Vec<Code> = Vec::new();

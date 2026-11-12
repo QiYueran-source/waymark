@@ -44,6 +44,7 @@ const FINDING_ONLY: &[Code] = &[
     Code::DanglingReference,
     Code::TimestampIncoherent,
     Code::ClosedParent,
+    Code::OneSidedSoftLink,
     Code::AssetsVersionMismatch,
     Code::TimeZoneUndetected,
 ];
@@ -212,7 +213,7 @@ fn the_distribution_codes_are_registered_and_classified() {
     );
     assert_eq!(
         Code::ALL.len(),
-        43,
+        44,
         "the registry grows one code at a time, reviewed one at a time"
     );
 }
@@ -307,6 +308,7 @@ fn the_finding_only_codes_keep_their_pinned_severity() {
         (Code::DanglingReference, Severity::Error),
         (Code::TimestampIncoherent, Severity::Warning),
         (Code::ClosedParent, Severity::Info),
+        (Code::OneSidedSoftLink, Severity::Warning),
         (Code::AssetsVersionMismatch, Severity::Error),
     ];
     for (code, severity) in expected {

@@ -29,6 +29,11 @@
 //! - [`archive_leftovers_json`] — the documents an archive deliberately did
 //!   not rewrite, each with the relations that still point at the target.
 //! - [`archive_leftovers_summary`] — the one human sentence that precedes them.
+//! - [`soft_link_findings`] / [`SoftLinkDisplacement`] / [`Displacement`] — the
+//!   one diagnosis of a soft link that is stale (its partner is archived) or
+//!   one-sided (its partner never recorded it). `doctor` turns it into
+//!   registry findings, `show` renders it under `relationships.soft_link_issues`,
+//!   and neither ever offers a command.
 //! - [`DisplayState`] / [`display_state`] / [`blocked_reason`] /
 //!   [`closed_parent_reason`] — the one derivation of the display state and the
 //!   human blocked-reason and closed-parent prose.
@@ -49,6 +54,7 @@ use camino::Utf8Path;
 use serde_json::{json, Map, Value};
 
 use crate::config::Config;
+use crate::envelope::Finding;
 use crate::id::WorkItemId;
 use crate::model::{Status, WorkItem};
 use crate::ops::list::Listing;
@@ -163,6 +169,135 @@ pub fn closed_parent_reason(closed_parent: &Option<crate::id::WorkItemId>) -> Op
     closed_parent
         .as_ref()
         .map(|parent| format!("parent {} is closed", parent.as_str()))
+}
+
+/// What is wrong with one soft link, as one diagnosis.
+///
+/// A soft link is stored on both documents, and the two are written by two
+/// owners under the consent rules, so the pair can disagree. These are the two
+/// ways it does, and they are different facts:
+///
+/// - [`Displacement::PartnerArchived`] — the link is intact but its partner has
+///   been archived: the association is history, and stale.
+/// - [`Displacement::PartnerSilent`] — the link is recorded here and not on the
+///   partner's document: the partner never recorded it, and is still live.
+///
+/// `partner_owner` is the partner's `owner` as recorded on its own document,
+/// so a reader knows whose document is missing the link without opening it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SoftLinkDisplacement {
+    /// The partner the link points at.
+    pub partner: WorkItemId,
+    /// Which of the two disagreements this is.
+    pub kind: Displacement,
+    /// Who owns the partner document.
+    pub partner_owner: String,
+}
+
+/// The two ways a soft link's two sides can disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Displacement {
+    /// The partner document is archived and holds the link as history.
+    PartnerArchived,
+    /// The partner document is live but does not record the link back.
+    PartnerSilent,
+}
+
+impl Displacement {
+    /// Which side of the pair is not there.
+    ///
+    /// `"link"` is the ordinary one-sided state, where the partner document is
+    /// live and simply never recorded the association; `"archived"` is the
+    /// partner itself. Machine callers read this, not the prose.
+    pub fn missing_side(self) -> &'static str {
+        match self {
+            Self::PartnerArchived => "archived",
+            Self::PartnerSilent => "link",
+        }
+    }
+
+    /// The prose for this kind, naming the partner.
+    pub fn reason(self, partner: &WorkItemId) -> String {
+        match self {
+            Self::PartnerArchived => {
+                format!("{partner} is archived and keeps the association as history only")
+            }
+            Self::PartnerSilent => {
+                format!("the soft link exists on one side only: {partner} never recorded it")
+            }
+        }
+    }
+}
+
+/// Every soft link of one document whose two sides disagree.
+///
+/// Returned in the document's stored soft-link order. A partner that does not
+/// exist at all is not included: the missing-target check owns that case, and a
+/// document that cannot be read is left alone rather than guessed about.
+pub fn soft_link_findings(
+    item: &WorkItem,
+    projection: &crate::projection::Projection,
+) -> Vec<SoftLinkDisplacement> {
+    item.soft_links
+        .iter()
+        .filter_map(|partner| {
+            let partner_item = &projection.entry(partner)?.item;
+            let kind = if partner_item.is_archived() {
+                Displacement::PartnerArchived
+            } else if !partner_item.soft_links.contains(&item.id) {
+                Displacement::PartnerSilent
+            } else {
+                return None;
+            };
+            Some(SoftLinkDisplacement {
+                partner: partner.clone(),
+                kind,
+                partner_owner: partner_item.owner.clone(),
+            })
+        })
+        .collect()
+}
+
+/// Read one displacement as the registry finding it is.
+///
+/// This is the one place the two disagreements become codes, so `doctor` and
+/// any future surface cannot disagree about which code a case gets. Neither
+/// finding is fixable: completing or dropping the other side rewrites a
+/// document its owner may not have consented to, so the diagnosis states the
+/// fact and stops there.
+pub fn soft_link_finding(item: &WorkItem, displacement: &SoftLinkDisplacement) -> Finding {
+    match displacement.kind {
+        Displacement::PartnerArchived => Finding::new(
+            crate::error::Code::DanglingReference,
+            format!(
+                "{} soft_links the archived item {}",
+                item.id.as_str(),
+                displacement.partner.as_str()
+            ),
+        )
+        .with_location(crate::location::Location::work_item(&item.id)),
+        Displacement::PartnerSilent => Finding::from_error(
+            &crate::error::WaymarkError::one_sided_soft_link(&item.id, &displacement.partner),
+        ),
+    }
+}
+
+/// The machine form of one soft-link disagreement, without any command.
+///
+/// The same shape is rendered by `show` and named by `doctor`, so an adapter
+/// only decides where to print it:
+///
+/// ```json
+/// {"partner": "wm-…", "partner_owner": "frank", "missing": "link",
+///  "reason": "the soft link exists on one side only: wm-… never recorded it"}
+/// ```
+fn soft_link_issue_json(displacement: &SoftLinkDisplacement) -> Value {
+    json!({
+        "partner": displacement.partner.as_str(),
+        "partner_owner": displacement.partner_owner,
+        "missing": displacement.kind.missing_side(),
+        "reason": displacement.kind.reason(&displacement.partner),
+    })
 }
 
 /// The persisted fields of one item, without the file that happens to hold it.
@@ -476,6 +611,15 @@ pub fn read_json(read: &ScopedRead) -> Value {
             "soft_links": read.item.soft_links.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
             "children": read.children.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
             "dependents": read.dependents.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
+            // A soft link whose two sides disagree. `missing` names the
+            // document that does not record the link: "archived" means the
+            // partner is gone, "link" means it is live and never recorded it.
+            // The diagnosis is the whole answer; no repair command is offered.
+            "soft_link_issues": read
+                .soft_link_findings
+                .iter()
+                .map(soft_link_issue_json)
+                .collect::<Vec<_>>(),
         },
         "ready": read.readiness.as_ref().map(|readiness| readiness.ready),
         "blocked": read.readiness.as_ref().map(|readiness| readiness.blocked),
@@ -1039,6 +1183,7 @@ mod tests {
             readiness: None,
             children: vec![id("wm-000000000005")],
             dependents: vec![id("wm-000000000006")],
+            soft_link_findings: vec![],
             meta: Meta::direct_file_scoped(),
         };
         let value = read_json(&read);
@@ -1062,6 +1207,52 @@ mod tests {
         assert_eq!(value["ready"], Value::Null);
         assert_eq!(value["blocked"], Value::Null);
         assert_eq!(value["blocked_by"], json!([]));
+        assert_eq!(value["relationships"]["soft_link_issues"], json!([]));
+    }
+
+    #[test]
+    fn a_soft_link_issue_names_the_missing_side_and_never_a_command() {
+        let partner = id("wm-000000000007");
+        let read = ScopedRead {
+            item: item(),
+            path: Utf8Path::new("work/task/wm-000000000001.md").to_path_buf(),
+            category: crate::model::CategoryKey::parse("task").unwrap(),
+            fingerprint: Fingerprint::of(b"document"),
+            readiness: None,
+            children: vec![],
+            dependents: vec![],
+            soft_link_findings: vec![
+                SoftLinkDisplacement {
+                    partner: partner.clone(),
+                    kind: Displacement::PartnerSilent,
+                    partner_owner: "robin".to_owned(),
+                },
+                SoftLinkDisplacement {
+                    partner: id("wm-000000000008"),
+                    kind: Displacement::PartnerArchived,
+                    partner_owner: "frank".to_owned(),
+                },
+            ],
+            meta: Meta::direct_file_scoped(),
+        };
+        let issues = read_json(&read)["relationships"]["soft_link_issues"].clone();
+        assert_eq!(
+            issues,
+            json!([
+                {
+                    "partner": "wm-000000000007",
+                    "partner_owner": "robin",
+                    "missing": "link",
+                    "reason": "the soft link exists on one side only: wm-000000000007 never recorded it",
+                },
+                {
+                    "partner": "wm-000000000008",
+                    "partner_owner": "frank",
+                    "missing": "archived",
+                    "reason": "wm-000000000008 is archived and keeps the association as history only",
+                },
+            ])
+        );
     }
 
     #[test]
