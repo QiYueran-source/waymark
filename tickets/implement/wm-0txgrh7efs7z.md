@@ -3,11 +3,12 @@ schema: 1
 id: wm-0txgrh7efs7z
 title: Refuse a missing consent and a foreign partner distinctly
 category: implement
-status: open
+status: closed
 owner: frank
 creator: Frank
 created_at: 2026-11-12T06:27:40Z
-updated_at: 2026-11-12T06:27:45Z
+updated_at: 2026-11-12T10:55:25Z
+closed_at: 2026-11-12T10:55:25Z
 parent: wm-62yfmh5j41t5
 dependencies:
   - wm-0c5qz2jk17sx

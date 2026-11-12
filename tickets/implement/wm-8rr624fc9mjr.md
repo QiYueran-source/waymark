@@ -3,11 +3,12 @@ schema: 1
 id: wm-8rr624fc9mjr
 title: CLI and MCP agree on every cross-item write
 category: implement
-status: open
+status: closed
 owner: frank
 creator: Frank
 created_at: 2026-11-12T06:27:28Z
-updated_at: 2026-11-12T06:27:33Z
+updated_at: 2026-11-12T10:55:25Z
+closed_at: 2026-11-12T10:55:25Z
 parent: wm-62yfmh5j41t5
 dependencies:
   - wm-0c5qz2jk17sx
