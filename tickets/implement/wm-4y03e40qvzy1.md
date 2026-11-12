@@ -3,11 +3,12 @@ schema: 1
 id: wm-4y03e40qvzy1
 title: create does not rewrite its link partner by surprise
 category: implement
-status: open
+status: closed
 owner: frank
 creator: Frank
 created_at: 2026-11-12T06:27:27Z
-updated_at: 2026-11-12T06:27:32Z
+updated_at: 2026-11-12T10:20:24Z
+closed_at: 2026-11-12T10:20:24Z
 parent: wm-62yfmh5j41t5
 dependencies:
   - wm-0txgrh7efs7z
