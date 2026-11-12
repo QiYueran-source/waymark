@@ -198,8 +198,26 @@ async fn every_tool_routes_to_the_shared_library_and_returns_the_envelope() {
             "waymark_remove_dependency",
             json!({"id": id1, "blocking": id0}),
         ),
-        ("waymark_add_soft_link", json!({"id": id0, "other": id1})),
-        ("waymark_remove_soft_link", json!({"id": id0, "other": id1})),
+        // A soft link is a cross-item write, so both verbs need consent and an
+        // operator who owns the document they would also rewrite. The two ends
+        // are transferred to the same owner and the operator follows them, so
+        // the pair is hers and the removal that follows is one she may make.
+        (
+            "waymark_config_set",
+            json!({"name": "operator", "value": "carol"}),
+        ),
+        (
+            "waymark_transfer_owner",
+            json!({"id": id1, "owner": "carol"}),
+        ),
+        (
+            "waymark_add_soft_link",
+            json!({"id": id0, "other": id1, "cascade": true}),
+        ),
+        (
+            "waymark_remove_soft_link",
+            json!({"id": id0, "other": id1, "cascade": true}),
+        ),
         ("waymark_archive_work_item", json!({"id": id1})),
     ];
 

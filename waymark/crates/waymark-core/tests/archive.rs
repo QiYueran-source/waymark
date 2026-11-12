@@ -109,6 +109,21 @@ fn document(project: &Project, item: &str) -> String {
     std::fs::read_to_string(&entry.path).expect("the document is readable")
 }
 
+/// Record `from`'s half of a soft link by writing the document, because
+/// `link add` now refuses to write a partner at all without consent.
+fn seed_link(project: &Project, from: &str, to: &str) {
+    let entry = project
+        .locate(&id(from))
+        .expect("the item is in the inventory");
+    let mut item = waymark_core::parse::parse_item_file(&entry.path).expect("the document parses");
+    let target = id(to);
+    if !item.soft_links.contains(&target) {
+        item.soft_links.push(target);
+    }
+    std::fs::write(&entry.path, waymark_core::serialize::to_document(&item))
+        .expect("the document is writable");
+}
+
 fn parse(project: &Project, item: &str) -> waymark_core::WorkItem {
     let entry = project
         .locate(&id(item))
@@ -397,7 +412,16 @@ fn every_mediated_write_family_rejects_an_archived_item() {
                 &project,
                 &item,
                 &other,
-                &options_at(20),
+                &options_at(20).with_cascade(),
+            )),
+        ),
+        (
+            "link remove",
+            code_of(link::remove_soft_link(
+                &project,
+                &item,
+                &other,
+                &options_at(20).with_cascade(),
             )),
         ),
     ];
@@ -431,7 +455,7 @@ fn archive_without_consent_rewrites_nothing_but_the_target() {
     let partner = make(&project, "partner");
     relationship::add_dependency(&project, &dependent, &target, &options())
         .expect("the edge is added");
-    link::add_soft_link(&project, &partner, &target, &options()).expect("the link is added");
+    seed_link(&project, &partner, &target);
     let target_before = parse(&project, &target);
     let dependent_before = document(&project, &dependent);
     let partner_before = document(&project, &partner);
@@ -469,7 +493,7 @@ fn a_foreign_reference_does_not_refuse_the_archive_and_is_named() {
     let extra = make(&project, "mine");
     relationship::add_dependency(&project, &dependent, &target, &options())
         .expect("the edge is added");
-    link::add_soft_link(&project, &partner, &target, &options()).expect("the link is added");
+    seed_link(&project, &partner, &target);
     relationship::add_dependency(&project, &extra, &target, &options()).expect("the edge is added");
     let dependent_before = document(&project, &dependent);
     let partner_before = document(&project, &partner);
@@ -616,7 +640,7 @@ fn the_archived_items_own_relationships_are_preserved_exactly() {
     relationship::add_dependency(&project, &target, &prerequisite, &options())
         .expect("the outbound edge is added");
     parent::set_parent(&project, &target, &parent_id, &options()).expect("the parent is set");
-    link::add_soft_link(&project, &target, &linked, &options()).expect("the link is added");
+    seed_link(&project, &target, &linked);
     let before = parse(&project, &target);
     assert!(
         !before.dependencies.is_empty() && before.parent.is_some() && !before.soft_links.is_empty(),
@@ -673,7 +697,7 @@ fn a_dry_run_plans_the_child_check_and_every_removal() {
     let partner = make(&project, "partner");
     relationship::add_dependency(&project, &dependent, &target, &options())
         .expect("the edge is added");
-    link::add_soft_link(&project, &partner, &target, &options()).expect("the link is added");
+    seed_link(&project, &partner, &target);
     let target_before = parse(&project, &target);
     let dependent_before = parse(&project, &dependent);
     let partner_before = parse(&project, &partner);
@@ -728,7 +752,7 @@ fn a_dry_run_without_consent_predicts_exactly_what_the_real_run_does() {
         let theirs = make_owned_by(&project, "theirs", "alice");
         relationship::add_dependency(&project, &mine, &target, &options())
             .expect("the edge is added");
-        link::add_soft_link(&project, &theirs, &target, &options()).expect("the link is added");
+        seed_link(&project, &theirs, &target);
         let snapshot = |project: &Project, item: &str| document(project, item);
         let before = [
             snapshot(&project, &target),

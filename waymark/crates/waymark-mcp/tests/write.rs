@@ -669,21 +669,26 @@ async fn dependency_edges_are_added_and_removed_through_the_domain() {
     client.shutdown().await;
 }
 
+/// Record the operator who owns both ends of the fixture, so a cross-item soft
+/// link is a write the operator is entitled to make.
+fn act_as_owner(fixture: &common::Fixture) {
+    waymark_core::ops::local_config::set_scalar(
+        &fixture.project(),
+        waymark_core::ops::config::Scalar::Operator,
+        "frank",
+        &common::options(),
+    )
+    .expect("the operator is recorded");
+}
+
 #[tokio::test]
 async fn soft_links_are_written_on_both_sides_as_one_batch() {
     let fixture = common::fixture(&["one", "two"]);
+    act_as_owner(&fixture);
     let left = fixture.ids[0].clone();
     let right = fixture.ids[1].clone();
-    let left_path = fixture
-        .root
-        .join("work")
-        .join("task")
-        .join(format!("{left}.md"));
-    let right_path = fixture
-        .root
-        .join("work")
-        .join("task")
-        .join(format!("{right}.md"));
+    let left_path = common::task_path(&fixture.root, &left);
+    let right_path = common::task_path(&fixture.root, &right);
     let client = common::Client::connect(fixture.root.clone()).await;
 
     let result = client
@@ -693,7 +698,7 @@ async fn soft_links_are_written_on_both_sides_as_one_batch() {
         )
         .await;
     let envelope = common::envelope(&result);
-    assert_eq!(envelope["ok"], true);
+    assert_eq!(envelope["ok"], true, "{envelope}");
     assert_eq!(envelope["data"]["verb"], "add");
     assert_eq!(envelope["data"]["other"], right);
     assert_eq!(envelope["data"]["soft_links"], json!([right]));
@@ -713,6 +718,7 @@ async fn soft_links_are_written_on_both_sides_as_one_batch() {
         )
         .await;
     let envelope = common::envelope(&result);
+    assert_eq!(envelope["ok"], true, "{envelope}");
     assert_eq!(envelope["data"]["verb"], "remove");
     assert_eq!(envelope["data"]["soft_links"], json!([]));
     assert_eq!(envelope["data"]["changed"], true);
@@ -725,16 +731,16 @@ async fn soft_links_are_written_on_both_sides_as_one_batch() {
 #[tokio::test]
 async fn removing_a_soft_link_without_consent_leaves_the_partner_alone() {
     let fixture = common::fixture(&["one", "two"]);
+    act_as_owner(&fixture);
     let left = fixture.ids[0].clone();
     let right = fixture.ids[1].clone();
-    let right_path = fixture
-        .root
-        .join("work")
-        .join("task")
-        .join(format!("{right}.md"));
+    let right_path = common::task_path(&fixture.root, &right);
     let client = common::Client::connect(fixture.root.clone()).await;
     let added = client
-        .call("waymark_add_soft_link", json!({"id": left, "other": right}))
+        .call(
+            "waymark_add_soft_link",
+            json!({"id": left, "other": right, "cascade": true}),
+        )
         .await;
     assert_eq!(common::envelope(&added)["ok"], true);
     let partner = common::read(&right_path);
@@ -769,47 +775,78 @@ async fn removing_a_soft_link_without_consent_leaves_the_partner_alone() {
 }
 
 #[tokio::test]
-async fn a_soft_link_without_consent_is_recorded_on_one_side_only() {
+async fn a_soft_link_without_consent_is_refused_and_writes_nothing() {
     let fixture = common::fixture(&["one", "two"]);
+    act_as_owner(&fixture);
     let left = fixture.ids[0].clone();
     let right = fixture.ids[1].clone();
-    let right_path = fixture
-        .root
-        .join("work")
-        .join("task")
-        .join(format!("{right}.md"));
-    let right_document = common::read(&right_path);
+    let left_path = common::task_path(&fixture.root, &left);
+    let right_path = common::task_path(&fixture.root, &right);
+    let before = (common::read(&left_path), common::read(&right_path));
     let client = common::Client::connect(fixture.root.clone()).await;
 
     let result = client
         .call("waymark_add_soft_link", json!({"id": left, "other": right}))
         .await;
-    let envelope = common::envelope(&result);
-    assert_eq!(envelope["ok"], true, "{envelope}");
-    assert_eq!(envelope["data"]["soft_links"], json!([right]));
-    assert_eq!(envelope["data"]["other_item"], serde_json::Value::Null);
-    assert_eq!(
-        envelope["data"]["partner_unsynchronised"],
-        json!(true),
-        "the result says the pair is one-sided"
+
+    assert_eq!(result.is_error, Some(true), "a refusal is a tool failure");
+    let error = common::business_error(&result);
+    assert_eq!(error["code"], json!("CASCADE_CONSENT_REQUIRED"));
+    assert_eq!(error["retryable"], json!(false));
+    assert_eq!(error["details"]["option"], json!("cascade"));
+    assert!(
+        error["message"]
+            .as_str()
+            .expect("a message")
+            .contains("--cascade"),
+        "the refusal names the option to re-run with: {error}"
     );
     assert_eq!(
-        envelope["data"]["fingerprints"].as_array().unwrap().len(),
-        1
-    );
-    assert_eq!(
-        common::read(&right_path),
-        right_document,
-        "the partner is byte-identical, updated_at included"
+        (common::read(&left_path), common::read(&right_path)),
+        before,
+        "a refusal writes neither document"
     );
 
+    client.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_soft_link_against_another_owners_item_is_owned_by_other() {
+    let fixture = common::fixture(&["one", "two"]);
+    act_as_owner(&fixture);
+    let mine = fixture.ids[0].clone();
+    let theirs = fixture.ids[1].clone();
+    let project = fixture.project();
+    waymark_core::ops::owner::transfer_owner(&project, &theirs, "alice", &common::options())
+        .expect("the partner belongs to someone else");
+    let mine_path = common::task_path(&fixture.root, &mine);
+    let theirs_path = common::task_path(&fixture.root, &theirs);
+    let before = (common::read(&mine_path), common::read(&theirs_path));
+    let client = common::Client::connect(fixture.root.clone()).await;
+
     let result = client
-        .call("waymark_add_soft_link", json!({"id": left, "other": right}))
+        .call(
+            "waymark_add_soft_link",
+            json!({"id": mine, "other": theirs, "cascade": true}),
+        )
         .await;
-    let envelope = common::envelope(&result);
-    assert_eq!(envelope["ok"], true, "{envelope}");
-    assert_eq!(envelope["data"]["written"], false);
-    assert_eq!(envelope["data"]["partner_unsynchronised"], json!(true));
+
+    assert_eq!(result.is_error, Some(true));
+    let error = common::business_error(&result);
+    assert_eq!(error["code"], json!("OWNED_BY_OTHER"));
+    assert_eq!(error["details"]["owner"], json!("alice"));
+    assert!(
+        error["message"]
+            .as_str()
+            .expect("a message")
+            .contains("re-running will not change the outcome"),
+        "the refusal says retrying cannot help: {error}"
+    );
+    assert_eq!(
+        (common::read(&mine_path), common::read(&theirs_path)),
+        before,
+        "a refusal writes neither document"
+    );
 
     client.shutdown().await;
 }
@@ -908,8 +945,13 @@ async fn archive_without_consent_rewrites_the_target_only_and_names_the_rest() {
     )
     .expect("the operator is recorded");
     common::depend(&project, &dependent, &target);
-    waymark_core::ops::link::add_soft_link(&project, &linked, &target, &common::options())
-        .expect("the link is added");
+    waymark_core::ops::link::add_soft_link(
+        &project,
+        &linked,
+        &target,
+        &common::options().with_cascade().with_operator("frank"),
+    )
+    .expect("the link is added");
     waymark_core::ops::owner::transfer_owner(&project, &dependent, "alice", &common::options())
         .expect("the dependent belongs to someone else");
     let dependent_path = common::task_path(&fixture.root, &dependent);

@@ -266,6 +266,31 @@ pub fn waymark_binary() -> Utf8PathBuf {
 }
 
 /// Run one CLI command in JSON mode against `root` and return its envelope.
+/// Run the CLI and return its envelope, failure or success.
+///
+/// For the cases that assert the two adapters refuse the same request the same
+/// way: the business refusal is still an envelope, and its exit is non-zero.
+pub fn try_cli_json(root: &Utf8Path, arguments: &[&str]) -> Result<Value, Value> {
+    let output = std::process::Command::new(waymark_binary())
+        .arg("--json")
+        .arg("--project")
+        .arg(root)
+        .args(arguments)
+        .output()
+        .expect("the CLI binary runs");
+    let envelope: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+        panic!(
+            "the CLI did not emit one JSON envelope ({error}): {}",
+            String::from_utf8_lossy(&output.stdout)
+        )
+    });
+    if output.status.success() {
+        Ok(envelope)
+    } else {
+        Err(envelope)
+    }
+}
+
 pub fn cli_json(root: &Utf8Path, arguments: &[&str]) -> Value {
     let output = std::process::Command::new(waymark_binary())
         .arg("--json")

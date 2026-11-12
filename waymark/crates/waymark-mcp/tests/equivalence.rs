@@ -14,7 +14,7 @@ use camino::Utf8Path;
 use serde_json::json;
 use waymark_core::config::FieldType;
 use waymark_core::model::FieldKey;
-use waymark_core::ops::{config, edit, relationship};
+use waymark_core::ops::{config, edit, local_config, relationship};
 use waymark_core::FieldValue;
 
 /// Declare an optional custom field before the project is copied.
@@ -40,6 +40,24 @@ fn add_category(fixture: &common::Fixture, key: &str, path: &str) {
         &common::options(),
     )
     .expect("the category is declared");
+}
+
+/// Record `operator` as the local document's operator, the way a person does.
+fn act_as(project: &waymark_core::Project, operator: &str) {
+    local_config::set_scalar(
+        project,
+        config::Scalar::Operator,
+        operator,
+        &common::options(),
+    )
+    .expect("the operator is recorded");
+}
+
+/// Record `operator` in the CLI copy's local document, so both adapters act as
+/// the same person: the server has no local document of its own.
+fn act_as_in(root: &Utf8Path, operator: &str) {
+    let project = waymark_core::Project::discover(root).expect("the copied project opens");
+    act_as(&project, operator);
 }
 
 #[tokio::test]
@@ -368,36 +386,91 @@ async fn dependency_matches_the_cli() {
 
 #[tokio::test]
 async fn soft_link_matches_the_cli() {
-    // Both consent states write the same bytes through either adapter: without
-    // `cascade` the same single-sided document, with it both documents.
-    for cascade in [false, true] {
-        let fixture = common::fixture(&["one", "two"]);
-        let left = fixture.ids[0].clone();
-        let right = fixture.ids[1].clone();
-        let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
-        let client = common::Client::connect(fixture.root.clone()).await;
+    // Consent is the only way either adapter writes the partner, and both write
+    // the same bytes for it: one pair recorded on both sides by this add, then
+    // the removal that takes it back. Without consent both adapters refuse the
+    // same way, so the project stays byte-identical after either attempt.
+    let fixture = common::fixture(&["one", "two"]);
+    let left = fixture.ids[0].clone();
+    let right = fixture.ids[1].clone();
+    let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
+    // Act as the owner on both sides: the CLI through its local document, the
+    // server through the override a tool call carries.
+    let project = fixture.project();
+    act_as(&project, "frank");
+    act_as_in(&cli_root, "frank");
+    let client = common::Client::connect(fixture.root.clone()).await;
 
-        let result = client
-            .call(
-                "waymark_add_soft_link",
-                json!({"id": left, "other": right, "cascade": cascade}),
-            )
-            .await;
-        assert_eq!(common::envelope(&result)["ok"], true);
-        if cascade {
-            common::cli_json(&cli_root, &["link", "add", &left, &right, "--cascade"]);
-        } else {
-            common::cli_json(&cli_root, &["link", "add", &left, &right]);
-        }
+    let refused = client
+        .call("waymark_add_soft_link", json!({"id": left, "other": right}))
+        .await;
+    assert_eq!(refused.is_error, Some(true));
+    assert_eq!(
+        common::business_error(&refused)["code"],
+        json!("CASCADE_CONSENT_REQUIRED")
+    );
+    assert!(
+        common::try_cli_json(&cli_root, &["link", "add", &left, &right]).is_err(),
+        "the CLI refuses it as well"
+    );
 
-        assert_eq!(
-            common::normalized_snapshot(&fixture.root),
-            common::normalized_snapshot(&cli_root),
-            "the soft-link write diverges from the CLI (cascade={cascade})"
-        );
+    let result = client
+        .call(
+            "waymark_add_soft_link",
+            json!({"id": left, "other": right, "cascade": true}),
+        )
+        .await;
+    assert_eq!(
+        common::envelope(&result)["ok"],
+        true,
+        "{:?}",
+        common::envelope(&result)
+    );
+    let cli = common::cli_json(&cli_root, &["link", "add", &left, &right, "--cascade"]);
+    assert_eq!(
+        common::normalized_snapshot(&fixture.root),
+        common::normalized_snapshot(&cli_root),
+        "the consented soft-link write diverges from the CLI: {cli}"
+    );
 
-        client.shutdown().await;
-    }
+    let result = client
+        .call(
+            "waymark_remove_soft_link",
+            json!({"id": left, "other": right, "cascade": true}),
+        )
+        .await;
+    assert_eq!(common::envelope(&result)["ok"], true);
+    common::cli_json(&cli_root, &["link", "remove", &left, &right, "--cascade"]);
+    assert_eq!(
+        common::normalized_snapshot(&fixture.root),
+        common::normalized_snapshot(&cli_root),
+        "the consented soft-link removal diverges from the CLI"
+    );
+
+    // A removal without consent writes one document through either adapter.
+    common::cli_json(&cli_root, &["link", "add", &left, &right, "--cascade"]);
+    let added = client
+        .call(
+            "waymark_add_soft_link",
+            json!({"id": left, "other": right, "cascade": true}),
+        )
+        .await;
+    assert_eq!(common::envelope(&added)["ok"], true);
+    let removed = client
+        .call(
+            "waymark_remove_soft_link",
+            json!({"id": left, "other": right}),
+        )
+        .await;
+    assert_eq!(common::envelope(&removed)["ok"], true);
+    common::cli_json(&cli_root, &["link", "remove", &left, &right]);
+    assert_eq!(
+        common::normalized_snapshot(&fixture.root),
+        common::normalized_snapshot(&cli_root),
+        "the one-sided removal diverges from the CLI"
+    );
+
+    client.shutdown().await;
 }
 
 #[tokio::test]
@@ -464,11 +537,21 @@ async fn archive_matches_the_cli_with(cascade: bool) {
     let project = fixture.project();
     relationship::add_dependency(&project, &dependent, &target, &common::options())
         .expect("the dependency is added");
-    waymark_core::ops::link::add_soft_link(&project, &linked, &target, &common::options())
-        .expect("the link is added");
+    waymark_core::ops::link::add_soft_link(
+        &project,
+        &linked,
+        &target,
+        &common::options().with_cascade().with_operator("frank"),
+    )
+    .expect("the link is added");
     waymark_core::ops::owner::transfer_owner(&project, &dependent, "alice", &common::options())
         .expect("the dependent belongs to someone else");
     let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
+    // Consent asks whether the inbound documents are the operator's, so both
+    // adapters have to act as the same person: the CLI reads the local
+    // document, and this is where it is written.
+    act_as(&project, "frank");
+    act_as_in(&cli_root, "frank");
     let client = common::Client::connect(fixture.root.clone()).await;
 
     let result = client

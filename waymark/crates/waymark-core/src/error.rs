@@ -41,6 +41,10 @@ use crate::envelope::{Completeness, Freshness};
 use crate::id::{IdError, WorkItemId};
 use crate::location::{Location, LocationKind};
 
+/// The relation a cross-item write carries in its location: the caller's item
+/// as `from`, the document it would also write as `to`.
+const MEDIATED_BY: &str = "mediated_by";
+
 /// A registered error code.
 ///
 /// The literal is the `SCREAMING_SNAKE` string on the wire; the enum variant
@@ -137,6 +141,11 @@ pub enum Code {
     ClosedParent,
     /// A soft link is recorded on one side but not the other.
     OneSidedSoftLink,
+    /// A cross-item write was asked for without the `cascade` consent option.
+    CascadeConsentRequired,
+    /// The second document a cross-item write would rewrite belongs to another
+    /// owner.
+    OwnedByOther,
 }
 
 /// The process exit class of a failure.
@@ -311,6 +320,8 @@ impl Code {
         Code::TimeZoneUndetected,
         Code::ClosedParent,
         Code::OneSidedSoftLink,
+        Code::CascadeConsentRequired,
+        Code::OwnedByOther,
     ];
 
     /// The registry row for this code.
@@ -572,6 +583,20 @@ impl Code {
                 &["from", "to", "missing"],
                 &[WorkItem, Relationship],
             ),
+            Self::CascadeConsentRequired => spec(
+                Some(ExitClass::Conflict),
+                false,
+                None,
+                &["operation", "id", "other", "option"],
+                &[WorkItem, Relationship],
+            ),
+            Self::OwnedByOther => spec(
+                Some(ExitClass::Conflict),
+                false,
+                None,
+                &["id", "owner", "operation"],
+                &[WorkItem],
+            ),
         }
     }
 
@@ -622,6 +647,8 @@ impl Code {
             Self::TimeZoneUndetected => "TIME_ZONE_UNDETECTED",
             Self::ClosedParent => "CLOSED_PARENT",
             Self::OneSidedSoftLink => "ONE_SIDED_SOFT_LINK",
+            Self::CascadeConsentRequired => "CASCADE_CONSENT_REQUIRED",
+            Self::OwnedByOther => "OWNED_BY_OTHER",
         }
     }
 
@@ -681,6 +708,8 @@ impl Code {
             "TIME_ZONE_UNDETECTED" => Ok(Self::TimeZoneUndetected),
             "CLOSED_PARENT" => Ok(Self::ClosedParent),
             "ONE_SIDED_SOFT_LINK" => Ok(Self::OneSidedSoftLink),
+            "CASCADE_CONSENT_REQUIRED" => Ok(Self::CascadeConsentRequired),
+            "OWNED_BY_OTHER" => Ok(Self::OwnedByOther),
             other => Err(UnknownCode(other.to_owned())),
         }
     }
@@ -1099,6 +1128,84 @@ impl WaymarkError {
         )
         .with_details(json!({"id": id.as_str(), "children": ids}))
         .with_location(Location::work_item(id))
+    }
+
+    /// A cross-item write was asked for without the consent option.
+    ///
+    /// `consent_hint` names the option to re-run with, so the caller can correct
+    /// its own request without guessing. Class 4: the request cannot proceed as
+    /// issued, and the same request with the same flags will fail again.
+    pub fn cascade_consent_required(
+        operation: impl Into<String>,
+        id: &WorkItemId,
+        other: &WorkItemId,
+        consent_hint: impl Into<String>,
+    ) -> Self {
+        let operation = operation.into();
+        let consent_hint = consent_hint.into();
+        Self::new(
+            Code::CascadeConsentRequired,
+            format!("{operation} would write {other} too: {consent_hint}"),
+        )
+        .with_details(json!({
+            "operation": operation,
+            "id": id.as_str(),
+            "other": other.as_str(),
+            "option": "cascade",
+        }))
+        .with_location(Location::relationship(id, MEDIATED_BY, other))
+    }
+
+    /// The second document of a cross-item write belongs to another owner.
+    ///
+    /// The message says outright that re-running cannot help: consent is not
+    /// what is missing, the owner is. `operation` is carried both in the message
+    /// and in the details, so an adapter can say which command was refused.
+    pub fn owned_by_other(id: &WorkItemId, owner: impl Into<String>, operation: &str) -> Self {
+        let owner = owner.into();
+        Self::new(
+            Code::OwnedByOther,
+            format!(
+                "{id} is owned by {owner}, not by the operator, so {operation} cannot rewrite it; \
+                 re-running will not change the outcome — ask the owner to make the change, or \
+                 transfer ownership first"
+            ),
+        )
+        .with_details(json!({
+            "id": id.as_str(),
+            "owner": owner,
+            "operation": operation,
+        }))
+        .with_location(Location::work_item(id))
+    }
+
+    /// A cross-item write needs an owner decision but no operator resolves.
+    ///
+    /// A configuration failure (`CONFIG_INVALID`) at the local document, which
+    /// is the identity source that has to supply the operator. It is never
+    /// downgraded to a warning: a cross-item write that cannot show who is
+    /// entitled to it does not pass silently.
+    pub fn missing_operator_source(
+        operation: &str,
+        other: &WorkItemId,
+        source: impl Into<String>,
+    ) -> Self {
+        let source = source.into();
+        let mut error = Self::config_invalid(
+            source.as_str(),
+            vec![format!(
+                "operator: {operation} needs the operator identity to decide whether {other} may \
+                 be rewritten, and no operator is configured (no operation override, no user \
+                 document, no Git user.name)"
+            )],
+        );
+        let message = format!(
+            "{operation} cannot decide whether it may rewrite {other}: no operator identity is \
+             configured; set one (for example `waymark config set operator <name>`), which writes \
+             {source}"
+        );
+        error.message = message;
+        error.with_location(Location::config_key(crate::user_config::USER_CONFIG_FILE))
     }
 
     // -- filesystem, Git, environment (class 5) ---------------------------

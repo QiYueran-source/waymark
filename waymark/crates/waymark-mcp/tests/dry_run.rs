@@ -60,7 +60,24 @@ async fn every_dry_run_tool_leaves_the_project_byte_identical() {
     parent::set_parent(&project, &id1, &id0, &common::options()).expect("the parent is set");
     relationship::add_dependency(&project, &id1, &id0, &common::options())
         .expect("the dependency is added");
-    link::add_soft_link(&project, &id0, &id1, &common::options()).expect("the link is added");
+    // A soft link is a cross-item write: it needs consent and an operator who
+    // owns both ends, so the fixture records the pair the way a person does.
+    link::add_soft_link(
+        &project,
+        &id0,
+        &id1,
+        &common::options().with_cascade().with_operator("frank"),
+    )
+    .expect("the link is added");
+    // The operator is recorded once, before any dry run, the way a person sets
+    // it: no dry run writes it.
+    waymark_core::ops::local_config::set_scalar(
+        &project,
+        waymark_core::ops::config::Scalar::Operator,
+        "frank",
+        &common::options(),
+    )
+    .expect("the operator is recorded");
 
     common::warm_lock(&fixture.root);
     let client = common::Client::connect(fixture.root.clone()).await;
@@ -157,10 +174,6 @@ async fn every_dry_run_tool_leaves_the_project_byte_identical() {
         (
             "waymark_add_soft_link",
             json!({"id": id0, "other": id2, "cascade": true, "dry_run": true}),
-        ),
-        (
-            "waymark_add_soft_link",
-            json!({"id": id0, "other": id2, "dry_run": true}),
         ),
         (
             "waymark_remove_soft_link",
