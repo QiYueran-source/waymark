@@ -3,11 +3,12 @@ schema: 1
 id: wm-3v6nq7wdav86
 title: A closed parent is visible on list and ready
 category: implement
-status: open
+status: closed
 owner: frank
 creator: Frank
 created_at: 2026-11-12T06:27:27Z
-updated_at: 2026-11-12T06:27:32Z
+updated_at: 2026-11-12T08:42:15Z
+closed_at: 2026-11-12T08:42:15Z
 parent: wm-62yfmh5j41t5
 dependencies:
   - wm-363qccgxcw0q
