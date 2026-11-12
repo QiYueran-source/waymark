@@ -707,10 +707,17 @@ async fn soft_links_are_written_on_both_sides_as_one_batch() {
 }
 
 #[tokio::test]
-async fn archive_writes_a_tombstone_and_cleans_inbound_edges() {
+async fn archive_writes_a_tombstone_and_cleans_inbound_edges_with_consent() {
     let fixture = common::fixture(&["one", "two"]);
     let target = fixture.ids[0].clone();
     let dependent = fixture.ids[1].clone();
+    waymark_core::ops::local_config::set_scalar(
+        &fixture.project(),
+        waymark_core::ops::config::Scalar::Operator,
+        "frank",
+        &common::options(),
+    )
+    .expect("the operator is recorded");
     common::depend(&fixture.project(), &dependent, &target);
     let target_path = fixture
         .root
@@ -727,12 +734,14 @@ async fn archive_writes_a_tombstone_and_cleans_inbound_edges() {
     let result = client
         .call(
             "waymark_archive_work_item",
-            json!({"id": target, "reason": "  retired  "}),
+            json!({"id": target, "reason": "  retired  ", "cascade": true}),
         )
         .await;
     let envelope = common::envelope(&result);
     assert_eq!(envelope["ok"], true);
     assert_eq!(envelope["data"]["written"], true);
+    // The dependent is frank's, so consent cleans it; nothing is left alone.
+    assert_eq!(envelope["data"]["untouched"], json!([]));
     assert_eq!(envelope["data"]["archive_reason"], "retired");
     assert!(envelope["data"]["archived_at"].is_string());
     assert_eq!(
@@ -772,6 +781,68 @@ async fn archive_writes_a_tombstone_and_cleans_inbound_edges() {
     assert_eq!(envelope["data"]["written"], false);
     assert!(envelope["data"]["archived_at"].is_string());
     assert_eq!(common::snapshot(&fixture.root), before);
+
+    client.shutdown().await;
+}
+
+#[tokio::test]
+async fn archive_without_consent_rewrites_the_target_only_and_names_the_rest() {
+    let fixture = common::fixture(&["one", "two", "three"]);
+    let target = fixture.ids[0].clone();
+    let dependent = fixture.ids[1].clone();
+    let linked = fixture.ids[2].clone();
+    let project = fixture.project();
+    waymark_core::ops::local_config::set_scalar(
+        &project,
+        waymark_core::ops::config::Scalar::Operator,
+        "frank",
+        &common::options(),
+    )
+    .expect("the operator is recorded");
+    common::depend(&project, &dependent, &target);
+    waymark_core::ops::link::add_soft_link(&project, &linked, &target, &common::options())
+        .expect("the link is added");
+    waymark_core::ops::owner::transfer_owner(&project, &dependent, "alice", &common::options())
+        .expect("the dependent belongs to someone else");
+    let dependent_path = common::task_path(&fixture.root, &dependent);
+    let linked_path = common::task_path(&fixture.root, &linked);
+    let dependent_before = common::read(&dependent_path);
+    let linked_before = common::read(&linked_path);
+    common::warm_lock(&fixture.root);
+    let client = common::Client::connect(fixture.root.clone()).await;
+
+    let result = client
+        .call("waymark_archive_work_item", json!({"id": target}))
+        .await;
+    let envelope = common::envelope(&result);
+    assert_eq!(envelope["ok"], true, "{envelope}");
+    assert_eq!(
+        envelope["data"]["removals"],
+        json!([]),
+        "no consent, no cleanup"
+    );
+    assert_eq!(
+        envelope["data"]["affected"],
+        json!([]),
+        "not even my own document is rewritten"
+    );
+    let untouched: Vec<&str> = envelope["data"]["untouched"]
+        .as_array()
+        .expect("untouched is a list")
+        .iter()
+        .map(|item| item["id"].as_str().expect("an id"))
+        .collect();
+    assert_eq!(untouched, vec![dependent.as_str(), linked.as_str()]);
+    assert_eq!(
+        envelope["data"]["untouched"][0]["relations"],
+        json!(["dependencies"])
+    );
+    assert_eq!(
+        envelope["data"]["untouched"][1]["relations"],
+        json!(["soft_links"])
+    );
+    assert_eq!(common::read(&dependent_path), dependent_before);
+    assert_eq!(common::read(&linked_path), linked_before);
 
     client.shutdown().await;
 }

@@ -116,11 +116,34 @@ pub fn load_entry_any(project: &Project, entry: InventoryEntry) -> Result<Loaded
 /// operation-override layer the spec puts in front of the local document. Note
 /// that the operation override is *not* written anywhere — it applies to this
 /// operation alone.
+///
+/// This is the advisory path: a broken local document degrades to the
+/// environment fallbacks. Compare for ownership with
+/// [`effective_operator_strict`].
 pub fn effective_operator(project: &Project, options: &OpOptions) -> Option<String> {
     if let Some(operator) = options.operator() {
         return Some(operator.to_owned());
     }
     crate::ops::local_config::effective_operator(project)
+}
+
+/// The effective operator identity, resolved strictly.
+///
+/// Ownership is a permission-style question, so it uses the same identity but
+/// not the same leniency: an unreadable local document is a configuration error
+/// (`CONFIG_INVALID`) rather than a silent "no operator". A project that simply
+/// has no operator configured still resolves to `None`, which is an answer, not
+/// a failure.
+pub fn effective_operator_strict(
+    project: &Project,
+    options: &OpOptions,
+) -> Result<Option<String>, WaymarkError> {
+    if let Some(operator) = options.operator() {
+        return Ok(Some(operator.to_owned()));
+    }
+    Ok(crate::ops::local_config::bundle(project)?
+        .effective
+        .operator)
 }
 
 /// The operator an operation is about to *persist*, resolved strictly.
@@ -153,6 +176,15 @@ pub fn owner_warnings(project: &Project, item: &WorkItem, options: &OpOptions) -
         )],
         _ => Vec::new(),
     }
+}
+
+/// Whether `owner` is the operator named in `operator`.
+///
+/// `owner` is compared, never `creator`: provenance is recorded, it does not
+/// grant the right to rewrite a document. An item with no resolved operator on
+/// either side is not the caller's, because nobody can claim it.
+pub fn is_operators(owner: &str, operator: Option<&str>) -> bool {
+    operator.is_some_and(|operator| operator == owner)
 }
 
 /// The `_meta` block for a single-document write result.

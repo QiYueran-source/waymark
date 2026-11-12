@@ -3,11 +3,12 @@ schema: 1
 id: wm-0c5qz2jk17sx
 title: link add records the link on the caller's side only
 category: implement
-status: open
+status: closed
 owner: frank
 creator: Frank
 created_at: 2026-11-12T06:27:39Z
-updated_at: 2026-11-12T06:27:45Z
+updated_at: 2026-11-12T06:46:31Z
+closed_at: 2026-11-12T06:46:31Z
 parent: wm-62yfmh5j41t5
 dependencies:
   - wm-363qccgxcw0q

@@ -884,7 +884,9 @@ pub struct ArchiveWorkItemArgs {
     pub reason: Option<String>,
 
     /// Consent to a cross-item write: also clean up inbound references from
-    /// other items you own. Defaults to off.
+    /// other items you own. Defaults to off, which rewrites nothing but the
+    /// archived item. Another owner's document is never rewritten; it is
+    /// reported in `untouched` either way.
     #[serde(default)]
     pub cascade: bool,
 
@@ -1034,6 +1036,10 @@ fn archive_result(outcome: &archive::ArchiveOutcome) -> ToolResult {
                     "path": item.path.to_string(),
                 }))
                 .collect::<Vec<_>>(),
+            "untouched": waymark_core::view::archive_leftovers_json(
+                &outcome.untouched,
+                &outcome.untouched_relations,
+            ),
             "item": item_fields(&outcome.item),
         }),
         outcome.meta.clone(),

@@ -391,32 +391,56 @@ async fn move_matches_the_cli() {
     client.shutdown().await;
 }
 
-#[tokio::test]
-async fn archive_matches_the_cli() {
-    let fixture = common::fixture(&["one", "two"]);
+/// One archive, with or without consent, through both adapters.
+///
+/// The project carries a document that belongs to someone else, so the consent
+/// case distinguishes "cleaned up" from "left and named" rather than both
+/// adapters doing the same nothing.
+async fn archive_matches_the_cli_with(cascade: bool) {
+    let fixture = common::fixture(&["one", "two", "three"]);
     let target = fixture.ids[0].clone();
     let dependent = fixture.ids[1].clone();
-    relationship::add_dependency(&fixture.project(), &dependent, &target, &common::options())
+    let linked = fixture.ids[2].clone();
+    let project = fixture.project();
+    relationship::add_dependency(&project, &dependent, &target, &common::options())
         .expect("the dependency is added");
+    waymark_core::ops::link::add_soft_link(&project, &linked, &target, &common::options())
+        .expect("the link is added");
+    waymark_core::ops::owner::transfer_owner(&project, &dependent, "alice", &common::options())
+        .expect("the dependent belongs to someone else");
     let (_cli_dir, cli_root) = common::copy_project(&fixture.root);
     let client = common::Client::connect(fixture.root.clone()).await;
 
     let result = client
         .call(
             "waymark_archive_work_item",
-            json!({"id": target, "reason": "retired"}),
+            json!({"id": target, "reason": "retired", "cascade": cascade}),
         )
         .await;
     assert_eq!(common::envelope(&result)["ok"], true);
-    common::cli_json(&cli_root, &["archive", &target, "--reason", "retired"]);
+    let mut arguments = vec!["archive", &target, "--reason", "retired"];
+    if cascade {
+        arguments.push("--cascade");
+    }
+    common::cli_json(&cli_root, &arguments);
 
     assert_eq!(
         common::normalized_snapshot(&fixture.root),
         common::normalized_snapshot(&cli_root),
-        "the archive diverges from the CLI"
+        "the archive diverges from the CLI (cascade={cascade})"
     );
 
     client.shutdown().await;
+}
+
+#[tokio::test]
+async fn archive_matches_the_cli() {
+    archive_matches_the_cli_with(false).await;
+}
+
+#[tokio::test]
+async fn cascading_archive_matches_the_cli() {
+    archive_matches_the_cli_with(true).await;
 }
 
 #[tokio::test]

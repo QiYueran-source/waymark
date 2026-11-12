@@ -377,3 +377,8 @@ fn normalize(text: &str, replace_id: bool) -> String {
     }
     normalized
 }
+
+/// The `work/task` document path of one fixture item.
+pub fn task_path(root: &Utf8Path, id: &str) -> Utf8PathBuf {
+    root.join("work").join("task").join(format!("{id}.md"))
+}

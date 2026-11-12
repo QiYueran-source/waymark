@@ -3,11 +3,12 @@ schema: 1
 id: wm-363qccgxcw0q
 title: Give cross-item writes a place to say yes
 category: implement
-status: open
+status: closed
 owner: frank
 creator: Frank
 created_at: 2026-11-12T06:27:26Z
-updated_at: 2026-11-12T06:27:26Z
+updated_at: 2026-11-12T06:46:31Z
+closed_at: 2026-11-12T06:46:31Z
 parent: wm-62yfmh5j41t5
 ---
 ## Parent
