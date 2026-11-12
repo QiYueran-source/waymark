@@ -174,7 +174,7 @@ fn parent_dry_run_reports_the_change_without_writing_it() {
 }
 
 #[test]
-fn link_add_and_remove_touch_both_documents() {
+fn link_add_consents_to_both_documents_but_remove_needs_its_own() {
     let (_dir, root) = project();
     let left = create(&root, "left");
     let right = create(&root, "right");
@@ -195,12 +195,62 @@ fn link_add_and_remove_touch_both_documents() {
         "both documents were replaced"
     );
 
-    let removed = json_ok(&root, &["link", "remove", &left, &right]);
+    let removed = json_ok(&root, &["link", "remove", &left, &right, "--cascade"]);
     assert_eq!(removed["data"]["soft_links"], serde_json::json!([]));
     assert_eq!(
         removed["data"]["other_item"]["soft_links"],
         serde_json::json!([])
     );
+}
+
+#[test]
+fn link_remove_without_cascade_reports_the_partner_left_alone() {
+    let (_dir, root) = project();
+    let left = create(&root, "left");
+    let right = create(&root, "right");
+    json_ok(&root, &["link", "add", &left, &right, "--cascade"]);
+    // The operator of a removal is the one it acts as, not the item's owner:
+    // the CLI's `--owner` is recorded at creation and never inherited.
+    json_ok(&root, &["config", "set", "operator", "frank"]);
+    let partner_path = root.join(format!("work/task/{right}.md"));
+    let partner = std::fs::read_to_string(&partner_path).unwrap();
+
+    let removed = json_ok(&root, &["link", "remove", &left, &right]);
+
+    assert_eq!(removed["data"]["soft_links"], serde_json::json!([]));
+    assert_eq!(removed["data"]["other_item"], serde_json::Value::Null);
+    assert_eq!(
+        removed["data"]["fingerprints"].as_array().map(|f| f.len()),
+        Some(1),
+        "only the caller's document was replaced"
+    );
+    assert_eq!(
+        removed["data"]["other_untouched"]["id"],
+        serde_json::json!(right)
+    );
+    assert_eq!(removed["data"]["other_untouched"]["owner"], "frank");
+    assert_eq!(
+        removed["data"]["other_untouched"]["owned"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&partner_path).unwrap(),
+        partner,
+        "the partner keeps its bytes and its updated_at"
+    );
+}
+
+#[test]
+fn link_remove_reports_an_absent_link_the_same_with_or_without_consent() {
+    let (_dir, root) = project();
+    let left = create(&root, "left");
+    let right = create(&root, "right");
+
+    let (plain, error) = json_err(&root, &["link", "remove", &left, &right]);
+    assert_eq!(error["error"]["code"], "INVALID_RELATIONSHIP");
+    let (cascaded, consenting) = json_err(&root, &["link", "remove", &left, &right, "--cascade"]);
+    assert_eq!(consenting["error"]["code"], "INVALID_RELATIONSHIP");
+    assert_eq!(plain, cascaded, "consent does not change the refusal");
 }
 
 #[test]

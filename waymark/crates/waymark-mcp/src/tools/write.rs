@@ -1007,6 +1007,7 @@ fn link_result(outcome: &link::LinkOutcome, verb: LinkVerb) -> ToolResult {
                 "soft_links": outcome.item.soft_links.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
                 "fingerprints": outcome.fingerprints.iter().map(|fingerprint| fingerprint.as_str()).collect::<Vec<_>>(),
                 "other_item": outcome.other.as_ref().zip(outcome.other_path.as_ref()).map(|(item, path)| item_json(item, path)),
+                "other_untouched": outcome.other_untouched.as_ref().map(waymark_core::view::link_untouched_json),
             }),
         ),
         outcome.meta.clone(),

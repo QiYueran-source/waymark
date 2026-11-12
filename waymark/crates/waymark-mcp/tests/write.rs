@@ -694,14 +694,61 @@ async fn soft_links_are_written_on_both_sides_as_one_batch() {
     let result = client
         .call(
             "waymark_remove_soft_link",
-            json!({"id": left, "other": right}),
+            json!({"id": left, "other": right, "cascade": true}),
         )
         .await;
     let envelope = common::envelope(&result);
     assert_eq!(envelope["data"]["verb"], "remove");
     assert_eq!(envelope["data"]["soft_links"], json!([]));
     assert_eq!(envelope["data"]["changed"], true);
+    assert_eq!(envelope["data"]["other_untouched"], json!(null));
     assert!(!common::read(&right_path).contains(&format!("- {left}")));
+
+    client.shutdown().await;
+}
+
+#[tokio::test]
+async fn removing_a_soft_link_without_consent_leaves_the_partner_alone() {
+    let fixture = common::fixture(&["one", "two"]);
+    let left = fixture.ids[0].clone();
+    let right = fixture.ids[1].clone();
+    let right_path = fixture
+        .root
+        .join("work")
+        .join("task")
+        .join(format!("{right}.md"));
+    let client = common::Client::connect(fixture.root.clone()).await;
+    let added = client
+        .call("waymark_add_soft_link", json!({"id": left, "other": right}))
+        .await;
+    assert_eq!(common::envelope(&added)["ok"], true);
+    let partner = common::read(&right_path);
+
+    let result = client
+        .call(
+            "waymark_remove_soft_link",
+            json!({"id": left, "other": right}),
+        )
+        .await;
+    let envelope = common::envelope(&result);
+
+    assert_eq!(envelope["ok"], true);
+    assert_eq!(envelope["data"]["soft_links"], json!([]));
+    assert_eq!(envelope["data"]["other_item"], json!(null));
+    assert_eq!(
+        envelope["data"]["fingerprints"].as_array().map(|f| f.len()),
+        Some(1)
+    );
+    assert_eq!(envelope["data"]["other_untouched"]["id"], json!(right));
+    assert_eq!(
+        envelope["data"]["other_untouched"]["path"],
+        json!(right_path.to_string())
+    );
+    assert_eq!(
+        common::read(&right_path),
+        partner,
+        "the partner is untouched"
+    );
 
     client.shutdown().await;
 }

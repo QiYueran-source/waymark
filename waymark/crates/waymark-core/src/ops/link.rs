@@ -16,13 +16,23 @@
 //!   (`ITEM_ARCHIVED`);
 //! - an archived source (`ITEM_ARCHIVED`).
 //!
-//! # Removal is deliberately more permissive
+//! # Removal only needs the caller's side
 //!
-//! Removing a link that is not there is an `INVALID_RELATIONSHIP`: the caller
-//! named an association that does not exist. But when the *other* document is
-//! gone or archived — an external deletion, or an archive — only the surviving
-//! side is cleaned up. An archived document is never rewritten, because archive
-//! is a tombstone and its relationship fields are historical.
+//! Disconnecting is always possible: a link lives on both documents, but either
+//! end may drop it alone. Without [`OpOptions::cascade`] a removal rewrites the
+//! caller's document only and reports the partner as left alone
+//! ([`LinkOutcome::other_untouched`]), leaving it byte-identical, `updated_at`
+//! included. Rewriting the partner is a cross-item write, so it happens only
+//! with consent. The asymmetry is deliberate: adding a link is a claim about
+//! both ends, so `add` without consent is a separate rule, while removal never
+//! needs someone else's cooperation.
+//!
+//! Removing a link that is not there is an `INVALID_RELATIONSHIP` with or
+//! without consent: the caller named an association that does not exist. When
+//! the *other* document is gone or archived — an external deletion, or an
+//! archive — only the surviving side is cleaned up. An archived document is
+//! never rewritten, because archive is a tombstone and its relationship fields
+//! are historical.
 
 use crate::envelope::Meta;
 use crate::error::WaymarkError;
@@ -35,6 +45,24 @@ use crate::WorkItemId;
 /// The relation name this operation edits, as it appears in documents and errors.
 pub const SOFT_LINKS: &str = "soft_links";
 
+/// The partner a one-sided change deliberately left as it is.
+///
+/// A soft link is stored on both ends, but [`LinkOutcome::other`] only carries a
+/// partner that was *rewritten*. When consent is absent the partner keeps its
+/// document, its bytes, and its `updated_at`, and this is what reports that
+/// fact: enough to say whose file still lists the link, without re-reading it.
+#[derive(Debug, Clone)]
+pub struct UntouchedLink {
+    /// The partner's stable ID.
+    pub id: WorkItemId,
+    /// The partner's document.
+    pub path: camino::Utf8PathBuf,
+    /// The partner's `owner`, as its document records it.
+    pub owner: String,
+    /// Whether `owner` is the effective operator.
+    pub owned: bool,
+}
+
 /// What a soft-link change produced.
 #[derive(Debug, Clone)]
 pub struct LinkOutcome {
@@ -44,6 +72,12 @@ pub struct LinkOutcome {
     pub other: Option<WorkItem>,
     /// The other end's stable ID, whether or not its document was written.
     pub other_id: WorkItemId,
+    /// The other end as it still stands unchanged in this project.
+    ///
+    /// `Some` when the change deliberately wrote only the caller's document,
+    /// and `None` otherwise: a two-sided write, a partner whose document is
+    /// missing or archived, and every `link add` all leave this empty.
+    pub other_untouched: Option<UntouchedLink>,
     /// The document of the item the caller named.
     pub path: camino::Utf8PathBuf,
     /// The document of the other end, when it was written too.
@@ -116,6 +150,9 @@ pub fn remove_soft_link(
                 "the item has no such soft link",
             ));
         }
+        if !options.cascade {
+            return remove_own_side(project, left, &right_id, options);
+        }
         match load_partner(project, &right_id, "link remove") {
             Ok(right) => apply_remove(project, left, Some(right), &right_id, options),
             // A missing or archived partner leaves the surviving side as the
@@ -173,6 +210,57 @@ fn apply_add(
     commit_pair(&left, &left_item, &right, &right_item, meta, options)
 }
 
+/// Drop the link from the caller's document only, leaving the partner as is.
+fn remove_own_side(
+    project: &Project,
+    left: Loaded,
+    partner: &WorkItemId,
+    options: &OpOptions,
+) -> Result<LinkOutcome, WaymarkError> {
+    let mut left_item = left.item.clone();
+    left_item.soft_links.retain(|known| known != partner);
+    normalize_links(&mut left_item);
+    mediated::stamp_updated_at(&mut left_item, options);
+
+    // The partner is read, never written: the result says whose file still
+    // lists the link so the caller does not have to look it up.
+    let untouched = match mediated::load_for_write(project, partner.as_str(), "link remove") {
+        Ok(right) => Some(UntouchedLink {
+            id: partner.clone(),
+            path: right.path.clone(),
+            owned: mediated::is_operators(
+                &right.item.owner,
+                mediated::effective_operator(project, options).as_deref(),
+            ),
+            owner: right.item.owner.clone(),
+        }),
+        Err(error)
+            if matches!(
+                error.code(),
+                crate::error::Code::ItemNotFound | crate::error::Code::ItemArchived
+            ) =>
+        {
+            None
+        }
+        Err(error) => return Err(error),
+    };
+
+    let meta = link_meta(project, [&left_item], options);
+    let fingerprint = mediated::commit(&left, &left_item, options)?;
+    Ok(LinkOutcome {
+        meta,
+        path: left.path.clone(),
+        item: left_item,
+        other: None,
+        other_id: partner.clone(),
+        other_untouched: untouched,
+        other_path: None,
+        changed: true,
+        written: fingerprint.is_some(),
+        fingerprints: fingerprint.into_iter().collect(),
+    })
+}
+
 fn apply_remove(
     project: &Project,
     left: Loaded,
@@ -195,6 +283,7 @@ fn apply_remove(
             item: left_item,
             other: None,
             other_id: partner.clone(),
+            other_untouched: None,
             other_path: None,
             changed: true,
             written: fingerprint.is_some(),
@@ -226,6 +315,7 @@ fn commit_pair(
             item: left_item.clone(),
             other: Some(right_item.clone()),
             other_id: right.id().clone(),
+            other_untouched: None,
             path: left.path.clone(),
             other_path: Some(right.path.clone()),
             changed: true,
@@ -256,6 +346,7 @@ fn commit_pair(
         item: left_item.clone(),
         other: Some(right_item.clone()),
         other_id: right.id().clone(),
+        other_untouched: None,
         path: left.path.clone(),
         other_path: Some(right.path.clone()),
         changed: true,

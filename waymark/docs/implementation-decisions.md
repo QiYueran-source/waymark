@@ -3575,6 +3575,41 @@ consent and treats `--cascade` as the old two-sided path, while `add` without co
 records only the caller's side. One shared flag struct would force a single meaning onto both, and
 clap's own help is where a caller learns which verb consents to what.
 
+### `link remove` reports the partner it left alone as its own field
+
+**Choice:** `LinkOutcome` gains `other_untouched: Option<UntouchedLink>`
+(`{id, path, owner, owned}`). It is `Some` exactly when a removal dropped the
+link from the caller's document only, and `None` when the pair was rewritten,
+when the partner's document is missing or archived, and on every `link add`.
+`view::link_untouched_json` renders it; the CLI puts it under `data.other_untouched`
+and prints one stderr sentence ("`wm-…` was left alone", present tense under
+`--dry-run`), and the MCP `waymark_remove_soft_link` result carries the same field
+from the same renderer. `other`/`other_path`/`other_item` keep meaning "the partner
+this operation rewrote", so a one-sided removal reports `other_item: null` and a
+`fingerprints` list of one.
+
+**Why:** the partner in a one-sided removal is read but never written, so putting
+it in `other` would let a reader believe the file changed. At the same time the
+caller needs to know which document still lists the link, and re-reading the
+project in an adapter to find out is the second opinion this codebase forbids.
+`owned` is included because it answers the natural next question ("would
+`--cascade` have been enough?") without a second lookup. The field stays out of
+`link add` outcomes for now: `add` without consent still writes both sides until
+its own ticket lands, and it will report the same way through this field.
+
+### A one-sided removal reads its partner under the same `link remove` operation
+
+**Choice:** the partner is loaded with `mediated::load_for_write(…, "link remove")`,
+the same call the consented path uses, and a partner that is missing or archived
+is simply not reported as untouched. Nothing is refused. Ownership is recorded
+(`owned`) but never checked: consent plus ownership is the rule for *writing* a
+second document, and this path writes none.
+
+**Why:** the consent design makes `remove` an asymmetry — it may always drop the
+caller's side — so the ownership refusal the spec reserves for cross-item writes
+cannot apply here. Keeping the same load call means an archived or vanished
+partner behaves identically with and without consent.
+
 ### The archive module no longer says "archive never cascades"
 
 **Choice:** the module documentation and the child check now say archive never cascades *to children*.
