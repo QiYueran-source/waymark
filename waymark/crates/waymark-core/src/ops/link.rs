@@ -3,29 +3,50 @@
 //! A soft link is a *symmetric, non-blocking* association: two items point at
 //! each other and neither waits for nor constrains the other.
 //!
-//! # Consent decides how many documents are written
+//! # Consent and ownership decide whether the second document is written
 //!
-//! The association is stored on both sides, but writing the second side is a
-//! cross-item write. Adding a link without [`OpOptions::cascade`] therefore
-//! records it on the document the caller named and leaves the partner exactly
-//! as it is — bytes and `updated_at` included — and the outcome says so by
-//! having no `other`. The pair is then *one-sided*: a normal, reportable state
-//! that `doctor` and `show` diagnose and that converges when each side records
-//! its own half. With `cascade`, both documents are rewritten as one batch —
-//! see [`crate::write::replace_batch`] for the guarantee, which is what makes a
-//! two-sided change all-or-nothing.
+//! The association is stored on both sides, and writing the second side is a
+//! cross-item write: it needs (a) [`OpOptions::cascade`] and (b) that document's
+//! `owner` to equal the effective operator. `add` asks for the partner write
+//! *always* — a link is a claim about both ends — and `remove` asks for it only
+//! with consent. The two refusals carry different codes because their recoveries
+//! differ:
 //!
-//! This operation performs no ownership check of its own: consent alone decides.
+//! - a missing consent is [`crate::error::Code::CascadeConsentRequired`], and
+//!   the message names the option to re-run with;
+//! - a partner owned by somebody else is [`crate::error::Code::OwnedByOther`]
+//!   (reached once consent is given, since a non-consenting write is refused
+//!   before it), and the message says that re-running cannot help: the owner has
+//!   to be involved, or ownership transferred first.
 //!
-//! # Repeating a non-consenting add
+//! The ownership comparison resolves the operator strictly
+//! ([`mediated::effective_operator_strict`]), so a broken local document is a
+//! configuration error rather than a silent "no operator". A project with no
+//! operator at all is refused as a missing identity source, because a
+//! cross-item write that cannot show who is entitled to it must not pass
+//! silently.
 //!
-//! A second `link add` from the side that already records the link is not a
-//! request to refuse when the pair is still one-sided: what the caller asked
-//! for is already true, and the missing half is the other side's to record. It
-//! succeeds with `changed: false`, `written: false`, and `other: None`, so a
-//! retry neither hides the one-sided state nor restamps `updated_at`. Only a
-//! repeat that leaves nothing to do is refused: a `--cascade` repeat, and a
-//! plain repeat of a pair whose two sides already record each other.
+//! With both, the two documents are replaced as one batch — see
+//! [`crate::write::replace_batch`] for the guarantee, which is what makes a
+//! two-sided change all-or-nothing. A refusal writes neither document.
+//!
+//! # The repeat rule
+//!
+//! A link whose caller's side already records it is a *repeat*. With consent it
+//! is a claim about the pair, and a pair that already records the link on both
+//! sides has nothing left to do (`INVALID_RELATIONSHIP`); a pair that records it
+//! on one side is the missing half, so the consented add writes it. Without
+//! consent the caller's half is all this command ever writes, so a one-sided
+//! pair is answered with that state — `changed: false`, `written: false`,
+//! `partner_unsynchronised: true` — rather than an error that hides it, and a
+//! complete pair is the duplicate it asks about (`INVALID_RELATIONSHIP`).
+//!
+//! # One-sided pairs still exist
+//!
+//! A pair whose two sides disagree is a normal, reportable state: an external
+//! edit, a hand edit, or a merge can leave one behind. `doctor` and `show`
+//! diagnose it ([`crate::error::Code::OneSidedSoftLink`]) and nothing repairs
+//! it automatically; each side converges by running its own command.
 //!
 //! # What is rejected
 //!
@@ -36,7 +57,9 @@
 //!   record it yet;
 //! - a target that does not exist (`ITEM_NOT_FOUND`) or is archived
 //!   (`ITEM_ARCHIVED`);
-//! - an archived source (`ITEM_ARCHIVED`).
+//! - an archived source (`ITEM_ARCHIVED`);
+//! - a second-document write without consent (`CASCADE_CONSENT_REQUIRED`), or
+//!   one whose partner belongs to another owner (`OWNED_BY_OTHER`).
 //!
 //! # Removal only needs the caller's side
 //!
@@ -44,17 +67,16 @@
 //! end may drop it alone. Without [`OpOptions::cascade`] a removal rewrites the
 //! caller's document only and reports the partner as left alone
 //! ([`LinkOutcome::other_untouched`]), leaving it byte-identical, `updated_at`
-//! included. Rewriting the partner is a cross-item write, so it happens only
-//! with consent. The asymmetry is deliberate: adding a link is a claim about
-//! both ends, so `add` without consent is a separate rule, while removal never
-//! needs someone else's cooperation.
+//! included. Ownership does not come into it: the operation writes one document,
+//! and that document is the caller's own. With `cascade` the removal is a
+//! cross-item write and takes the same two conditions as `add`.
 //!
 //! Removing a link that is not there is an `INVALID_RELATIONSHIP` with or
 //! without consent: the caller named an association that does not exist. When
 //! the *other* document is gone or archived — an external deletion, or an
-//! archive — only the surviving side is cleaned up. An archived document is
-//! never rewritten, because archive is a tombstone and its relationship fields
-//! are historical.
+//! archive — only the surviving side is cleaned up, because there is no second
+//! document to judge. An archived document is never rewritten, because archive
+//! is a tombstone and its relationship fields are historical.
 
 use crate::envelope::Meta;
 use crate::error::WaymarkError;
@@ -123,6 +145,10 @@ pub struct LinkOutcome {
 }
 
 /// Link two items to each other.
+///
+/// The partner is read and judged before anything is staged: a missing consent
+/// or a partner the operator does not own is refused, and a refusal writes
+/// neither document.
 pub fn add_soft_link(
     project: &Project,
     id: &str,
@@ -140,14 +166,23 @@ pub fn add_soft_link(
                 "an item cannot be soft-linked to itself",
             ));
         }
-        // The caller's side already holds the link. With consent that is the
-        // duplicate the caller asked about; without it the pair may still be
-        // one-sided, and a retry has to answer with that state instead of an
-        // error that hides it.
-        if let Some(outcome) = repeat(project, &left, &right_id, options)? {
+        let right = load_partner(project, &right_id, "link add")?;
+        // The caller's side may already hold the link. A complete pair is the
+        // duplicate the caller asked about; a one-sided pair without consent is
+        // answered with that state rather than an error that hides it. Both are
+        // read-only answers, so they are given before the consent refusal: a
+        // retry that changes nothing must not fail.
+        if let Some(outcome) = repeat(project, &left, &right, options)? {
             return Ok(outcome);
         }
-        let right = load_partner(project, &right_id, "link add")?;
+        require_partner_write(
+            project,
+            "link add",
+            left.id(),
+            &right,
+            options,
+            "re-run with --cascade to also record the link there",
+        )?;
         apply_add(project, left, right, options)
     })
 }
@@ -182,7 +217,17 @@ pub fn remove_soft_link(
             return remove_own_side(project, left, &right_id, options);
         }
         match load_partner(project, &right_id, "link remove") {
-            Ok(right) => apply_remove(project, left, Some(right), &right_id, options),
+            Ok(right) => {
+                require_partner_write(
+                    project,
+                    "link remove",
+                    left.id(),
+                    &right,
+                    options,
+                    "re-run with --cascade to also drop the link there",
+                )?;
+                apply_remove(project, left, Some(right), &right_id, options)
+            }
             // A missing or archived partner leaves the surviving side as the
             // only document to clean up.
             Err(error)
@@ -220,48 +265,42 @@ fn load_partner(
 /// The answer to an `add` whose caller's side already records the link.
 ///
 /// Returns `None` when the caller's side does not record it yet and the add
-/// should proceed. The partner is read only when consent was given (a consented
-/// add must judge the *pair*) or, without consent, only to confirm a document
-/// exists that itself already records the link — which without consent means
-/// nothing is left to do.
+/// should proceed. The question is only whether the pair already holds what the
+/// caller asked for: a complete pair is a duplicate, a consented add of a
+/// one-sided pair writes the missing half, and a non-consenting add of a
+/// one-sided pair answers with that state.
 fn repeat(
     project: &Project,
     left: &Loaded,
-    partner: &WorkItemId,
+    right: &Loaded,
     options: &OpOptions,
 ) -> Result<Option<LinkOutcome>, WaymarkError> {
-    if !left.item.soft_links.contains(partner) {
+    if !left.item.soft_links.contains(right.id()) {
         return Ok(None);
     }
+    // A pair that records the link on both sides has nothing left to do, with or
+    // without consent: the caller asked for an association that exists.
+    if right.item.soft_links.contains(left.id()) {
+        return Err(WaymarkError::invalid_relationship(
+            SOFT_LINKS,
+            left.id(),
+            right.id(),
+            "the soft link already exists",
+        ));
+    }
+    // A consented add of a one-sided pair is the missing half, not a repeat.
     if options.cascade {
-        return Err(WaymarkError::invalid_relationship(
-            SOFT_LINKS,
-            left.id(),
-            partner,
-            "the soft link already exists",
-        ));
+        return Ok(None);
     }
-    let partner_records_it = match mediated::load_entry_any(project, project.locate(partner)?) {
-        Ok(right) => right.item.soft_links.contains(left.id()),
-        // A partner whose document is gone has nothing to synchronise, and the
-        // surviving side is already what the caller asked for: the outcome is
-        // the one-sided state either way.
-        Err(error) if error.code() == crate::error::Code::ItemNotFound => false,
-        Err(error) => return Err(error),
-    };
-    if partner_records_it {
-        return Err(WaymarkError::invalid_relationship(
-            SOFT_LINKS,
-            left.id(),
-            partner,
-            "the soft link already exists",
-        ));
-    }
+    // One-sided, without consent: an earlier run of this same command recorded
+    // the caller's half, and the answer is that state — no write,
+    // `partner_unsynchronised` — so a retry is neither an error that hides it
+    // nor a timestamp for an edit nobody made.
     let meta = link_meta(project, std::iter::once(&left.item), options);
     Ok(Some(LinkOutcome {
         item: left.item.clone(),
         other: None,
-        other_id: partner.clone(),
+        other_id: right.id().clone(),
         other_untouched: None,
         partner_unsynchronised: true,
         path: left.path.clone(),
@@ -311,6 +350,80 @@ fn apply_add(
 
     let meta = link_meta(project, [&left_item, &right_item], options);
     commit_pair(&left, &left_item, &right, &right_item, meta, options)
+}
+
+/// The operator identity, resolved strictly, or the refusal that names what is
+/// missing.
+///
+/// Ownership is a permission-style question, so it must not inherit the lenient
+/// path's "a broken document means no operator" answer: that would turn an
+/// unreadable identity into a write nobody is entitled to. `source` names where
+/// the operator should have come from, and the refusal carries it as
+/// `CONFIG_INVALID` at the local document, the file that has to be fixed.
+fn require_operator(
+    project: &Project,
+    operation: &str,
+    other: &WorkItemId,
+) -> Result<String, WaymarkError> {
+    let local = project.user_config_path();
+    if !local.exists() {
+        // No local document at all: nothing to repair, so the refusal names the
+        // missing source instead of pointing at a file that is not there.
+        return Err(WaymarkError::missing_operator_source(
+            operation,
+            other,
+            local.as_str(),
+        ));
+    }
+    let bundle = crate::ops::local_config::bundle(project)?;
+    match bundle.effective.operator {
+        Some(operator) => Ok(operator),
+        None => Err(WaymarkError::missing_operator_source(
+            operation,
+            other,
+            local.as_str(),
+        )),
+    }
+}
+
+/// Refuse the second-document write `partner` would receive unless consent was
+/// given and the partner is the operator's.
+///
+/// Two conditions, both required, checked before anything is staged. The
+/// messages say which one failed and what can be done about it: `consent_hint`
+/// names the option to re-run with, and the ownership refusal says re-running
+/// cannot change the outcome.
+fn require_partner_write(
+    project: &Project,
+    operation: &str,
+    caller: &WorkItemId,
+    partner: &Loaded,
+    options: &OpOptions,
+    consent_hint: &str,
+) -> Result<(), WaymarkError> {
+    if !options.cascade {
+        return Err(WaymarkError::cascade_consent_required(
+            operation,
+            caller,
+            partner.id(),
+            consent_hint,
+        ));
+    }
+    // The operation override is the identity the caller is acting as; without
+    // one the local document (or Git, when it is all there is) supplies it,
+    // through the strict path so a broken document is a configuration error.
+    let operator = match options.operator() {
+        Some(operator) => operator.to_owned(),
+        None => require_operator(project, operation, partner.id())?,
+    };
+    if !mediated::is_operators(&partner.item.owner, Some(&operator)) {
+        return Err(WaymarkError::owned_by_other(
+            partner.id(),
+            &partner.item.owner,
+            operation,
+        ));
+    }
+    Ok(())
 }
 
 /// Drop the link from the caller's document only, leaving the partner as is.

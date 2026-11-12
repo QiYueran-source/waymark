@@ -111,7 +111,13 @@ fn decorate(project: &Project, item: &str, other: &str) {
     parent::set_parent(project, item, other, &options_at(40)).expect("the parent is set");
     relationship::add_dependency(project, item, other, &options_at(50))
         .expect("the dependency is set");
-    link::add_soft_link(project, item, other, &options_at(60)).expect("the soft link is set");
+    link::add_soft_link(
+        project,
+        item,
+        other,
+        &options_at(60).with_cascade().with_operator("frank"),
+    )
+    .expect("the soft link is set");
 }
 
 fn archive(project: &Project, item: &str) {

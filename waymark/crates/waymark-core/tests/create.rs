@@ -448,14 +448,18 @@ fn a_create_with_parent_dependencies_and_links_matches_applying_them_one_by_one(
         &options(),
     )
     .expect("dependency");
-    // `create --link` consents to the partner write, so the equivalent of one
-    // create call is one consented `link add` per link.
+    // `create --link` consents to the partner write and judges the partner's
+    // owner, so the equivalent of one create call is one consented `link add`
+    // per link, from an operator who owns both ends.
+    // `CreateRequest` names the owner; the operator has to match it for the
+    // partner write, the same way a person runs `link add` as themselves.
+    let owner = sequential_created.item.owner.clone();
     for partner in [&sequential_ids[0], &sequential_ids[2]] {
         link::add_soft_link(
             &sequential,
             sequential_created.item.id.as_str(),
             partner,
-            &options().with_cascade(),
+            &options().with_cascade().with_operator(&owner),
         )
         .expect("link");
     }

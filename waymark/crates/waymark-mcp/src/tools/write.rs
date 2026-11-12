@@ -523,10 +523,14 @@ impl WaymarkServer {
     /// Associate two items with a symmetric, non-blocking soft link. Both
     /// documents are replaced as one all-or-nothing batch.
     ///
-    /// `cascade` is the consent flag for a cross-item write: off by default,
-    /// it also rewrites the other item's document, which requires you to own
-    /// it. `lock_timeout_ms` bounds the wait for the project write lock; `0`
-    /// fails immediately with retryable `LOCK_TIMEOUT`.
+    /// `cascade` is the consent flag for a cross-item write and is required: a
+    /// link is a claim about both ends, so without it the call fails with
+    /// `CASCADE_CONSENT_REQUIRED` and writes nothing. With it, the other item's
+    /// document must belong to the operator, or the call fails with
+    /// `OWNED_BY_OTHER`, which re-running cannot change; give both items the
+    /// same owner or transfer ownership first. `lock_timeout_ms` bounds the
+    /// wait for the project write lock; `0` fails immediately with retryable
+    /// `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_add_soft_link",
         annotations(
@@ -555,10 +559,12 @@ impl WaymarkServer {
     /// is `INVALID_RELATIONSHIP`; when the other document is missing or
     /// archived, the surviving side alone is cleaned up.
     ///
-    /// `cascade` is the consent flag for a cross-item write: off by default,
-    /// it also rewrites the other item's document, which requires you to own
-    /// it. `lock_timeout_ms` bounds the wait for the project write lock; `0`
-    /// fails immediately with retryable `LOCK_TIMEOUT`.
+    /// Without `cascade` only this item's document is rewritten and the other
+    /// stays as it is, so a removal always succeeds. With `cascade` the other
+    /// item's document is rewritten too, which requires it to belong to the
+    /// operator: otherwise the call fails with `OWNED_BY_OTHER`.
+    /// `lock_timeout_ms` bounds the wait for the project write lock; `0` fails
+    /// immediately with retryable `LOCK_TIMEOUT`.
     #[tool(
         name = "waymark_remove_soft_link",
         annotations(
@@ -857,7 +863,10 @@ pub struct SoftLinkArgs {
     pub other: String,
 
     /// Consent to a cross-item write: also rewrite the other item's document,
-    /// which requires you to own it. Defaults to off.
+    /// which requires you to own it. Required by `waymark_add_soft_link` (a
+    /// link is a claim about both ends) and optional for
+    /// `waymark_remove_soft_link`, where without it only this item's side is
+    /// dropped. Defaults to off.
     #[serde(default)]
     pub cascade: bool,
 

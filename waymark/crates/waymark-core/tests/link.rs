@@ -87,6 +87,22 @@ fn act_as(project: &Project, operator: &str) {
     .expect("the operator is recorded");
 }
 
+/// Record a soft link by writing **one** document, the way an external edit or
+/// an older half-write leaves one behind.
+///
+/// `link add` now refuses a non-consented partner write, and a consented add of
+/// a pair where only one side records the link writes the missing half, so a
+/// deliberately one-sided pair has to be set up directly.
+fn set_soft_links(project: &Project, id: &str, targets: &[&str]) {
+    let path = read::read(project, id).unwrap().path;
+    let mut item = waymark_core::parse::parse_item_file(&path).unwrap();
+    item.soft_links = targets
+        .iter()
+        .map(|target| waymark_core::WorkItemId::parse(target).unwrap())
+        .collect();
+    std::fs::write(&path, waymark_core::serialize::to_document(&item)).unwrap();
+}
+
 /// Options whose clock is frozen `seconds` after the fixture instant.
 fn options_at(seconds: i64) -> OpOptions {
     let base = chrono::DateTime::parse_from_rfc3339(waymark_core::testing::FIXTURE_INSTANT)
@@ -98,22 +114,32 @@ fn options_at(seconds: i64) -> OpOptions {
 }
 
 #[test]
-fn adding_a_link_without_consent_records_it_on_the_callers_side_only() {
+fn adding_a_link_without_consent_is_refused_and_records_nothing() {
+    // The partner write is what a link is a claim about, so `add` asks for
+    // consent outright instead of leaving the pair one-sided behind the caller's
+    // back. Both documents keep their exact bytes and timestamps.
     let (_dir, project) = project();
     act_as(&project, "frank");
     let left = make(&project, "task", "left");
     let right = make(&project, "bug", "right");
     let right_document = document(&project, &right);
     let right_updated_at = read::read(&project, &right).unwrap().item.updated_at;
+    let left_document = document(&project, &left);
 
-    let outcome = add_soft_link(&project, &left, &right, &options_at(60)).unwrap();
+    let error = add_soft_link(&project, &left, &right, &options_at(60)).unwrap_err();
 
-    assert!(outcome.changed && outcome.written);
-    assert_eq!(links(&project, &left), vec![right.clone()]);
+    assert_eq!(error.code(), Code::CascadeConsentRequired);
+    assert_eq!(error.details()["option"], serde_json::json!("cascade"));
+    assert!(
+        error.message().contains("--cascade"),
+        "the refusal names the option to re-run with: {}",
+        error.message()
+    );
+    assert!(links(&project, &left).is_empty());
     assert_eq!(
-        outcome.fingerprints.len(),
-        1,
-        "only the caller's document was replaced"
+        document(&project, &left),
+        left_document,
+        "the caller's document was not written either"
     );
     assert_eq!(
         document(&project, &right),
@@ -125,60 +151,25 @@ fn adding_a_link_without_consent_records_it_on_the_callers_side_only() {
         right_updated_at,
         "the partner's updated_at did not move"
     );
-    assert!(outcome.other.is_none(), "the partner was not written");
-    assert!(outcome.other_path.is_none());
-    assert!(
-        outcome.partner_unsynchronised,
-        "the result says the pair is one-sided"
-    );
-    assert!(
-        read::read(&project, &right)
-            .unwrap()
-            .item
-            .soft_links
-            .is_empty(),
-        "the partner never recorded the link"
-    );
 }
 
 #[test]
-fn repeating_a_link_add_without_consent_reports_the_one_sided_state_without_a_second_write() {
+fn repeating_a_link_add_without_consent_repeats_the_refusal_without_a_write() {
     let (_dir, project) = project();
     act_as(&project, "frank");
     let left = make(&project, "task", "left");
     let right = make(&project, "bug", "right");
-    let first = add_soft_link(&project, &left, &right, &options_at(60)).unwrap();
-    assert!(first.written);
     let left_document = document(&project, &left);
     let right_document = document(&project, &right);
 
-    // A retry at a later instant: the caller's side already records the link,
-    // the partner still does not. The answer is the same one-sided state, and
-    // neither document is rewritten to say so.
-    let second =
-        add_soft_link(&project, &left, &right, &options_at(600)).expect("a repeat is not refused");
-    assert!(!second.changed, "the stored lists already match");
-    assert!(!second.written);
-    assert!(second.fingerprints.is_empty());
-    assert_eq!(
-        second.item.updated_at, first.item.updated_at,
-        "the repeat did not restamp the caller's document"
-    );
-    assert!(second.partner_unsynchronised);
+    // A refusal stops the write, so a retry starts from the same state and gets
+    // the same answer: the only thing that changes it is the option it names.
+    for _ in 0..2 {
+        let error = add_soft_link(&project, &left, &right, &options_at(60)).unwrap_err();
+        assert_eq!(error.code(), Code::CascadeConsentRequired);
+    }
     assert_eq!(document(&project, &left), left_document);
     assert_eq!(document(&project, &right), right_document);
-
-    // The far side is an ordinary first add for that document: it records its
-    // own half and again leaves the other end alone.
-    let from_the_far_side = add_soft_link(&project, &right, &left, &options_at(600))
-        .expect("the far side records its own half");
-    assert!(from_the_far_side.written);
-    assert!(from_the_far_side.other.is_none());
-    assert_eq!(
-        document(&project, &left),
-        left_document,
-        "the pair converged and the first side was not rewritten"
-    );
 }
 
 #[test]
@@ -208,6 +199,7 @@ fn both_ends_are_sorted_and_deduplicated() {
     let b = make(&project, "task", "b");
     let c = make(&project, "task", "c");
     let d = make(&project, "task", "d");
+    act_as(&project, "frank");
     add_soft_link(&project, &a, &d, &options().with_cascade()).unwrap();
     add_soft_link(&project, &a, &c, &options().with_cascade()).unwrap();
     add_soft_link(&project, &a, &b, &options().with_cascade()).unwrap();
@@ -227,6 +219,7 @@ fn both_ends_are_sorted_and_deduplicated() {
 #[test]
 fn adding_a_duplicate_link_is_an_invalid_relationship() {
     let (_dir, project) = project();
+    act_as(&project, "frank");
     let left = make(&project, "task", "left");
     let right = make(&project, "task", "right");
     add_soft_link(&project, &left, &right, &options().with_cascade()).unwrap();
@@ -236,8 +229,9 @@ fn adding_a_duplicate_link_is_an_invalid_relationship() {
     assert_eq!(error.code(), Code::InvalidRelationship);
     assert_eq!(error.details()["relation"], serde_json::json!("soft_links"));
 
-    // From the far side it is the same existing association, not a new one.
-    let error = add_soft_link(&project, &right, &left, &options()).unwrap_err();
+    // From the far side it is the same existing association, not a new one,
+    // and consent does not turn it into a second one.
+    let error = add_soft_link(&project, &right, &left, &options().with_cascade()).unwrap_err();
     assert_eq!(error.code(), Code::InvalidRelationship);
 
     assert_eq!(
@@ -298,6 +292,7 @@ fn removing_a_link_without_consent_leaves_the_partner_byte_identical() {
     let (_dir, project) = project();
     let left = make(&project, "task", "left");
     let right = make(&project, "bug", "right");
+    act_as(&project, "frank");
     add_soft_link(&project, &left, &right, &options().with_cascade()).unwrap();
     let partner = document(&project, &right);
 
@@ -322,8 +317,8 @@ fn removing_a_link_without_consent_leaves_the_partner_byte_identical() {
     assert_eq!(untouched.path, read::read(&project, &right).unwrap().path);
     assert_eq!(untouched.owner, "frank");
     assert!(
-        !untouched.owned,
-        "no operator is configured, so nobody owns the partner"
+        untouched.owned,
+        "the partner belongs to the operator, and a one-sided removal still does not ask"
     );
     assert!(outcome.other.is_none(), "the partner was not rewritten");
     assert!(outcome.other_path.is_none());
@@ -353,7 +348,7 @@ fn a_one_sided_removal_of_a_partner_i_own_is_reported_as_mine() {
     .unwrap();
     let left = make(&project, "task", "left");
     let right = make(&project, "bug", "right");
-    add_soft_link(&project, &left, &right, &options()).unwrap();
+    add_soft_link(&project, &left, &right, &options().with_cascade()).unwrap();
     let partner = document(&project, &right);
 
     let outcome = remove_soft_link(&project, &left, &right, &options()).unwrap();
@@ -369,6 +364,7 @@ fn a_one_sided_removal_of_a_partner_i_own_is_reported_as_mine() {
 #[test]
 fn removing_a_link_with_consent_updates_both_owned_sides() {
     let (_dir, project) = project();
+    act_as(&project, "frank");
     let left = make(&project, "task", "left");
     let right = make(&project, "bug", "right");
     add_soft_link(&project, &left, &right, &options().with_cascade()).unwrap();
@@ -407,11 +403,17 @@ fn removing_a_link_that_does_not_exist_is_an_invalid_relationship() {
 
 #[test]
 fn removing_a_link_to_a_deleted_target_cleans_the_surviving_side() {
-    for options in [options(), options().with_cascade()] {
+    for consented in [false, true] {
         let (_dir, project) = project();
+        act_as(&project, "frank");
         let left = make(&project, "task", "left");
         let right = make(&project, "task", "right");
-        add_soft_link(&project, &left, &right, &options).unwrap();
+        add_soft_link(&project, &left, &right, &options().with_cascade()).unwrap();
+        let options = if consented {
+            options().with_cascade()
+        } else {
+            options()
+        };
 
         // Someone deletes the other document behind our back.
         let path = read::read(&project, &right).unwrap().path;
@@ -443,6 +445,7 @@ fn a_failed_second_write_leaves_both_sides_unchanged() {
     std::fs::remove_file(&right_path).unwrap();
     std::fs::create_dir(&right_path).unwrap();
 
+    act_as(&project, "frank");
     let error = add_soft_link(&project, &left, &right, &options().with_cascade()).unwrap_err();
     assert_ne!(error.code(), Code::InternalError, "{error}");
 
@@ -471,7 +474,7 @@ fn a_soft_link_to_a_deleted_target_stays_written_and_is_diagnosed() {
     let (_dir, project) = project();
     let left = make(&project, "task", "left");
     let right = make(&project, "task", "right");
-    add_soft_link(&project, &left, &right, &options().with_cascade()).unwrap();
+    set_soft_links(&project, &left, &[&right]);
 
     // The target document disappears; the surviving half-link is data, not a
     // reason to rewrite anything on a read.

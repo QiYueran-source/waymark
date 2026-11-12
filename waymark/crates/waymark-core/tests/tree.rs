@@ -343,7 +343,15 @@ fn soft_links_do_not_appear_in_the_hierarchy_or_dependency_trees() {
     let (_dir, project) = project();
     let left = make(&project, "left");
     let right = make(&project, "right");
-    add_soft_link(&project, &left, &right, &options()).unwrap();
+    // A soft link is a cross-item write, so it needs consent and an operator
+    // who owns both ends; the tree must ignore the pair either way.
+    add_soft_link(
+        &project,
+        &left,
+        &right,
+        &options().with_cascade().with_operator("frank"),
+    )
+    .unwrap();
 
     let hierarchy = hierarchy_tree(&project, None, None).unwrap();
     assert_eq!(hierarchy.roots.len(), 2, "both are roots, neither nests");

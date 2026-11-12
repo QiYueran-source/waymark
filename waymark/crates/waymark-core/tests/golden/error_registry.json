@@ -38,6 +38,22 @@
     "retryable": false
   },
   {
+    "code": "CASCADE_CONSENT_REQUIRED",
+    "details": [
+      "operation",
+      "id",
+      "other",
+      "option"
+    ],
+    "exit": 4,
+    "finding": null,
+    "location_kinds": [
+      "work_item",
+      "relationship"
+    ],
+    "retryable": false
+  },
+  {
     "code": "CATEGORY_NOT_FOUND",
     "details": [
       "key"
@@ -401,6 +417,20 @@
     "location_kinds": [
       "work_item",
       "relationship"
+    ],
+    "retryable": false
+  },
+  {
+    "code": "OWNED_BY_OTHER",
+    "details": [
+      "id",
+      "owner",
+      "operation"
+    ],
+    "exit": 4,
+    "finding": null,
+    "location_kinds": [
+      "work_item"
     ],
     "retryable": false
   },

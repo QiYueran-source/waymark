@@ -119,8 +119,10 @@ severity, no exit class), so the current total is 41.
 registry table"). Counting the table at T2 gave 37; counting it plus `USAGE_ERROR` gives 38, and the
 brief's parenthetical listed the finding-only codes correctly, so the original total was simply
 transcribed wrong. No code was invented to match the brief's number, and none was dropped: the three
-distribution additions each have a producing failure, and the golden snapshot names all 41 and a
-consistency test fails if the enum and the snapshot disagree in either direction.
+distribution additions each have a producing failure, and the golden snapshot names every code and a
+consistency test fails if the enum and the snapshot disagree in either direction. Two read-only
+diagnostic codes followed (`CLOSED_PARENT`, `ONE_SIDED_SOFT_LINK`), and the cross-item refusals added
+`CASCADE_CONSENT_REQUIRED` and `OWNED_BY_OTHER`, for 46 today; `tests/registry.rs` pins the count.
 
 ## One `Spec` row per code, read by every accessor
 
@@ -3618,17 +3620,18 @@ caller's side — so the ownership refusal the spec reserves for cross-item writ
 cannot apply here. Keeping the same load call means an archived or vanished
 partner behaves identically with and without consent.
 
-### A non-consenting `link add` leaves the pair one-sided
+### A non-consenting `link add` is refused, not half-written
 
-**Choice:** `add_soft_link` without `options.cascade` records the link on the caller's document only.
-The partner is read to validate the request (it exists, it is not archived, it is not the caller) and
-is otherwise not written at all: same bytes, same `updated_at`, no list change. The outcome carries
-`other: None`, `other_path: None`, one fingerprint, and `partner_unsynchronised: true`; the adapters
-render `partner_unsynchronised` in the `data` block, and the CLI's human output says
-`<partner> was not changed: the link is recorded on one side only; re-run with --cascade to record it
-there too`. With `options.cascade` the pair is written as before, and `partner_unsynchronised` is
-`false`. There is no ownership check and no refusal in this operation; that arrives with its own
-ticket.
+**Choice:** `add_soft_link` without `options.cascade` is refused with `CASCADE_CONSENT_REQUIRED`
+before anything is staged: neither document is written, neither `updated_at` moves. The earlier choice
+in this section — record the caller's side and report `partner_unsynchronised` — was superseded by
+the refusal ticket; the field, its rendering, and its meaning survive for the states that still
+produce a one-sided pair (a pair delivered by Git, or completed by hand).
+
+**Why:** a half-link cannot converge on its own. If the partner is the operator's, the missing half is
+exactly what `--cascade` writes, so the one-step answer is better; if it is not the operator's, the
+partner can never record the link and the half-write creates state nobody can finish. The refusal
+carries the recovery in its message, so the caller does not guess.
 
 **Why:** the spec calls adding a link a claim about the caller's item. Writing the partner without a
 word is exactly the collateral edit the consent rule exists to stop, and "one side only" has to be
@@ -3658,9 +3661,12 @@ the state or push the caller toward `--cascade`. The repeat is refused with
   is complete and the caller's request has been satisfied.
 
 An add from the far side of a one-sided pair is not a repeat of anything: that document does not
-record the link yet, so it is an ordinary first add that records its own half and leaves the other
-document alone. A pair therefore converges when each side asks once, which is what the spec means by
-"the pair converges when each side runs its own command".
+record the link yet, so it is an ordinary first add and needs the same consent as any other.
+
+**Superseded in part** by *A non-consenting `link add` is refused, not half-written* above: a
+non-consenting add no longer writes the caller's half, so the "repeat succeeds without writing" branch
+is only reachable for a pair that arrived one-sided from outside Waymark. What remains true is the
+duplicate rule and the far-side rule.
 
 **Why:** the duplicate rule's purpose is to tell a caller that the thing it asked for already exists.
 For a one-sided pair that is not the whole truth — the caller's half exists and the partner's does
@@ -3674,6 +3680,84 @@ spec forbids for the partner and which there is no reason to allow for the calle
 
 **Why:** with `cascade` meaning inbound cleanup, the bare sentence would read as a contradiction of a
 flag that now exists.
+
+## Two refusals for a cross-item write
+
+### A missing consent and a foreign owner get their own codes
+
+**Choice:** `CASCADE_CONSENT_REQUIRED` (exit class 4, not retryable, details
+`{operation, id, other, option}`, location `relationship(mediated_by)`) and `OWNED_BY_OTHER`
+(exit class 4, not retryable, details `{id, owner, operation}`, location `work_item`) are separate
+registry rows. The consent message names the option to re-run with (`re-run with --cascade to also
+record the link there` / `to also drop the link there`); the ownership message says re-running will not
+change the outcome and names the owner and the two ways forward (the owner makes the change, or
+ownership is transferred first). The golden snapshot, the JSON-schema enum, the registry test, and
+the anti-drift constructor test change in the same commit, taking the registry from 44 to 46 codes.
+
+**Why:** the two refusals have different recoveries — one is fixed by the caller alone, the other
+cannot be fixed by the caller at all — so they are different recovery units and the registry's rule
+says they are different codes. Both are class 4 (conflict or state rejection) because neither can
+proceed as issued, and neither is retryable because the same request produces the same answer.
+
+### Consent is checked before ownership
+
+**Choice:** `link add` and `link remove --cascade` answer the consent question first: without
+`cascade`, the refusal is always `CASCADE_CONSENT_REQUIRED`, even when the partner is somebody else's.
+With `cascade`, the operator is resolved and the partner's owner compared, and a mismatch is
+`OWNED_BY_OTHER`. A partner that is not the operator's therefore produces both codes in sequence:
+consent, then ownership.
+
+**Why:** the consent refusal is the only one the caller can act on alone, and it costs nothing to take
+that step before being told about an owner. The mixed case still becomes `OWNED_BY_OTHER` on the very
+next attempt, so the ownership rule is never hidden — it is ordered. `add` is judged on its first
+attempt every time, because a non-consenting add is refused outright rather than half-written.
+
+### `link remove` without consent takes no ownership check
+
+**Choice:** a non-consenting `link remove` writes the caller's document only, reports the partner in
+`other_untouched` (`{id, path, owner, owned}`), and never calls the operator resolution. A broken
+local document or a missing operator does not stop it. With `cascade` the removal is a cross-item
+write and takes the same two conditions as `add`.
+
+**Why:** the rule is about writing a second document, and this path writes none. Requiring an
+identity to delete a line from your own file would block the one operation the spec guarantees is
+always possible.
+
+### Operator resolution for ownership
+
+**Choice:** the ownership comparison uses the operation override when one is supplied (the
+`OpOptions::operator` override is the caller stating who it is), and otherwise the strict resolution
+(`local_config::bundle`, the same one `mediated::effective_operator_strict` returns). A local document
+that exists but does not parse fails the cross-item write with `CONFIG_INVALID` located at
+`user.toml`, before any ownership or consent answer is produced for the consented path.
+
+**Why:** strictness is the point — a broken identity document must be a configuration failure, not a
+silent "no operator" that a lenient fallback would turn into either a pass or an incorrect
+`OWNED_BY_OTHER`.
+
+### No operator at all is a configuration error that names the source
+
+**Choice:** when neither the override, the local document, nor Git supplies an operator, a consented
+cross-item write is refused with `CONFIG_INVALID` at `config_key("user.toml")`, details
+`{path, issues}`, and a message that says no operator identity is configured and names the document
+that would supply one. It is never a silent pass and never `OWNED_BY_OTHER` (which would blame the
+partner's owner for the caller's missing identity).
+
+**Why:** the registry has no "identity missing" code, and inventing one for a configuration problem the
+registry already covers would be a second vocabulary. `CONFIG_INVALID` is class 3, which is the
+honest instruction: fix the document, then re-run.
+
+### The repeat rule survives, narrowed to pairs that arrive from outside
+
+**Choice:** with or without consent, an add whose pair already records the link on both sides is
+`INVALID_RELATIONSHIP`. Without consent, an add whose caller's side records it on a pair that is
+one-sided succeeds with `changed: false`, `written: false`, `partner_unsynchronised: true`, and no
+timestamp change. With consent, a one-sided pair is completed by writing the missing half.
+
+**Why:** the retry must not be an error — the caller's request is already true — while a consented
+add is a claim about the pair and a one-sided pair is exactly what consent is for. The narrowed rule
+only matters for pairs that a merge, a hand edit, or an older half-write left behind, because Waymark
+no longer creates them.
 
 ## A closed parent is a row column, not a state
 

@@ -112,6 +112,20 @@ fn json_err(root: &Utf8PathBuf, arguments: &[&str]) -> (i32, serde_json::Value) 
     (result.status(), result.json())
 }
 
+/// Record a soft link on one side by editing the document, leaving the partner
+/// exactly as it is.
+fn seed_soft_link(root: &Utf8PathBuf, from: &str, to: &str) {
+    let path = root.join("work").join("task").join(format!("{from}.md"));
+    let mut text = std::fs::read_to_string(&path).expect("the document is readable");
+    if !text.contains("\nsoft_links:") {
+        // Insert the key in canonical position: after `updated_at` and any
+        // `closed_at`, before the closing fence.
+        let fence = text.rfind("\n---").expect("a frontmatter fence");
+        text.insert_str(fence, &format!("\nsoft_links:\n  - {to}"));
+    }
+    std::fs::write(&path, text).expect("the document is writable");
+}
+
 fn document(root: &Utf8PathBuf, id: &str) -> String {
     std::fs::read_to_string(root.join("work").join("task").join(format!("{id}.md")))
         .expect("the document is readable")
@@ -255,7 +269,10 @@ fn archive_without_cascade_leaves_a_foreign_document_alone_and_names_it() {
     let theirs = create_owned_by(&root, "theirs", "alice");
     let mine = create(&root, "mine");
     json_ok(&root, &["dependency", "add", &theirs, &target]);
-    json_ok(&root, &["link", "add", &mine, &target]);
+    // A soft link is a cross-item write, so it is recorded by hand here: the
+    // relation under archive is what this test is about, not how the link got
+    // there.
+    seed_soft_link(&root, &mine, &target);
     let theirs_before = document(&root, &theirs);
     let mine_before = document(&root, &mine);
 
